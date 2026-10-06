@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { domainDetail, listPrompts } from "@/services/overview";
+import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
+import { ScoreTrend } from "@/components/ScoreTrend";
 import { num, pct, usd } from "@/components/format";
 import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo } from "@/components/ui";
 
@@ -19,6 +20,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: detail?.domain.hostname ?? "Domain not found" };
 }
 
+/** Fixed categorical slot per provider (registry order), so a provider keeps its colour everywhere. */
+const providerSlot = (id: string) => {
+  const i = listProviders().findIndex((p) => p.id === id);
+  return i < 0 ? 8 : (i % 8) + 1;
+};
 const providerLabel = (id: string | null) => (id ? (listProviders().find((p) => p.id === id)?.label ?? id) : "—");
 
 export default async function DomainPage({
@@ -30,7 +36,7 @@ export default async function DomainPage({
 }) {
   const { id } = await params;
   const { done, added } = await searchParams;
-  const [detail, activePrompts] = await Promise.all([domainDetail(id), listPrompts(id, "ACTIVE")]);
+  const [detail, activePrompts, history] = await Promise.all([domainDetail(id), listPrompts(id, "ACTIVE"), scoreHistory(id, 180)]);
   if (!detail) notFound();
   const { domain: d } = detail;
   const now = new Date();
@@ -65,6 +71,17 @@ export default async function DomainPage({
       <Flash message={done ?? addedMessage} />
 
       <ScoreTiles detail={detail} />
+
+      {history && history.domain.length > 0 && (
+        <Section title="Score over time" id="trend-heading">
+          <ScoreTrend
+            combined={history.domain}
+            providers={history.providers
+              .map((p) => ({ ...p, label: providerLabel(p.id), slot: providerSlot(p.id) }))
+              .sort((a, b) => a.slot - b.slot)}
+          />
+        </Section>
+      )}
 
       <div className="grid-2">
         <ProviderScores detail={detail} />

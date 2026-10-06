@@ -65,6 +65,7 @@ describe.skipIf(!url || !days)("cost simulation", () => {
     await db.execute(sql`update runs set created_at = created_at - ${d}, finished_at = finished_at - ${d}`);
     await db.execute(sql`update llm_usage set created_at = created_at - ${d}`);
     await db.execute(sql`update prompts set active_since = active_since - ${d}`);
+    await db.execute(sql`update score_snapshots set window_start = window_start - ${d}, window_end = window_end - ${d}, created_at = created_at - ${d}`);
   }
 
   it(`simulates ${days} days`, async () => {

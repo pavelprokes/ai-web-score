@@ -71,6 +71,7 @@ API_URL=http://localhost:3000 ADMIN_API_TOKEN=change-me-long-random pnpm cli dom
 | POST | `/api/domains` | `{hostname, brandName?, monthlyBudgetUsd?, runDiscovery=true}` |
 | GET / PATCH / DELETE | `/api/domains/:id` | detail (profile, portfolio quality, schedule, runs, failures, costs) / settings |
 | POST | `/api/domains/:id/actions` | `run-now`, `pause`, `resume`, `rediscover`, `regenerate-prompts`, `explore-prompts`, `optimize-portfolio`, `recalculate-schedule`, `recalculate-scores`, `approve-proposals`, `reject-proposals` |
+| GET | `/api/domains/:id/history` | daily score history (28-day rolling windows) for the domain and per provider (`?days=180`) |
 | GET | `/api/domains/:id/prompts` | portfolio with per-prompt statistics |
 | GET | `/api/domains/:id/measurements` | evidence (`?raw=1` includes raw provider JSON) |
 | GET / PATCH | `/api/providers`, `/api/providers/:id` | AI providers, configurations, capabilities, prices, cost, value; enable/disable, reach |

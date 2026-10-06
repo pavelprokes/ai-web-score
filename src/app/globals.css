@@ -794,3 +794,202 @@ code {
   margin: 0.3rem 0 0;
   padding-left: 1.1rem;
 }
+
+/* ── Score trend chart ───────────────────────────────────────────── */
+/* Categorical slots (validated: adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3 in both modes).
+   Light slots 3–5 are below 3:1 on white, so the legend, tooltip and table view carry identity too. */
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --chart-grid: #e1e0d9;
+  --chart-band: rgb(11 11 11 / 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --chart-grid: #2c2c2a;
+    --chart-band: rgb(255 255 255 / 0.14);
+  }
+}
+.stroke-ink { stroke: var(--text); }
+.fill-ink { fill: var(--text); }
+.fill-band { fill: var(--chart-band); }
+.stroke-series-1 { stroke: var(--series-1); } .fill-series-1 { fill: var(--series-1); }
+.stroke-series-2 { stroke: var(--series-2); } .fill-series-2 { fill: var(--series-2); }
+.stroke-series-3 { stroke: var(--series-3); } .fill-series-3 { fill: var(--series-3); }
+.stroke-series-4 { stroke: var(--series-4); } .fill-series-4 { fill: var(--series-4); }
+.stroke-series-5 { stroke: var(--series-5); } .fill-series-5 { fill: var(--series-5); }
+.stroke-series-6 { stroke: var(--series-6); } .fill-series-6 { fill: var(--series-6); }
+.stroke-series-7 { stroke: var(--series-7); } .fill-series-7 { fill: var(--series-7); }
+.stroke-series-8 { stroke: var(--series-8); } .fill-series-8 { fill: var(--series-8); }
+
+.trend__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.segmented {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.segmented legend {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+  padding: 0;
+}
+.segmented label {
+  position: relative;
+}
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.segmented span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--surface);
+  color: var(--text);
+}
+.segmented label:hover span {
+  background: var(--surface-2);
+}
+.segmented input:checked + span {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--surface);
+  font-weight: 600;
+}
+.segmented input:focus-visible + span {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.check--inline {
+  align-self: center;
+  margin: 0;
+}
+.trend__legend {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-2);
+}
+.trend__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.trend__plot {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+}
+.trend__plot svg {
+  display: block;
+  overflow: visible;
+}
+.trend__plot:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+.trend__grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+.trend__tick {
+  fill: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.trend__endlabel {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+.trend__crosshair {
+  stroke: var(--text-2);
+  stroke-width: 1;
+}
+.trend__dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.trend__tip {
+  position: absolute;
+  top: 8px;
+  pointer-events: none;
+  min-width: 11rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.16);
+  font-size: 0.85rem;
+  z-index: 2;
+}
+.trend__tip-date {
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+}
+.trend__tip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+.trend__tip-row strong {
+  min-width: 3.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.trend__tip-row span {
+  color: var(--text-2);
+}
+.trend__note {
+  margin: 0.5rem 0 0;
+}
+.trend__table {
+  margin-top: 0.75rem;
+}
+.trend__table > summary {
+  cursor: pointer;
+  color: var(--link);
+  text-decoration: underline;
+  min-height: 24px;
+  margin-bottom: 0.5rem;
+}
+@media (forced-colors: active) {
+  .stroke-ink, [class*="stroke-series-"] { stroke: CanvasText; }
+  [class*="fill-series-"], .fill-ink { fill: CanvasText; }
+  .segmented input:checked + span { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}

@@ -245,6 +245,55 @@ export async function domainDetail(domainId: string) {
   };
 }
 
+export interface TrendPoint {
+  /** Window end (ISO). Each point summarises the preceding 28 days. */
+  t: string;
+  overall: number | null;
+  mention: [number | null, number | null, number | null];
+  citation: [number | null, number | null, number | null];
+  recommendation: [number | null, number | null, number | null];
+  shareOfVoice: number | null;
+  samples: number;
+}
+
+/** Daily score history (rolling-window snapshots) for the domain and each provider. */
+export async function scoreHistory(domainId: string, days = 180) {
+  const db = getDb();
+  const [d] = await db.select({ scoringVersion: domains.scoringVersion }).from(domains).where(eq(domains.id, domainId));
+  if (!d) return null;
+  const rows = await db
+    .select({ scope: scoreSnapshots.scope, scopeKey: scoreSnapshots.scopeKey, windowEnd: scoreSnapshots.windowEnd, metrics: scoreSnapshots.metrics })
+    .from(scoreSnapshots)
+    .where(
+      and(
+        eq(scoreSnapshots.domainId, domainId),
+        eq(scoreSnapshots.scoringVersion, d.scoringVersion),
+        inArray(scoreSnapshots.scope, ["DOMAIN", "PROVIDER"]),
+        gte(scoreSnapshots.windowEnd, new Date(Date.now() - days * 86_400_000)),
+      ),
+    )
+    .orderBy(scoreSnapshots.windowEnd);
+  const rate = (r: VisibilityMetrics["mentionRate"]): TrendPoint["mention"] => [r.value, r.low, r.high];
+  const point = (windowEnd: Date, m: VisibilityMetrics): TrendPoint => ({
+    t: windowEnd.toISOString(),
+    overall: m.overallScore,
+    mention: rate(m.mentionRate),
+    citation: rate(m.citationRate),
+    recommendation: rate(m.recommendationRate),
+    shareOfVoice: m.shareOfVoice,
+    samples: m.sampleCount,
+  });
+  const providerIds = [...new Set(rows.filter((r) => r.scope === "PROVIDER").map((r) => r.scopeKey))];
+  return {
+    scoringVersion: d.scoringVersion,
+    domain: rows.filter((r) => r.scope === "DOMAIN").map((r) => point(r.windowEnd, r.metrics as VisibilityMetrics)),
+    providers: providerIds.map((id) => ({
+      id,
+      points: rows.filter((r) => r.scope === "PROVIDER" && r.scopeKey === id).map((r) => point(r.windowEnd, r.metrics as VisibilityMetrics)),
+    })),
+  };
+}
+
 /** Prompt portfolio with current version, role, status and learned statistics per prompt. */
 export async function listPrompts(domainId: string, status?: string | null) {
   return getDb()

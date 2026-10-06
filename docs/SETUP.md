@@ -78,7 +78,8 @@ run `pnpm cli process` again later (or keep `pnpm dev` running and call it perio
 - **Domains** (`/`) — every domain with overall score, mention/citation/recommendation rate (95 % CI), share of
   voice, last discovery, last measurement run, next run and budget use. *Add domain* asks whether to run the
   initial analysis now; *Run now* queues a measurement run.
-- **Domain detail** (`/domains/:id`) — scores, visibility per AI provider and per topic, costs and forecast,
+- **Domain detail** (`/domains/:id`) — scores, score over time (chart per metric and provider, with table view),
+  visibility per AI provider and per topic, costs and forecast,
   domain profile, prompt portfolio quality, proposals to approve/reject, schedule, runs, failures, active prompts,
   and actions (pause/resume, re-run discovery, regenerate/explore prompts, optimise portfolio, recalculate scores).
 - **AI providers** (`/providers`) — enabled providers, missing credentials, cost per answer, value
