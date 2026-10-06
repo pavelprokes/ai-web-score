@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import Link from "next/link";
 import type { TrendPoint } from "@/services/overview";
+import { MetricInfo } from "./MetricInfo";
 
 /*
  * Score history line chart (plain SVG, no chart library).
@@ -320,7 +322,10 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
       <p className="sr-only" aria-live="polite">
         {announce}
       </p>
-      <p className="note trend__note">Each point summarises the previous 28 days, so the line moves smoothly and a real change shows over several days.</p>
+      <p className="note trend__note">
+        Each point summarises the previous 28 days <MetricInfo id="rolling-window" />, so the line moves smoothly and a real change shows over several days.{" "}
+        <Link href="/metrics">What do the metrics mean?</Link>
+      </p>
 
       <details className="trend__table">
         <summary>Show data as table</summary>

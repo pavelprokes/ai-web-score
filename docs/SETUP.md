@@ -82,6 +82,8 @@ run `pnpm cli process` again later (or keep `pnpm dev` running and call it perio
   visibility per AI provider and per topic, costs and forecast,
   domain profile, prompt portfolio quality, proposals to approve/reject, schedule, runs, failures, active prompts,
   and actions (pause/resume, re-run discovery, regenerate/explore prompts, optimise portfolio, recalculate scores).
+- **Metrics** (`/metrics`) — every metric with its calculation, meaning, an example and how to read it. On desktop,
+  the “i” icon next to a tile or column name shows a short definition and links there.
 - **AI providers** (`/providers`) — enabled providers, missing credentials, cost per answer, value
   recommendation, configurations and calibration results (promote a cheaper configuration once it passes).
 

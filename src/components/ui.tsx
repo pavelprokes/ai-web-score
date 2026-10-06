@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { absoluteTime, pct, relativeTime, usd } from "./format";
+import { MetricInfo } from "./MetricInfo";
 
 /* Server-safe presentational components. Accessibility rules applied throughout:
  * meaning is never carried by colour alone (icon + text), numbers keep text colours,
@@ -109,7 +110,7 @@ export function Score({ value }: { value: number | null | undefined }) {
   );
 }
 
-export function StatTile({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }) {
+export function StatTile({ label, value, detail }: { label: ReactNode; value: ReactNode; detail?: ReactNode }) {
   return (
     <div className="tile">
       <dt className="tile__label">{label}</dt>
@@ -134,7 +135,11 @@ export function BudgetMeter({ spent, budget, estimate }: { spent: number; budget
       <div className={`meter__track meter__track--${tone}`} aria-hidden="true">
         <div className="meter__fill" style={{ width: `${Math.min(100, ratio * 100)}%` }} />
       </div>
-      {estimate !== undefined && <div className="meter__note muted">Forecast {usd(estimate)} / month</div>}
+      {estimate !== undefined && (
+        <div className="meter__note muted">
+          Forecast {usd(estimate)} / month <MetricInfo id="forecast" />
+        </div>
+      )}
     </div>
   );
 }

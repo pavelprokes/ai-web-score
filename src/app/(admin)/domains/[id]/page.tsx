@@ -5,6 +5,7 @@ import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
+import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
 import { num, pct, usd } from "@/components/format";
 import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo } from "@/components/ui";
@@ -153,21 +154,21 @@ function ScoreTiles({ detail }: { detail: Detail }) {
   return (
     <>
       <dl className="tiles tiles--4" aria-label="Visibility scores, last 28 days">
-        <StatTile label="Overall score" value={<Score value={s.overall} />} detail={`${num(s.samples)} answers · ${num(s.prompts)} prompts`} />
-        <StatTile label="Mentioned" value={<Rate value={s.mentionRate} ci={ci} />} detail="Brand named in the answer" />
-        <StatTile label="Cited" value={<Rate value={s.citationRate} />} detail="Domain linked as a source" />
-        <StatTile label="Recommended" value={<Rate value={s.recommendationRate} />} detail="Listed as a recommendation" />
+        <StatTile label={<>Overall score <MetricInfo id="overall-score" /></>} value={<Score value={s.overall} />} detail={`${num(s.samples)} answers · ${num(s.prompts)} prompts`} />
+        <StatTile label={<>Mentioned <MetricInfo id="mention-rate" /></>} value={<Rate value={s.mentionRate} ci={ci} />} detail="Brand named in the answer" />
+        <StatTile label={<>Cited <MetricInfo id="citation-rate" /></>} value={<Rate value={s.citationRate} />} detail="Domain linked as a source" />
+        <StatTile label={<>Recommended <MetricInfo id="recommendation-rate" /></>} value={<Rate value={s.recommendationRate} />} detail="Listed as a recommendation" />
         <StatTile
-          label="Average position"
+          label={<>Average position <MetricInfo id="average-position" /></>}
           value={s.avgRecommendationPosition == null ? <span className="muted">–</span> : s.avgRecommendationPosition.toFixed(1)}
           detail="In recommendation lists (1 = first)"
         />
-        <StatTile label="Share of voice" value={<Rate value={s.shareOfVoice} />} detail="Mentions vs. competitors" />
-        <StatTile label="Sentiment" value={<Score value={s.sentiment == null ? null : s.sentiment * 100} />} detail="How positively it is described" />
-        <StatTile label="Accuracy" value={<Score value={s.accuracy == null ? null : s.accuracy * 100} />} detail="Facts match the website" />
+        <StatTile label={<>Share of voice <MetricInfo id="share-of-voice" /></>} value={<Rate value={s.shareOfVoice} />} detail="Mentions vs. competitors" />
+        <StatTile label={<>Sentiment <MetricInfo id="sentiment" /></>} value={<Score value={s.sentiment == null ? null : s.sentiment * 100} />} detail="How positively it is described" />
+        <StatTile label={<>Accuracy <MetricInfo id="accuracy" /></>} value={<Score value={s.accuracy == null ? null : s.accuracy * 100} />} detail="Facts match the website" />
       </dl>
       <p className="note">
-        Small numbers next to a rate are its 95 % confidence interval.
+        Small numbers next to a rate are its 95 % confidence interval <MetricInfo id="confidence-interval" />.
         {detail.scores.windowEnd && (
           <>
             {" "}
@@ -192,19 +193,19 @@ function ProviderScores({ detail }: { detail: Detail }) {
               <tr>
                 <th scope="col">Provider</th>
                 <th scope="col" className="num">
-                  Overall
+                  Overall <MetricInfo id="overall-score" />
                 </th>
                 <th scope="col" className="num">
-                  Mentioned
+                  Mentioned <MetricInfo id="mention-rate" />
                 </th>
                 <th scope="col" className="num">
-                  Cited
+                  Cited <MetricInfo id="citation-rate" />
                 </th>
                 <th scope="col" className="num">
-                  Recommended
+                  Recommended <MetricInfo id="recommendation-rate" />
                 </th>
                 <th scope="col" className="num">
-                  Answers
+                  Answers <MetricInfo id="answers" />
                 </th>
               </tr>
             </thead>
@@ -245,7 +246,9 @@ function Costs({ detail }: { detail: Detail }) {
       <dl className="kv kv--compact">
         <dt>Measurements this month</dt>
         <dd>{usd(c.monthUsd?.measurementCost ?? 0)}</dd>
-        <dt>Analysis (internal LLM) this month</dt>
+        <dt>
+          Analysis (internal LLM) this month <MetricInfo id="analysis-cost" />
+        </dt>
         <dd>{usd(c.monthUsd?.llmCost ?? 0)}</dd>
         <dt>Measurements all time</dt>
         <dd>{usd(total)}</dd>
@@ -267,7 +270,7 @@ function Costs({ detail }: { detail: Detail }) {
                   Cost
                 </th>
                 <th scope="col" className="num">
-                  Per answer
+                  Per answer <MetricInfo id="cost-per-answer" />
                 </th>
               </tr>
             </thead>
@@ -349,6 +352,15 @@ function Profile({ detail, now }: { detail: Detail; now: Date }) {
   );
 }
 
+const QUALITY_METRIC: Record<string, string> = {
+  topicCoverage: "topic-coverage",
+  intentCoverage: "intent-coverage",
+  commercialCoverage: "commercial-coverage",
+  providerCoverage: "provider-coverage",
+  promptRedundancy: "prompt-redundancy",
+  measurementConfidence: "measurement-confidence",
+};
+
 const QUALITY_LABELS: Record<string, string> = {
   topicCoverage: "Topic coverage",
   intentCoverage: "Intent coverage",
@@ -373,11 +385,11 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
   return (
     <Section title="Prompt portfolio" id="portfolio-heading">
       <dl className="tiles tiles--inner" aria-label="Prompt counts">
-        <StatTile label="Active" value={portfolio.active} detail={`${portfolio.core} core · ${portfolio.exploration} exploration`} />
-        <StatTile label="Candidate pool" value={portfolio.candidate} detail={sizing ? `target ${sizing.candidatePoolTarget}` : undefined} />
-        <StatTile label="Recommended size" value={sizing?.recommendedPromptCount ?? "–"} detail={sizing ? `${sizing.minimumPromptCount}–${sizing.maximumPromptCount}` : undefined} />
+        <StatTile label={<>Active <MetricInfo id="active-prompts" /></>} value={portfolio.active} detail={`${portfolio.core} core · ${portfolio.exploration} exploration`} />
+        <StatTile label={<>Candidate pool <MetricInfo id="candidate-pool" /></>} value={portfolio.candidate} detail={sizing ? `target ${sizing.candidatePoolTarget}` : undefined} />
+        <StatTile label={<>Recommended size <MetricInfo id="recommended-size" /></>} value={sizing?.recommendedPromptCount ?? "–"} detail={sizing ? `${sizing.minimumPromptCount}–${sizing.maximumPromptCount}` : undefined} />
         <StatTile
-          label="Quality score"
+          label={<>Quality score <MetricInfo id="quality-score" /></>}
           value={q ? <Score value={q.score} /> : "–"}
           detail={q ? (q.needsReanalysis ? <Badge tone="warning">Needs re-analysis</Badge> : "Healthy") : undefined}
         />
@@ -386,7 +398,9 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
         <dl className="kv kv--compact">
           {Object.entries(QUALITY_LABELS).map(([key, label]) => (
             <div key={key} className="kv__row">
-              <dt>{label}</dt>
+              <dt>
+                {label} <MetricInfo id={QUALITY_METRIC[key]!} />
+              </dt>
               <dd>{pct(q[key as keyof typeof q] as number)}</dd>
             </div>
           ))}
@@ -439,22 +453,22 @@ function ClusterScores({ detail }: { detail: Detail }) {
             <tr>
               <th scope="col">Topic</th>
               <th scope="col" className="num">
-                Importance
+                Importance <MetricInfo id="topic-importance" />
               </th>
               <th scope="col" className="num">
-                Overall
+                Overall <MetricInfo id="overall-score" />
               </th>
               <th scope="col" className="num">
-                Mentioned
+                Mentioned <MetricInfo id="mention-rate" />
               </th>
               <th scope="col" className="num">
-                Cited
+                Cited <MetricInfo id="citation-rate" />
               </th>
               <th scope="col" className="num">
-                Recommended
+                Recommended <MetricInfo id="recommendation-rate" />
               </th>
               <th scope="col" className="num">
-                Answers
+                Answers <MetricInfo id="answers" />
               </th>
             </tr>
           </thead>
@@ -496,7 +510,9 @@ function Schedule({ detail, now }: { detail: Detail; now: Date }) {
         </dd>
         <dt>Cycles per day</dt>
         <dd>{s.cyclesPerDay}</dd>
-        <dt>Average measurement confidence</dt>
+        <dt>
+          Average measurement confidence <MetricInfo id="measurement-confidence" />
+        </dt>
         <dd>{pct(detail.measurementConfidence)}</dd>
       </dl>
       {s.nextDueCells.length > 0 && (
@@ -509,10 +525,10 @@ function Schedule({ detail, now }: { detail: Detail; now: Date }) {
                 <th scope="col">Provider</th>
                 <th scope="col">Due</th>
                 <th scope="col" className="num">
-                  Interval
+                  Interval <MetricInfo id="measurement-interval" />
                 </th>
                 <th scope="col" className="num">
-                  Confidence
+                  Confidence <MetricInfo id="measurement-confidence" />
                 </th>
               </tr>
             </thead>
@@ -560,12 +576,12 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
                 <th scope="col">Prompt</th>
                 <th scope="col">Topic</th>
                 <th scope="col">Intent</th>
-                <th scope="col">Role</th>
+                <th scope="col">Role <MetricInfo id="active-prompts" /></th>
                 <th scope="col" className="num">
-                  Presence
+                  Presence <MetricInfo id="presence" />
                 </th>
                 <th scope="col" className="num">
-                  Confidence
+                  Confidence <MetricInfo id="measurement-confidence" />
                 </th>
               </tr>
             </thead>

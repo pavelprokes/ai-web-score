@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { providersOverview } from "@/services/overview";
 import { providerAction } from "@/app/(admin)/actions";
 import { Flash } from "@/components/Flash";
+import { MetricInfo } from "@/components/MetricInfo";
 import { SubmitButton } from "@/components/SubmitButton";
 import { num, pct, usd } from "@/components/format";
 import { Badge, Section, StatTile, TableScroll, type Tone } from "@/components/ui";
@@ -55,7 +56,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       <dl className="tiles" aria-label="Summary">
         <StatTile label="Enabled providers" value={enabled} detail={`of ${rows.length} registered in code`} />
         <StatTile label="Measurements this month" value={usd(month)} detail="All domains" />
-        <StatTile label="Analysis this month" value={usd(llm)} detail="Discovery, prompt design, answer analysis" />
+        <StatTile label={<>Analysis this month <MetricInfo id="analysis-cost" /></>} value={usd(llm)} detail="Discovery, prompt design, answer analysis" />
       </dl>
 
       <Section title="Providers" id="providers-heading">
@@ -67,7 +68,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
                 <th scope="col">Provider</th>
                 <th scope="col">Status</th>
                 <th scope="col" className="num">
-                  Reach
+                  Reach <MetricInfo id="reach" />
                 </th>
                 <th scope="col" className="num">
                   This month
@@ -79,9 +80,9 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
                   Answers
                 </th>
                 <th scope="col" className="num">
-                  Per answer
+                  Per answer <MetricInfo id="cost-per-answer" />
                 </th>
-                <th scope="col">Value (30 days)</th>
+                <th scope="col">Value (30 days) <MetricInfo id="provider-value" /></th>
                 <th scope="col">
                   <span className="sr-only">Actions</span>
                 </th>
@@ -195,7 +196,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
             <tr>
               <th scope="col">Configuration</th>
               <th scope="col">Provider</th>
-              <th scope="col">Role</th>
+              <th scope="col">Role <MetricInfo id="active-prompts" /></th>
               <th scope="col">Status</th>
               <th scope="col">Latest calibration</th>
               <th scope="col">

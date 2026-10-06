@@ -993,3 +993,153 @@ code {
   [class*="fill-series-"], .fill-ink { fill: CanvasText; }
   .segmented input:checked + span { forced-color-adjust: none; background: Highlight; color: HighlightText; }
 }
+
+/* ── Metric definitions: "i" tooltips and /metrics ───────────────── */
+.metric-info {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 0.2rem;
+}
+.metric-info__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: var(--text-2);
+}
+.metric-info__link:hover {
+  color: var(--link);
+  background: var(--surface-2);
+}
+.metric-info__tip {
+  position: fixed;
+  z-index: 50;
+  width: 280px;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+.metric-info__tip[hidden] {
+  display: none;
+}
+.metric-info__tip strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+.metric-info__more {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+/* Tooltips are a desktop aid; on touch / narrow screens the Metrics page is in the navigation. */
+@media (max-width: 760px), (hover: none) {
+  .metric-info {
+    display: none;
+  }
+}
+
+.metrics-layout {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.metrics-toc {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  font-size: 0.9rem;
+}
+.metrics-toc h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+.metrics-toc h3 {
+  font-size: 0.9rem;
+  margin: 0.75rem 0 0.25rem;
+}
+.metrics-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.metrics-toc li a {
+  display: block;
+  padding: 0.15rem 0;
+  min-height: 24px;
+}
+.metrics-group {
+  margin-bottom: 2rem;
+}
+.metrics-group > h2 {
+  margin: 0 0 0.4rem;
+}
+.metric-card {
+  scroll-margin-top: 1rem;
+}
+.metric-card:target {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.metric-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+}
+.metric-card__lead {
+  margin: 0 0 0.85rem;
+  color: var(--text-2);
+  max-width: 75ch;
+}
+.metric-card__fields {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  margin: 0;
+}
+.metric-card__fields dt {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.metric-card__fields dd {
+  margin: 0;
+  max-width: 75ch;
+}
+.formula {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .metrics-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metrics-toc {
+    position: static;
+    max-height: none;
+  }
+  .metric-card__fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+  }
+  .metric-card__fields dd {
+    margin-bottom: 0.6rem;
+  }
+}

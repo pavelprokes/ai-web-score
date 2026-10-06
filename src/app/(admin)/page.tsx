@@ -6,6 +6,7 @@ type DomainRow = Awaited<ReturnType<typeof listDomainsOverview>>[number];
 import { AddDomainDialog } from "@/components/AddDomainDialog";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
+import { MetricInfo } from "@/components/MetricInfo";
 import { usd } from "@/components/format";
 import {
   BudgetMeter,
@@ -95,23 +96,23 @@ export default async function DomainsPage({
                       <th scope="col">Domain</th>
                       <th scope="col">Status</th>
                       <th scope="col" className="num">
-                        Overall
+                        Overall <MetricInfo id="overall-score" />
                       </th>
                       <th scope="col" className="num">
-                        Mentioned
+                        Mentioned <MetricInfo id="mention-rate" />
                       </th>
                       <th scope="col" className="num">
-                        Cited
+                        Cited <MetricInfo id="citation-rate" />
                       </th>
                       <th scope="col" className="num">
-                        Recommended
+                        Recommended <MetricInfo id="recommendation-rate" />
                       </th>
                       <th scope="col" className="num">
-                        Share of voice
+                        Share of voice <MetricInfo id="share-of-voice" />
                       </th>
-                      <th scope="col">Last discovery</th>
-                      <th scope="col">Last measurement</th>
-                      <th scope="col">Budget this month</th>
+                      <th scope="col">Last discovery <MetricInfo id="last-discovery" /></th>
+                      <th scope="col">Last measurement <MetricInfo id="last-measurement" /></th>
+                      <th scope="col">Budget this month <MetricInfo id="budget" /></th>
                       <th scope="col">
                         <span className="sr-only">Actions</span>
                       </th>

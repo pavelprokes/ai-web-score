@@ -25,6 +25,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               <li>
                 <NavLink href="/providers">AI providers</NavLink>
               </li>
+              <li>
+                <NavLink href="/metrics">Metrics</NavLink>
+              </li>
             </ul>
           </nav>
           <div className="topbar__user">
