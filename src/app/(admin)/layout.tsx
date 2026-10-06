@@ -2,11 +2,14 @@ import Link from "next/link";
 import { signOut } from "@/auth";
 import { isAuthDisabled, requireAdminPage } from "@/lib/auth-guard";
 import { NavLink } from "@/components/NavLink";
+import { ActivityIndicator } from "@/components/ActivityIndicator";
+import { currentActivity } from "@/services/activity";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const admin = await requireAdminPage();
+  const activity = await currentActivity();
   return (
     <>
       <a className="skip-link" href="#main">
@@ -30,6 +33,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               </li>
             </ul>
           </nav>
+          <ActivityIndicator initial={activity} />
           <div className="topbar__user">
             <span>{admin}</span>
             {!isAuthDisabled() && (

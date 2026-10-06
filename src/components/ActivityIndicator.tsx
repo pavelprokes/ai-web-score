@@ -1,0 +1,179 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { ActivityItem } from "@/services/activity";
+
+/*
+ * Top-bar indicator of background work (discovery, prompt design, measurement runs, analysis…).
+ * Polls /api/activity (every 4 s while something runs, 20 s when idle, paused in hidden tabs),
+ * ticks elapsed time every second, refreshes the page data when a task finishes, and announces
+ * starts/finishes politely to screen readers. Disclosure button + list: keyboard and AT friendly.
+ */
+
+const ACTIVE_POLL_MS = 4_000;
+const IDLE_POLL_MS = 20_000;
+
+export function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+function spokenElapsed(ms: number): string {
+  const min = Math.floor(ms / 60_000);
+  return min < 1 ? "less than a minute" : min === 1 ? "1 minute" : `${min} minutes`;
+}
+
+const describe = (i: ActivityItem) => `${i.label}${i.hostname ? ` for ${i.hostname}` : ""}`;
+
+export function ActivityIndicator({ initial }: { initial: ActivityItem[] }) {
+  const router = useRouter();
+  const [items, setItems] = useState<ActivityItem[]>(initial);
+  const [now, setNow] = useState(() => Date.now());
+  const [open, setOpen] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const previous = useRef(new Map(initial.map((i) => [i.id, i])));
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch("/api/activity", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { items: ActivityItem[] };
+      const next = new Map(data.items.map((i) => [i.id, i]));
+      const finished = [...previous.current.values()].filter((i) => !next.has(i.id));
+      const started = data.items.filter((i) => !previous.current.has(i.id));
+      previous.current = next;
+      setItems(data.items);
+      setNow(Date.now());
+      const parts = [
+        ...started.map((i) => `${describe(i)} started.`),
+        ...finished.map((i) => `${describe(i)} finished.`),
+      ];
+      if (parts.length) setAnnouncement(parts.slice(0, 3).join(" "));
+      // Finished work changes what the page shows (status, scores, prompts) — reload its data.
+      if (finished.length) router.refresh();
+    } catch {
+      /* offline or server restarting: keep the last state */
+    }
+  }, [router]);
+
+  const active = items.length > 0;
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const loop = async () => {
+      if (!document.hidden) await poll();
+      timer = setTimeout(loop, previous.current.size > 0 ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    };
+    timer = setTimeout(loop, active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    const onVisible = () => !document.hidden && void poll();
+    // A user action (e.g. "Re-run discovery") queues work: check right away after navigation/submit.
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    const onSubmit = () => setTimeout(() => void poll(), 1500);
+    document.addEventListener("submit", onSubmit, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("submit", onSubmit, true);
+    };
+  }, [poll]);
+
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onClick = (e: MouseEvent) => !rootRef.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
+
+  const oldest = items[0];
+  const longest = oldest ? now - Date.parse(oldest.startedAt) : 0;
+  const summary =
+    items.length === 1 && oldest ? `${oldest.label}${oldest.hostname ? ` · ${oldest.hostname}` : ""}` : `${items.length} tasks running`;
+
+  return (
+    <div className="activity" ref={rootRef}>
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
+      {active && (
+        <>
+          <button
+            type="button"
+            className="activity__button"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <span className="activity__spinner" aria-hidden="true" />
+            <span className="activity__summary">{summary}</span>
+            <span className="activity__time" aria-hidden="true">
+              {formatElapsed(longest)}
+            </span>
+            <span className="sr-only">, running for {spokenElapsed(longest)}. Show details</span>
+          </button>
+          <div id={panelId} className="activity__panel" hidden={!open}>
+            <h2 className="activity__title">Running in the background</h2>
+            <ul>
+              {items.map((i) => {
+                const elapsed = now - Date.parse(i.startedAt);
+                return (
+                  <li key={i.id}>
+                    <div className="activity__row">
+                      <strong>{i.label}</strong>
+                      <span className="activity__elapsed">
+                        {i.state === "queued" ? "queued " : ""}
+                        <span aria-hidden="true">{formatElapsed(elapsed)}</span>
+                        <span className="sr-only">{spokenElapsed(elapsed)}</span>
+                      </span>
+                    </div>
+                    {i.hostname && i.domainId && (
+                      <Link href={`/domains/${i.domainId}`} onClick={() => setOpen(false)}>
+                        {i.hostname}
+                      </Link>
+                    )}
+                    {i.progress && (
+                      <div className="activity__progress">
+                        <span>
+                          {i.progress.done} / {i.progress.total} answers
+                          {i.progress.failed > 0 ? ` · ${i.progress.failed} failed` : ""}
+                        </span>
+                        <span className="activity__bar" aria-hidden="true">
+                          <span style={{ width: `${Math.min(100, ((i.progress.done + i.progress.failed) / Math.max(1, i.progress.total)) * 100)}%` }} />
+                        </span>
+                      </div>
+                    )}
+                    {i.state === "waiting" && !i.note && <span className="activity__note">Waiting for the provider</span>}
+                    {i.note && <span className="activity__note">{i.note}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
