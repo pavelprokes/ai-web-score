@@ -63,7 +63,9 @@ pnpm test                            # offline test suite
 pnpm smoke                           # 1 real request per provider with keys (≈ a few cents)
 pnpm smoke --llm                     # + internal LLM structured-output check
 
-pnpm dev                             # admin UI at http://localhost:3000 (no sign-in in dev)
+pnpm dev                             # admin UI at http://localhost:3000 (no sign-in in dev);
+                                     # a local cron drives the job queue every 30 s like Vercel Cron
+                                     # (scheduled measurements included; LOCAL_CRON=0 turns it off)
                                      # in a second terminal, the same via CLI:
 pnpm cli providers                   # which providers are ready / missing env
 pnpm cli enable chatgpt-ui
@@ -88,6 +90,8 @@ run `pnpm cli process` again later (or keep `pnpm dev` running and call it perio
   visibility per AI provider and per topic, costs and forecast,
   domain profile, prompt portfolio quality, proposals to approve/reject, schedule, runs, failures, active prompts,
   and actions (pause/resume, re-run discovery, regenerate/explore prompts, optimise portfolio, recalculate scores).
+- **Activity** (top bar) — background work in progress (discovery, prompt design, measurement runs with
+  progress, answer analysis, scoring) with elapsed time; the page refreshes itself when a task finishes.
 - **Metrics** (`/metrics`) — every metric with its calculation, meaning, an example and how to read it. On desktop,
   the “i” icon next to a tile or column name shows a short definition and links there.
 - **AI providers** (`/providers`) — enabled providers, missing credentials, cost per answer, value

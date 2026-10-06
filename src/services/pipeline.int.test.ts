@@ -68,4 +68,30 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const plans = await db.execute(sql`select count(*)::int as n from jobs where type = 'measurement.plan' and status = 'QUEUED'`);
     expect(Number(plans[0]!.n)).toBe(0);
   });
+
+  it("reports background work for the top-bar activity indicator", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { createDomain } = await import("@/services/domains");
+    const { currentActivity } = await import("@/services/activity");
+    const db = getDb();
+    await db.execute(sql`delete from jobs`);
+
+    const domain = await createDomain({ hostname: "activity-test.example", runDiscovery: true });
+    let items = (await currentActivity()).filter((i) => i.domainId === domain.id);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "DISCOVERY", state: "queued", hostname: "activity-test.example" });
+
+    // Once the worker starts, the job and its DISCOVERY run are one item, shown as running.
+    await db.update(s.jobs).set({ status: "RUNNING" }).where(eq(s.jobs.type, "discovery.run"));
+    const [run] = await db.insert(s.runs).values({ domainId: domain.id, kind: "DISCOVERY", trigger: "MANUAL" }).returning();
+    items = (await currentActivity()).filter((i) => i.domainId === domain.id);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: `run:${run!.id}`, kind: "DISCOVERY", state: "running" });
+
+    // Finished work disappears.
+    await db.update(s.runs).set({ status: "SUCCEEDED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+    await db.update(s.jobs).set({ status: "SUCCEEDED" }).where(eq(s.jobs.type, "discovery.run"));
+    expect((await currentActivity()).filter((i) => i.domainId === domain.id)).toHaveLength(0);
+  });
 });
