@@ -1,0 +1,19 @@
+# Local development / tests. Preview & production use Supabase (see docs/DEPLOYMENT.md).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: ai_web_score
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/docker-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d ai_web_score"]
+      interval: 2s
+      retries: 20
+volumes:
+  pgdata:
