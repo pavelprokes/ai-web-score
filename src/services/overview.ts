@@ -130,11 +130,13 @@ export async function domainDetail(domainId: string) {
   const db = getDb();
   const [d] = await db.select().from(domains).where(eq(domains.id, domainId));
   if (!d) return null;
-  const latest = await latestProfile(domainId);
-  const snaps = await latestSnapshots([domainId]);
   const since14 = new Date(Date.now() - 14 * 86_400_000);
 
-  const [recentRuns, proposals, failed, cells, providerCosts, counts] = await Promise.all([
+  const [latest, snaps, monthCosts, estimatedMonthlyUsd, recentRuns, proposals, failed, cells, providerCosts, counts] = await Promise.all([
+    latestProfile(domainId),
+    latestSnapshots([domainId]),
+    costByDomain(monthStart()),
+    estimatedMonthlyCost(domainId),
     db.select().from(runs).where(eq(runs.domainId, domainId)).orderBy(desc(runs.startedAt)).limit(20),
     db.select().from(portfolioProposals).where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"))),
     db
@@ -238,8 +240,8 @@ export async function domainDetail(domainId: string) {
     clusters: clusterRows.map((r) => r.data),
     costs: {
       byProvider: providerCosts,
-      monthUsd: (await costByDomain(monthStart())).get(domainId) ?? null,
-      estimatedMonthlyUsd: await estimatedMonthlyCost(domainId),
+      monthUsd: monthCosts.get(domainId) ?? null,
+      estimatedMonthlyUsd,
       monthlyBudgetUsd: d.monthlyBudgetUsd ?? DEFAULT_MONTHLY_BUDGET_USD,
     },
   };
