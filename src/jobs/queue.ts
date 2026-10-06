@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 
@@ -27,6 +28,30 @@ export interface Job {
   payload: Record<string, unknown>;
   attempts: number;
   maxAttempts: number;
+}
+
+/**
+ * Cooperative cancellation. An admin can stop a job (status CANCELLED); the handler that is running
+ * it checks `throwIfJobCancelled()` between steps, and finishing a cancelled job never revives it.
+ */
+export class JobCancelledError extends Error {
+  constructor() {
+    super("Job was cancelled");
+  }
+}
+
+const currentJob = new AsyncLocalStorage<{ id: string }>();
+
+export function runAsJob<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  return currentJob.run({ id }, fn);
+}
+
+/** Call between expensive steps of a job handler; a no-op outside the job runner. */
+export async function throwIfJobCancelled() {
+  const job = currentJob.getStore();
+  if (!job) return;
+  const [row] = await getDb().execute(sql`select status from jobs where id = ${job.id}`);
+  if (row?.status === "CANCELLED") throw new JobCancelledError();
 }
 
 export async function enqueue(
@@ -74,7 +99,7 @@ export async function claim(limit: number, leaseSeconds = 300, types?: JobType[]
 }
 
 export async function complete(id: string) {
-  await getDb().execute(sql`update jobs set status = 'DONE', finished_at = now(), locked_until = null where id = ${id}`);
+  await getDb().execute(sql`update jobs set status = 'DONE', finished_at = now(), locked_until = null where id = ${id} and status = 'RUNNING'`);
 }
 
 export async function fail(job: Job, error: unknown, retryable = true) {
@@ -86,7 +111,7 @@ export async function fail(job: Job, error: unknown, retryable = true) {
     update jobs set status = ${final ? "FAILED" : "QUEUED"}, last_error = ${message.slice(0, 2000)},
       locked_until = null, run_at = now() + make_interval(secs => ${delay}),
       finished_at = ${final ? sql`now()` : sql`null`}
-    where id = ${job.id}`);
+    where id = ${job.id} and status = 'RUNNING'`);
 }
 
 /** Re-schedule a polling job (e.g. async results not ready yet) without counting an attempt. */
@@ -94,11 +119,11 @@ export async function reschedule(job: Job, delaySeconds: number) {
   await getDb().execute(sql`
     update jobs set status = 'QUEUED', attempts = greatest(0, attempts - 1), locked_until = null,
       run_at = now() + make_interval(secs => ${delaySeconds})
-    where id = ${job.id}`);
+    where id = ${job.id} and status = 'RUNNING'`);
 }
 
 export async function purgeOldJobs(days = 14) {
-  await getDb().execute(sql`delete from jobs where status in ('DONE','FAILED') and finished_at < now() - make_interval(days => ${days})`);
+  await getDb().execute(sql`delete from jobs where status in ('DONE','FAILED','CANCELLED') and finished_at < now() - make_interval(days => ${days})`);
 }
 
 export class RescheduleJob extends Error {

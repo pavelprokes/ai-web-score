@@ -118,4 +118,78 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(d!.nextPlanAt!.getTime()).toBeGreaterThan(Date.now() + 20 * 60_000);
     await db.update(s.runs).set({ status: "SUCCEEDED" }).where(eq(s.runs.id, run!.id));
   });
+
+  it("recovers runs interrupted by a deploy or timeout", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { recoverInterruptedRuns } = await import("@/services/recovery");
+    const db = getDb();
+    const [domain] = await db.select().from(s.domains).where(eq(s.domains.hostname, "activity-test.example"));
+    const old = new Date(Date.now() - 20 * 60_000);
+    await db.execute(sql`delete from jobs`);
+
+    // Discovery killed mid-run, no retry queued → run failed, domain flagged.
+    await db.update(s.domains).set({ status: "DISCOVERING" }).where(eq(s.domains.id, domain!.id));
+    const [disc] = await db.insert(s.runs).values({ domainId: domain!.id, kind: "DISCOVERY", trigger: "MANUAL", startedAt: old }).returning();
+
+    // Measurement run killed after creating measurements but before dispatching them.
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [m1] = await db.select().from(s.measurements).where(eq(s.measurements.domainId, demo!.id)).limit(1);
+    const [meas] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "CRON", startedAt: old, plannedCount: 1 }).returning();
+    await db.insert(s.measurements).values({ ...m1!, id: `${m1!.id}-recovery`, runId: meas!.id, status: "SCHEDULED", finishedAt: null, startedAt: null });
+
+    // Fresh run: must be left alone.
+    const [fresh] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "DISCOVERY", trigger: "MANUAL" }).returning();
+
+    expect(await recoverInterruptedRuns()).toEqual({ discovery: 1, measurement: 1 });
+    const status = async (id: string) => (await db.select().from(s.runs).where(eq(s.runs.id, id)))[0]!.status;
+    expect(await status(disc!.id)).toBe("FAILED");
+    expect(await status(fresh!.id)).toBe("RUNNING");
+    const [d] = await db.select().from(s.domains).where(eq(s.domains.id, domain!.id));
+    expect(d!.status).toBe("ERROR");
+    const exec = await db.select().from(s.jobs).where(eq(s.jobs.type, "measurement.execute"));
+    expect(exec.map((j) => (j.payload as { measurementId: string }).measurementId)).toContain(`${m1!.id}-recovery`);
+
+    // Once its measurement finishes, the run is closed with recounted totals.
+    await db.update(s.measurements).set({ status: "SUCCEEDED" }).where(eq(s.measurements.id, `${m1!.id}-recovery`));
+    await recoverInterruptedRuns();
+    expect(await status(meas!.id)).toBe("SUCCEEDED");
+    await db.update(s.runs).set({ status: "SUCCEEDED" }).where(eq(s.runs.id, fresh!.id));
+  });
+
+  it("lets the admin stop discovery and measurement runs", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { cancelActivity } = await import("@/services/cancel");
+    const { complete, enqueue, runAsJob, throwIfJobCancelled, JobCancelledError } = await import("@/jobs/queue");
+    const db = getDb();
+    await db.execute(sql`delete from jobs`);
+
+    // Queued discovery for a domain without a profile → job cancelled, domain back to NEW.
+    const [fresh] = await db.insert(s.domains).values({ hostname: "cancel-test.example", status: "DISCOVERING" }).returning();
+    await enqueue("discovery.run", { domainId: fresh!.id }, { dedupeKey: `discovery:${fresh!.id}` });
+    const [job] = await db.select().from(s.jobs).where(eq(s.jobs.type, "discovery.run"));
+    expect(await cancelActivity(`job:${job!.id}`, "test")).toBe("Stopped.");
+    expect((await db.select().from(s.jobs).where(eq(s.jobs.id, job!.id)))[0]!.status).toBe("CANCELLED");
+    expect((await db.select().from(s.domains).where(eq(s.domains.id, fresh!.id)))[0]!.status).toBe("NEW");
+
+    // A running handler notices at its next checkpoint, and finishing never revives the job.
+    await expect(runAsJob(job!.id, () => throwIfJobCancelled())).rejects.toBeInstanceOf(JobCancelledError);
+    await complete(job!.id);
+    expect((await db.select().from(s.jobs).where(eq(s.jobs.id, job!.id)))[0]!.status).toBe("CANCELLED");
+
+    // Measurement run: unanswered measurements and their jobs are dropped, the run is closed.
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [m1] = await db.select().from(s.measurements).where(eq(s.measurements.domainId, demo!.id)).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 1 }).returning();
+    const mid = `${m1!.id}-cancel`;
+    await db.insert(s.measurements).values({ ...m1!, id: mid, runId: run!.id, status: "SCHEDULED", finishedAt: null, startedAt: null });
+    await enqueue("measurement.execute", { measurementId: mid }, { dedupeKey: `exec:${mid}` });
+    expect(await cancelActivity(`run:${run!.id}`, "test")).toMatch(/1 unanswered/);
+    expect((await db.select().from(s.runs).where(eq(s.runs.id, run!.id)))[0]!.status).toBe("CANCELLED");
+    expect((await db.select().from(s.measurements).where(eq(s.measurements.id, mid)))[0]!.status).toBe("CANCELLED");
+    const [exec] = await db.select().from(s.jobs).where(eq(s.jobs.type, "measurement.execute"));
+    expect(exec!.status).toBe("CANCELLED");
+    expect(await cancelActivity(`run:${run!.id}`, "test")).toBe("Already finished.");
+  });
 });

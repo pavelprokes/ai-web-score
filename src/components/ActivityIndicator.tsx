@@ -39,6 +39,9 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
   const [now, setNow] = useState(renderedAt);
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const stopped = useRef(new Set<string>());
+  const [stopping, setStopping] = useState<string | null>(null);
   const previous = useRef(new Map(initial.map((i) => [i.id, i])));
   const rootRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -61,7 +64,8 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
       if (!res.ok) return;
       const data = (await res.json()) as { items: ActivityItem[] };
       const next = new Map(data.items.map((i) => [i.id, i]));
-      const finished = [...previous.current.values()].filter((i) => !next.has(i.id));
+      // Items the admin just stopped were already announced as stopped, not as finished.
+      const finished = [...previous.current.values()].filter((i) => !next.has(i.id) && !stopped.current.has(i.id));
       const started = data.items.filter((i) => !previous.current.has(i.id));
       previous.current = next;
       setItems(data.items);
@@ -78,6 +82,32 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
       /* offline or server restarting: keep the last state */
     }
   }, [scheduleRefresh]);
+
+  const stop = useCallback(
+    async (item: ActivityItem) => {
+      if (confirming !== item.id) {
+        setConfirming(item.id);
+        return;
+      }
+      setConfirming(null);
+      setStopping(item.id);
+      try {
+        const res = await fetch("/api/activity/cancel", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: item.id }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+        if (res.ok) stopped.current.add(item.id);
+        setAnnouncement(res.ok ? `${describe(item)}: ${data.message ?? "stopped."}` : `Could not stop ${describe(item)}: ${data.error ?? res.status}`);
+        await poll();
+        scheduleRefresh();
+      } finally {
+        setStopping(null);
+      }
+    },
+    [confirming, poll, scheduleRefresh],
+  );
 
   const active = items.length > 0;
 
@@ -184,6 +214,27 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
                     )}
                     {i.state === "waiting" && !i.note && <span className="activity__note">Waiting for the provider</span>}
                     {i.note && <span className="activity__note">{i.note}</span>}
+                    <div className="activity__actions">
+                      <button
+                        type="button"
+                        className={`btn btn--small${confirming === i.id ? " btn--danger" : ""}`}
+                        aria-disabled={stopping === i.id}
+                        onClick={() => stopping !== i.id && void stop(i)}
+                        onBlur={() => confirming === i.id && setConfirming(null)}
+                      >
+                        {stopping === i.id ? "Stopping…" : confirming === i.id ? "Confirm stop" : "Stop"}
+                        <span className="sr-only"> {describe(i)}</span>
+                      </button>
+                      {confirming === i.id && (
+                        <span className="activity__note" role="status">
+                          {i.kind === "MEASUREMENT"
+                            ? "Unanswered prompts are dropped; answers already collected are kept."
+                            : i.kind === "ANALYSIS"
+                              ? "Waiting answers keep their mention and citation data, without sentiment and accuracy."
+                              : "The current step may still finish; nothing further runs."}
+                        </span>
+                      )}
+                    </div>
                   </li>
                 );
               })}

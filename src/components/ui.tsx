@@ -62,6 +62,7 @@ const RUN_STATUS: Record<string, { tone: Tone; label: string }> = {
   SUCCEEDED: { tone: "good", label: "Succeeded" },
   PARTIAL: { tone: "warning", label: "Partial" },
   FAILED: { tone: "critical", label: "Failed" },
+  CANCELLED: { tone: "neutral", label: "Cancelled" },
 };
 
 export function RunStatus({ status }: { status: string }) {

@@ -77,6 +77,7 @@ API_URL=http://localhost:3000 ADMIN_API_TOKEN=change-me-long-random pnpm cli dom
 | GET / PATCH | `/api/providers`, `/api/providers/:id` | AI providers, configurations, capabilities, prices, cost, value; enable/disable, reach |
 | POST | `/api/configurations/:id/promote` | promote a calibrated cheaper configuration |
 | GET | `/api/activity` | background work in progress (top-bar indicator) |
+| POST | `/api/activity/cancel` | stop an activity item `{id}` (run, job or pending analysis) |
 | GET | `/api/costs` | cost by domain / provider / internal LLM |
 | POST | `/api/jobs/process` | scheduler tick + drain queue (same as cron) |
 | GET | `/api/cron` | Vercel Cron (Bearer `CRON_SECRET`) |

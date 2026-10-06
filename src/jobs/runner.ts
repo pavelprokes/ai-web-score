@@ -8,10 +8,11 @@ import { planMeasurements } from "@/services/planning";
 import { collectAsync, executeMeasurement, submitAsync } from "@/services/measure";
 import { collectAnalysis, submitAnalysis } from "@/services/analysis";
 import { computeScores } from "@/services/scores";
+import { recoverInterruptedRuns } from "@/services/recovery";
 import { sendMeasurementToUmami } from "@/services/umami";
 import { runOptimizer } from "@/services/optimizer";
 import { syncProviderRegistry } from "@/services/registry";
-import { claim, complete, enqueue, fail, type Job, type JobType, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob } from "./queue";
+import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
 
 type Handler = (payload: Record<string, unknown>) => Promise<unknown>;
 
@@ -37,9 +38,10 @@ const LEASE_SECONDS: Partial<Record<JobType, number>> = { "discovery.run": 600, 
 
 async function runJob(job: Job) {
   try {
-    await HANDLERS[job.type](job.payload);
+    await runAsJob(job.id, () => HANDLERS[job.type](job.payload));
     await complete(job.id);
   } catch (e) {
+    if (e instanceof JobCancelledError) return; // already CANCELLED by the admin
     if (e instanceof RescheduleJob) return reschedule(job, e.delaySeconds);
     console.error(`[job ${job.type}] ${job.id}`, e);
     await fail(job, e, !(e instanceof PermanentJobError));
@@ -90,6 +92,8 @@ async function drainQueue(opts: { deadlineMs: number; concurrency?: number; type
 export async function schedulerTick() {
   const db = getDb();
   await syncProviderRegistry();
+  // Close or resume runs a deploy/timeout interrupted before planning new work (which they would block).
+  await recoverInterruptedRuns();
   const now = new Date();
   const due = await db
     .select({ id: domains.id })
