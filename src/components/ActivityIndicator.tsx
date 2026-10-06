@@ -14,6 +14,7 @@ import type { ActivityItem } from "@/services/activity";
 
 const ACTIVE_POLL_MS = 4_000;
 const IDLE_POLL_MS = 20_000;
+const REFRESH_MIN_GAP_MS = 5_000;
 
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -42,6 +43,18 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
   const rootRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
+  const lastRefresh = useRef(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) return;
+    const wait = Math.max(0, lastRefresh.current + REFRESH_MIN_GAP_MS - Date.now());
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      lastRefresh.current = Date.now();
+      router.refresh();
+    }, wait);
+  }, [router]);
+
   const poll = useCallback(async () => {
     try {
       const res = await fetch("/api/activity", { cache: "no-store" });
@@ -58,12 +71,13 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
         ...finished.map((i) => `${describe(i)} finished.`),
       ];
       if (parts.length) setAnnouncement(parts.slice(0, 3).join(" "));
-      // Finished work changes what the page shows (status, scores, prompts) — reload its data.
-      if (finished.length) router.refresh();
+      // Finished work changes what the page shows (status, scores, prompts) — reload its data, but at most
+      // every few seconds: a measurement run finishes many small jobs and each refresh re-renders the page.
+      if (finished.length) scheduleRefresh();
     } catch {
       /* offline or server restarting: keep the last state */
     }
-  }, [router]);
+  }, [scheduleRefresh]);
 
   const active = items.length > 0;
 

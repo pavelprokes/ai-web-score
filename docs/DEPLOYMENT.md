@@ -54,6 +54,12 @@ pnpm cli action <domainId> run-now
 
 - Environment variables: everything from `.env.example` (`DATABASE_URL`, `ADMIN_API_TOKEN`, `CRON_SECRET`,
   `AUTH_*`, `ADMIN_EMAILS`, provider keys, `UMAMI_*`). Use separate values for Preview and Production.
+- **Function region = database region.** Every page runs a dozen or more sequential queries; put the
+  functions next to Supabase (Settings → Functions → Region; Supabase `eu-west-1` = Dublin → `dub1`).
+  A cross-Atlantic default (`iad1`) adds ~80–100 ms per query.
+- Background jobs (`after()`, cron) use their own connection pool (`JOB_DB_POOL_MAX`, default 4) next to
+  the request pool (`DB_POOL_MAX`, default 5), so a busy queue doesn't stall pages; work kicked off by a
+  click runs with `KICK_JOB_CONCURRENCY` (default 4) parallel jobs, cron with `JOB_CONCURRENCY` (8).
 - **Database migrations run on deploy.** `vercel.json` sets the build command to `pnpm vercel-build`
   (`pnpm db:deploy && next build`): pending Drizzle migrations are applied to the environment's own
   database before the app is built, so Preview builds migrate the preview project and Production builds

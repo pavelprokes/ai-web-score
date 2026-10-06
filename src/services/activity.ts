@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { domains, jobs, measurementSignals, measurements, runs } from "@/db/schema";
@@ -146,3 +147,6 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
 
   return items.sort((x, y) => x.startedAt.localeCompare(y.startedAt));
 }
+
+/** Same result for the layout and the page within one server render (one set of queries per request). */
+export const currentActivityForRequest = cache(() => currentActivity());

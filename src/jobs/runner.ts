@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, runInJobScope } from "@/db";
 import { domains, measurementSignals, measurements } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
 import { runDiscovery } from "@/services/discovery";
@@ -51,14 +51,22 @@ async function runJob(job: Job) {
  * so a single serverless invocation handles many parallel provider calls.
  */
 export async function processJobs(opts: { deadlineMs: number; concurrency?: number; types?: JobType[] }) {
+  // Background work uses its own connection pool so pages stay responsive while the queue is busy.
+  return runInJobScope(() => drainQueue(opts));
+}
+
+async function drainQueue(opts: { deadlineMs: number; concurrency?: number; types?: JobType[] }) {
   const deadline = Date.now() + opts.deadlineMs;
   const concurrency = opts.concurrency ?? Number(process.env.JOB_CONCURRENCY ?? 8);
   let processed = 0;
+  let nextClaimAt = 0;
   const inFlight = new Set<Promise<void>>();
   while (Date.now() < deadline - 5_000) {
     const free = concurrency - inFlight.size;
-    if (free > 0) {
+    if (free > 0 && Date.now() >= nextClaimAt) {
       const jobs = await claim(free, 300, opts.types);
+      // Nothing due while others still run: poll the queue once a second, not on every finished job.
+      nextClaimAt = jobs.length === 0 ? Date.now() + 1_000 : 0;
       for (const job of jobs) {
         const lease = LEASE_SECONDS[job.type];
         if (lease) await getDb().execute(sql`update jobs set locked_until = now() + make_interval(secs => ${lease}) where id = ${job.id}`);
@@ -69,6 +77,7 @@ export async function processJobs(opts: { deadlineMs: number; concurrency?: numb
       if (jobs.length === 0 && inFlight.size === 0) break;
     }
     if (inFlight.size > 0) await Promise.race([...inFlight, sleep(250)]);
+    else if (Date.now() < nextClaimAt) await sleep(nextClaimAt - Date.now());
   }
   await Promise.all(inFlight);
   return { processed };

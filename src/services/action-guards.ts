@@ -1,4 +1,4 @@
-import { type ActivityKind, currentActivity } from "./activity";
+import { type ActivityKind, currentActivityForRequest } from "./activity";
 
 /**
  * Which background work blocks which domain action, so the same work can't be started twice
@@ -25,7 +25,7 @@ const KIND_REASON: Record<ActivityKind, string> = {
 /** Kinds of background work in progress, per domain. */
 export async function busyKindsByDomain(): Promise<Map<string, Set<ActivityKind>>> {
   const out = new Map<string, Set<ActivityKind>>();
-  for (const item of await currentActivity()) {
+  for (const item of await currentActivityForRequest()) {
     if (!item.domainId) continue;
     const set = out.get(item.domainId) ?? new Set<ActivityKind>();
     set.add(item.kind);
