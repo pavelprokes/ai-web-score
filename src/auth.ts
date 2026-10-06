@@ -12,6 +12,7 @@ export function adminEmails(): string[] {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [Google],
   session: { strategy: "jwt" },
+  pages: { signIn: "/login", error: "/login" },
   callbacks: {
     signIn({ profile }) {
       const email = profile?.email?.toLowerCase();

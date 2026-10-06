@@ -4,7 +4,8 @@ Measures whether AI assistants (ChatGPT, Google AI Mode, Gemini, Claude, Perplex
 discover and recommend a monitored brand — through multiple reproducible metrics, not one arbitrary score —
 and optimises toward **maximum useful information for minimum justifiable measurement cost**.
 
-- **Admin only.** No public pages; Google sign-in for allowlisted accounts, bearer token for the API.
+- **Admin only.** No public pages; Google sign-in for allowlisted accounts (disabled in `pnpm dev`), bearer
+  token for the API. Admin UI: domains overview, domain detail, AI providers — WCAG 2.2 AA.
 - **Umami is the analytics layer.** This app does discovery, prompt portfolios, scheduling, measurement,
   raw evidence, cost accounting, scoring and sends normalised events to Umami.
 
@@ -44,7 +45,9 @@ src/
     analytics/     Umami client
   services/        orchestration with the database
   jobs/            queue + runner + scheduler tick
+  app/(admin)/     admin UI pages + server actions (Google sign-in)
   app/api/         admin REST API, cron endpoint, auth
+  components/      accessible UI building blocks
   db/              schema, migrations, seed
 scripts/cli.ts     CLI over the REST API
 ```
@@ -55,7 +58,7 @@ scripts/cli.ts     CLI over the REST API
 docker compose up -d db
 cp .env.example .env.local
 pnpm install && pnpm db:migrate
-MOCK_PROVIDERS=1 pnpm db:seed && MOCK_PROVIDERS=1 pnpm dev
+MOCK_PROVIDERS=1 pnpm db:seed && MOCK_PROVIDERS=1 pnpm dev   # admin UI: http://localhost:3000
 API_URL=http://localhost:3000 ADMIN_API_TOKEN=change-me-long-random pnpm cli process
 API_URL=http://localhost:3000 ADMIN_API_TOKEN=change-me-long-random pnpm cli domains
 ```

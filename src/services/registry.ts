@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { capabilityProfiles, priceEntries, providerConfigurations, providers } from "@/db/schema";
-import { listProviders } from "@/core/measurement/providers";
+import { getProvider, listProviders, missingEnv } from "@/core/measurement/providers";
 import type { PriceEntry } from "@/core/pricing/cost";
 
 /**
@@ -85,4 +85,27 @@ export async function loadPriceBook(): Promise<PriceEntry[]> {
  */
 export function priceModelKey(providerId: string, model: string): string {
   return ["chatgpt-ui", "gemini-ui", "google-ai-mode"].includes(providerId) ? "standard" : model;
+}
+
+export class ProviderSetupError extends Error {}
+
+/** Enable/disable a provider (or its configurations). Enabling requires its environment variables. */
+export async function updateProvider(
+  id: string,
+  change: { enabled?: boolean; reach?: number; configurations?: Record<string, { enabled: boolean }> },
+) {
+  const adapter = getProvider(id);
+  const missing = missingEnv(adapter);
+  if (change.enabled && missing.length) throw new ProviderSetupError(`Missing environment: ${missing.join(", ")}`);
+  const db = getDb();
+  const patch: Partial<typeof providers.$inferInsert> = { updatedAt: new Date() };
+  if (change.enabled !== undefined) patch.enabled = change.enabled;
+  if (change.reach !== undefined) patch.reach = change.reach;
+  await db.update(providers).set(patch).where(eq(providers.id, id));
+  for (const [configId, c] of Object.entries(change.configurations ?? {})) {
+    await db
+      .update(providerConfigurations)
+      .set({ enabled: c.enabled })
+      .where(and(eq(providerConfigurations.id, configId), eq(providerConfigurations.providerId, id)));
+  }
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { adminEmails, auth } from "@/auth";
 import { InvalidDomainError } from "@/services/domains";
+import { isAuthDisabled } from "./auth-guard";
 
 /**
  * Admin API guard. Accepts either `Authorization: Bearer $ADMIN_API_TOKEN`
@@ -25,6 +26,7 @@ export function bearerMatches(req: Request, secret: string | undefined): boolean
 
 export async function adminIdentity(req: Request): Promise<string | null> {
   if (bearerMatches(req, process.env.ADMIN_API_TOKEN)) return "api-token";
+  if (isAuthDisabled()) return "developer";
   if (process.env.AUTH_SECRET) {
     const session = await auth();
     const email = session?.user?.email?.toLowerCase();

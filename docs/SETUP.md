@@ -33,6 +33,12 @@ set `DATAFORSEO_BASE_URL=https://sandbox.dataforseo.com` (remove it again for re
 | `ADMIN_EMAILS` | comma-separated Google accounts allowed to sign in. |
 | `API_URL` | where `pnpm cli` talks to, e.g. `http://localhost:3000`. |
 
+**Sign-in is disabled in development.** `pnpm dev` (`NODE_ENV=development`) opens the admin without Google
+login, and the REST API accepts calls without a token, so the `AUTH_*` variables can stay empty locally.
+Set `AUTH_DISABLED=0` to test the real sign-in locally. Production builds (`next build`/`next start`,
+Vercel preview and production) always require Google sign-in for an `ADMIN_EMAILS` account; `AUTH_DISABLED`
+has no effect there.
+
 ## 4. Optional: Umami
 
 `UMAMI_URL` (your instance). Per domain, create a dedicated Umami website ("example.cz · AI visibility") and
@@ -51,7 +57,8 @@ pnpm test                            # offline test suite
 pnpm smoke                           # 1 real request per provider with keys (≈ a few cents)
 pnpm smoke --llm                     # + internal LLM structured-output check
 
-pnpm dev                             # in a second terminal:
+pnpm dev                             # admin UI at http://localhost:3000 (no sign-in in dev)
+                                     # in a second terminal, the same via CLI:
 pnpm cli providers                   # which providers are ready / missing env
 pnpm cli enable chatgpt-ui
 pnpm cli enable google-ai-mode
@@ -65,6 +72,21 @@ pnpm cli show <domainId>             # profile, portfolio, schedule, costs
 
 DataForSEO's standard queue returns results within ~45 minutes and Claude batches usually within an hour:
 run `pnpm cli process` again later (or keep `pnpm dev` running and call it periodically).
+
+## Admin UI
+
+- **Domains** (`/`) — every domain with overall score, mention/citation/recommendation rate (95 % CI), share of
+  voice, last discovery, last measurement run, next run and budget use. *Add domain* asks whether to run the
+  initial analysis now; *Run now* queues a measurement run.
+- **Domain detail** (`/domains/:id`) — scores, visibility per AI provider and per topic, costs and forecast,
+  domain profile, prompt portfolio quality, proposals to approve/reject, schedule, runs, failures, active prompts,
+  and actions (pause/resume, re-run discovery, regenerate/explore prompts, optimise portfolio, recalculate scores).
+- **AI providers** (`/providers`) — enabled providers, missing credentials, cost per answer, value
+  recommendation, configurations and calibration results (promote a cheaper configuration once it passes).
+
+Accessibility: WCAG 2.2 AA (contrast in light and dark mode, keyboard operation, visible focus, status never
+by colour alone, reflow at 320 px). `pnpm a11y http://localhost:3000 a11y-report / /providers /domains/<id>`
+runs axe-core and saves screenshots.
 
 ## What `pnpm smoke` verifies
 

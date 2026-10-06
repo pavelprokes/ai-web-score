@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Visibility Admin",
+  title: { default: "AI Visibility Admin", template: "%s · AI Visibility Admin" },
   robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, background: "#f7f7f8", color: "#111" }}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }
