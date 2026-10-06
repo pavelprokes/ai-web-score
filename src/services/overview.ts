@@ -329,19 +329,44 @@ export async function listPrompts(domainId: string, status?: string | null) {
 
 export async function providersOverview() {
   const db = getDb();
+  // Provider state is required; every other part degrades to a warning so one failing query
+  // (a slow aggregate, a dropped connection) does not take the whole page down.
+  const warnings: string[] = [];
+  const optional = async <T>(label: string, query: Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await query;
+    } catch (e) {
+      console.error(`[providers] ${label} failed`, e);
+      warnings.push(`${label} could not be loaded — reload to try again.`);
+      return fallback;
+    }
+  };
   const [rows, configs, caps, prices, month, total, calib, llm] = await Promise.all([
     db.select().from(providers),
     db.select().from(providerConfigurations),
-    db.select().from(capabilityProfiles).orderBy(desc(capabilityProfiles.version)),
-    db.select().from(priceEntries).orderBy(desc(priceEntries.effectiveFrom)),
-    costByProvider(monthStart()),
-    costByProvider(new Date(0)),
-    db.select().from(calibrationResults).where(gte(calibrationResults.createdAt, new Date(Date.now() - 30 * 86_400_000))).orderBy(desc(calibrationResults.createdAt)),
-    internalLlmCost(monthStart()),
+    // Latest version per provider/model only; older versions are history.
+    optional(
+      "Capability profiles",
+      db
+        .selectDistinctOn([capabilityProfiles.providerId, capabilityProfiles.model])
+        .from(capabilityProfiles)
+        .orderBy(capabilityProfiles.providerId, capabilityProfiles.model, desc(capabilityProfiles.version)),
+      [],
+    ),
+    optional("Prices", db.select().from(priceEntries).orderBy(desc(priceEntries.effectiveFrom)), []),
+    optional("This month's cost", costByProvider(monthStart()), []),
+    optional("All-time cost", costByProvider(new Date(0)), []),
+    optional(
+      "Calibration results",
+      db.select().from(calibrationResults).where(gte(calibrationResults.createdAt, new Date(Date.now() - 30 * 86_400_000))).orderBy(desc(calibrationResults.createdAt)),
+      [],
+    ),
+    optional("Internal analysis cost", internalLlmCost(monthStart()), []),
   ]);
   const reach = Object.fromEntries(rows.map((r) => [r.id, r.reach]));
-  const value = await providerValueReport(reach);
+  const value = await optional("Provider value", providerValueReport(reach), []);
   return {
+    warnings,
     providers: listProviders().map((p) => {
       const row = rows.find((r) => r.id === p.id);
       return {

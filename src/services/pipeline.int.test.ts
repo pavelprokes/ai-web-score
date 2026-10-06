@@ -69,6 +69,30 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(Number(plans[0]!.n)).toBe(0);
   });
 
+  it("keeps one capability profile version per provider model across syncs", async () => {
+    const { getDb } = await import("@/db");
+    const { syncProviderRegistry } = await import("@/services/registry");
+    const db = getDb();
+    const count = async () => Number((await db.execute(sql`select count(*)::int as n from capability_profiles`))[0]?.n);
+    await syncProviderRegistry();
+    const before = await count();
+    await Promise.all([syncProviderRegistry(), syncProviderRegistry()]); // cron and a click at once
+    await syncProviderRegistry();
+    expect(await count()).toBe(before);
+
+    // The 0001 migration removes the duplicates earlier syncs created; a real change stays.
+    const [row] = await db.execute(sql`select provider_id, model, version, profile from capability_profiles order by provider_id limit 1`);
+    const { provider_id: p, model: m, version: v, profile } = row as { provider_id: string; model: string; version: number; profile: unknown };
+    const changed = { ...(profile as object), note: "changed" };
+    await db.execute(sql`insert into capability_profiles (provider_id, model, version, profile) values
+      (${p}, ${m}, ${v + 1}, ${JSON.stringify(profile)}::jsonb), (${p}, ${m}, ${v + 2}, ${JSON.stringify(profile)}::jsonb),
+      (${p}, ${m}, ${v + 3}, ${JSON.stringify(changed)}::jsonb), (${p}, ${m}, ${v + 4}, ${JSON.stringify(changed)}::jsonb)`);
+    const { readFileSync } = await import("node:fs");
+    await db.execute(sql.raw(readFileSync("drizzle/0001_dedupe_capability_profiles.sql", "utf8")));
+    const versions = await db.execute(sql`select version from capability_profiles where provider_id = ${p} and model = ${m} order by version`);
+    expect(versions.map((r) => Number(r.version))).toEqual([v, v + 3]);
+  });
+
   it("reports background work for the top-bar activity indicator", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
