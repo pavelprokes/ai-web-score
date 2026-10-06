@@ -11,6 +11,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env.local src/db/migrate.ts",
+    "db:deploy": "tsx src/db/migrate.ts",
+    "vercel-build": "pnpm db:deploy && next build",
     "db:seed": "tsx --env-file-if-exists=.env.local src/db/seed.ts",
     "cli": "tsx --env-file-if-exists=.env.local scripts/cli.ts",
     "test:int": "vitest run src/services/pipeline.int.test.ts src/e2e",
