@@ -65,18 +65,29 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
 
   const status = mode === "INITIAL" || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
   let created = 0;
+  const chunks: TopicCluster[][] = [];
   for (let i = 0; i < clusters.length; i += CLUSTERS_PER_LLM_CALL) {
-    await throwIfJobCancelled();
     const chunk = clusters.slice(i, i + CLUSTERS_PER_LLM_CALL).filter((c) => allocation.has(c.key));
-    if (chunk.length === 0) continue;
-    const set = await generateStructured({
-      schema: LlmPromptSet,
-      system: PROMPT_SYSTEM,
-      user: promptGenerationUser({ profile, clusters: chunk, promptsPerCluster: allocation, exploratory }),
-      purpose: `portfolio.${mode.toLowerCase()}`,
-      domainId,
-      effort: "medium",
-    });
+    if (chunk.length) chunks.push(chunk);
+  }
+  // Chunks are independent: generate them in parallel so the job takes as long as the slowest chunk,
+  // not their sum (a large site would otherwise outlast a serverless invocation).
+  await throwIfJobCancelled();
+  const sets = await Promise.all(
+    chunks.map((chunk) =>
+      generateStructured({
+        schema: LlmPromptSet,
+        system: PROMPT_SYSTEM,
+        user: promptGenerationUser({ profile, clusters: chunk, promptsPerCluster: allocation, exploratory }),
+        purpose: `portfolio.${mode.toLowerCase()}`,
+        domainId,
+        effort: "medium",
+      }),
+    ),
+  );
+  await throwIfJobCancelled();
+  for (const [index, set] of sets.entries()) {
+    const chunk = chunks[index]!;
     const validKeys = new Set(chunk.map((c) => c.key));
     for (const p of set.prompts) {
       if (!validKeys.has(p.clusterKey)) continue;

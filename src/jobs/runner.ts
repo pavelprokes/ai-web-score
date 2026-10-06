@@ -36,6 +36,25 @@ const HANDLERS: Record<JobType, Handler> = {
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
 const LEASE_SECONDS: Partial<Record<JobType, number>> = { "discovery.run": 600, "portfolio.generate": 900 };
 
+/**
+ * Worst-case run time per job type. A job is only claimed when it fits the time left in the current
+ * invocation, so work never runs past the function's limit (Vercel kills it there; the job would then
+ * wait for its lease to expire and repeat its AI calls). Unlisted types are short (≤ 60 s).
+ */
+const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
+  "discovery.run": 200,
+  "portfolio.generate": 180,
+  "analysis.submit": 90,
+  "measurement.execute": 90,
+};
+const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
+const DEFAULT_MAX_JOB_SECONDS = 60;
+
+/** Job types that can still finish before the deadline. */
+export function typesThatFit(remainingMs: number, only?: JobType[]): JobType[] {
+  return (only ?? ALL_JOB_TYPES).filter((t) => (MAX_JOB_SECONDS[t] ?? DEFAULT_MAX_JOB_SECONDS) * 1000 <= remainingMs);
+}
+
 async function runJob(job: Job) {
   try {
     await runAsJob(job.id, () => HANDLERS[job.type](job.payload));
@@ -66,7 +85,9 @@ async function drainQueue(opts: { deadlineMs: number; concurrency?: number; type
   while (Date.now() < deadline - 5_000) {
     const free = concurrency - inFlight.size;
     if (free > 0 && Date.now() >= nextClaimAt) {
-      const jobs = await claim(free, 300, opts.types);
+      const fitting = typesThatFit(deadline - Date.now(), opts.types);
+      if (fitting.length === 0) break;
+      const jobs = await claim(free, 300, fitting);
       // Nothing due while others still run: poll the queue once a second, not on every finished job.
       nextClaimAt = jobs.length === 0 ? Date.now() + 1_000 : 0;
       for (const job of jobs) {

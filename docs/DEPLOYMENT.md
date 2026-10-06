@@ -60,6 +60,14 @@ pnpm cli action <domainId> run-now
 - Background jobs (`after()`, cron) use their own connection pool (`JOB_DB_POOL_MAX`, default 4) next to
   the request pool (`DB_POOL_MAX`, default 5), so a busy queue doesn't stall pages; work kicked off by a
   click runs with `KICK_JOB_CONCURRENCY` (default 4) parallel jobs, cron with `JOB_CONCURRENCY` (8).
+- **Serverless connection hygiene.** Fluid compute suspends instances between requests; a database
+  connection left open across a suspension is dead on resume and the next query would hang until the
+  300 s limit. Pools therefore close idle connections after `DB_IDLE_TIMEOUT_S` (5 s), recycle every
+  connection after 10 min, and keep the invocation awake (`waitUntil`) until idle connections are closed
+  — the `attachDatabasePool` pattern from `@vercel/functions`, which doesn't support postgres.js.
+- **Jobs fit the invocation.** The runner only claims a job when its worst-case duration fits the time
+  left (discovery 200 s, prompt design 180 s, others ≤ 90 s), so nothing runs into the function limit;
+  prompt-design batches run in parallel.
 - **Deploys don't lose work.** The job queue lives in Postgres. A deploy (or a timeout) that kills an
   instance mid-job only delays that job: its lease expires (5–15 min) and the next cron tick or click
   claims it again; queued jobs, DataForSEO tasks and Claude batches are untouched. Each cron tick also

@@ -7,13 +7,40 @@ import type { ActivityItem } from "@/services/activity";
 
 /*
  * Top-bar indicator of background work (discovery, prompt design, measurement runs, analysis…).
- * Polls /api/activity (every 4 s while something runs, 20 s when idle, paused in hidden tabs),
+ * Polls /api/activity adaptively (5 s while work is being processed, 30 s while it only waits in the
+ * queue or at a provider, 60 s when idle; paused in hidden tabs) and shares each result with the
+ * other open tabs through localStorage, so several tabs don't multiply the requests. It
  * ticks elapsed time every second, refreshes the page data when a task finishes, and announces
  * starts/finishes politely to screen readers. Disclosure button + list: keyboard and AT friendly.
  */
 
-const ACTIVE_POLL_MS = 4_000;
-const IDLE_POLL_MS = 20_000;
+const RUNNING_POLL_MS = 5_000;
+const WAITING_POLL_MS = 30_000;
+const IDLE_POLL_MS = 60_000;
+const SHARED_KEY = "ai-visibility:activity";
+
+/** Work actually being processed changes quickly; queued or provider-side work doesn't. */
+function pollInterval(items: ActivityItem[]): number {
+  if (items.some((i) => i.state === "running" && i.kind !== "ANALYSIS")) return RUNNING_POLL_MS;
+  return items.length ? WAITING_POLL_MS : IDLE_POLL_MS;
+}
+
+type Shared = { at: number; items: ActivityItem[] };
+function readShared(): Shared | null {
+  try {
+    const raw = localStorage.getItem(SHARED_KEY);
+    return raw ? (JSON.parse(raw) as Shared) : null;
+  } catch {
+    return null;
+  }
+}
+function writeShared(items: ActivityItem[]) {
+  try {
+    localStorage.setItem(SHARED_KEY, JSON.stringify({ at: Date.now(), items } satisfies Shared));
+  } catch {
+    /* storage unavailable (private mode): this tab just polls on its own */
+  }
+}
 const REFRESH_MIN_GAP_MS = 5_000;
 
 export function formatElapsed(ms: number): string {
@@ -58,30 +85,45 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
     }, wait);
   }, [router]);
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await fetch("/api/activity", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = (await res.json()) as { items: ActivityItem[] };
-      const next = new Map(data.items.map((i) => [i.id, i]));
+  /** Applies a fresh snapshot: announces starts/finishes and refreshes the page when work finished. */
+  const apply = useCallback(
+    (list: ActivityItem[]) => {
+      const next = new Map(list.map((i) => [i.id, i]));
       // Items the admin just stopped were already announced as stopped, not as finished.
       const finished = [...previous.current.values()].filter((i) => !next.has(i.id) && !stopped.current.has(i.id));
-      const started = data.items.filter((i) => !previous.current.has(i.id));
+      const started = list.filter((i) => !previous.current.has(i.id));
       previous.current = next;
-      setItems(data.items);
+      setItems(list);
       setNow(Date.now());
-      const parts = [
-        ...started.map((i) => `${describe(i)} started.`),
-        ...finished.map((i) => `${describe(i)} finished.`),
-      ];
+      const parts = [...started.map((i) => `${describe(i)} started.`), ...finished.map((i) => `${describe(i)} finished.`)];
       if (parts.length) setAnnouncement(parts.slice(0, 3).join(" "));
       // Finished work changes what the page shows (status, scores, prompts) — reload its data, but at most
       // every few seconds: a measurement run finishes many small jobs and each refresh re-renders the page.
       if (finished.length) scheduleRefresh();
-    } catch {
-      /* offline or server restarting: keep the last state */
-    }
-  }, [scheduleRefresh]);
+    },
+    [scheduleRefresh],
+  );
+
+  /** Uses another tab's recent result when it is fresh enough; otherwise asks the server. */
+  const poll = useCallback(
+    async (force = false) => {
+      const shared = readShared();
+      if (!force && shared && Date.now() - shared.at < pollInterval(shared.items)) {
+        apply(shared.items);
+        return;
+      }
+      try {
+        const res = await fetch("/api/activity", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { items: ActivityItem[] };
+        writeShared(data.items);
+        apply(data.items);
+      } catch {
+        /* offline or server restarting: keep the last state */
+      }
+    },
+    [apply],
+  );
 
   const stop = useCallback(
     async (item: ActivityItem) => {
@@ -100,7 +142,7 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
         const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
         if (res.ok) stopped.current.add(item.id);
         setAnnouncement(res.ok ? `${describe(item)}: ${data.message ?? "stopped."}` : `Could not stop ${describe(item)}: ${data.error ?? res.status}`);
-        await poll();
+        await poll(true);
         scheduleRefresh();
       } finally {
         setStopping(null);
@@ -115,22 +157,35 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
     let timer: ReturnType<typeof setTimeout>;
     const loop = async () => {
       if (!document.hidden) await poll();
-      timer = setTimeout(loop, previous.current.size > 0 ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+      timer = setTimeout(loop, pollInterval([...previous.current.values()]));
     };
-    timer = setTimeout(loop, active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    timer = setTimeout(loop, pollInterval(initial));
     const onVisible = () => !document.hidden && void poll();
-    // A user action (e.g. "Re-run discovery") queues work: check right away after navigation/submit.
+    // Another tab fetched a fresh snapshot.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SHARED_KEY || !e.newValue) return;
+      try {
+        apply((JSON.parse(e.newValue) as Shared).items);
+      } catch {
+        /* ignore malformed values */
+      }
+    };
+    // A user action (e.g. "Re-run discovery") queues work: check right away after the submit.
+    const onSubmit = () => setTimeout(() => void poll(true), 1500);
     window.addEventListener("focus", onVisible);
+    window.addEventListener("storage", onStorage);
     document.addEventListener("visibilitychange", onVisible);
-    const onSubmit = () => setTimeout(() => void poll(), 1500);
     document.addEventListener("submit", onSubmit, true);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("focus", onVisible);
+      window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onVisible);
       document.removeEventListener("submit", onSubmit, true);
     };
-  }, [poll]);
+    // initial is only the first snapshot; later ones come from polling
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poll, apply]);
 
   useEffect(() => {
     if (!active) return;
