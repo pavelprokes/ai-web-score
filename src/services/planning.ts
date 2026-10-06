@@ -88,12 +88,29 @@ async function observedCostByConfiguration(): Promise<Map<string, { avg: number;
   return new Map(rows.map((r) => [r.id, { avg: Number(r.avg), n: Number(r.n) }]));
 }
 
+/** A RUNNING run older than this is treated as stuck and no longer blocks new runs. */
+const IN_FLIGHT_MAX_MS = 24 * 3600_000;
+
 export async function planMeasurements(domainId: string, trigger: "CRON" | "MANUAL" | "SYSTEM") {
   const db = getDb();
   const now = new Date();
   const [domain] = await db.select().from(domains).where(eq(domains.id, domainId));
   if (!domain) throw new Error("Domain not found");
   if (domain.status === "PAUSED" && trigger !== "MANUAL") return null;
+
+  // One measurement run per domain at a time: a run waiting for queued provider answers must finish
+  // first, otherwise a cron tick or a second click would measure the same cells twice.
+  const [inFlight] = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(
+      and(eq(runs.domainId, domainId), eq(runs.kind, "MEASUREMENT"), eq(runs.status, "RUNNING"), gte(runs.startedAt, new Date(now.getTime() - IN_FLIGHT_MAX_MS))),
+    )
+    .limit(1);
+  if (inFlight) {
+    if (trigger !== "MANUAL") await db.update(domains).set({ nextPlanAt: new Date(now.getTime() + 30 * 60_000) }).where(eq(domains.id, domainId));
+    return null;
+  }
 
   const active = await db
     .select({ p: prompts, v: promptVersions })

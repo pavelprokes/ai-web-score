@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
+import { busyKindsByDomain, busyReason } from "@/services/action-guards";
+import type { ActivityKind } from "@/services/activity";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
@@ -33,11 +35,16 @@ export default async function DomainPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ done?: string; added?: string }>;
+  searchParams: Promise<{ done?: string; added?: string; error?: string }>;
 }) {
   const { id } = await params;
-  const { done, added } = await searchParams;
-  const [detail, activePrompts, history] = await Promise.all([domainDetail(id), listPrompts(id, "ACTIVE"), scoreHistory(id, 180)]);
+  const { done, added, error } = await searchParams;
+  const [detail, activePrompts, history, busyMap] = await Promise.all([
+    domainDetail(id),
+    listPrompts(id, "ACTIVE"),
+    scoreHistory(id, 180),
+    busyKindsByDomain(),
+  ]);
   if (!detail) notFound();
   const { domain: d } = detail;
   const now = new Date();
@@ -66,10 +73,10 @@ export default async function DomainPage({
             </p>
           )}
         </div>
-        <DomainActions detail={detail} returnTo={returnTo} />
+        <DomainActions detail={detail} returnTo={returnTo} busy={busyMap.get(d.id)} />
       </div>
 
-      <Flash message={done ?? addedMessage} />
+      <Flash message={done ?? addedMessage} error={error} />
 
       <ScoreTiles detail={detail} />
 
@@ -105,16 +112,58 @@ export default async function DomainPage({
   );
 }
 
-function DomainActions({ detail, returnTo }: { detail: Detail; returnTo: string }) {
+function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: string; busy: Set<ActivityKind> | undefined }) {
   const d = detail.domain;
   const discovered = d.status !== "NEW";
+  const spent = (detail.costs.monthUsd?.measurementCost ?? 0) + (detail.costs.monthUsd?.llmCost ?? 0);
+  const left = Math.max(0, detail.costs.monthlyBudgetUsd - spent);
+  const lastRun = detail.runs.find((r) => r.kind === "MEASUREMENT" && (r.estimatedCostUsd ?? 0) > 0);
+  const common = { domainId: d.id, returnTo, pendingLabel: "Queuing…" };
+  const runNow = (
+    <ActionButton
+      {...common}
+      action="run-now"
+      label="Run measurement now"
+      primary
+      busy={busyReason("run-now", busy)}
+      confirm={{
+        title: `Run a measurement for ${d.hostname}?`,
+        confirmLabel: "Run measurement",
+        body: (
+          <>
+            <p>Asks the enabled AI providers every core prompt now, plus the prompts the planner considers most uncertain.</p>
+            <p>
+              Spending stays within this month&apos;s budget: {usd(left)} of {usd(detail.costs.monthlyBudgetUsd)} left.
+              {lastRun ? ` The last run was estimated at ${usd(lastRun.estimatedCostUsd)}.` : ""} Answers from queue-based providers arrive within about
+              45 minutes.
+            </p>
+          </>
+        ),
+      }}
+    />
+  );
+  const discovery = (label: string, primary = false) => (
+    <ActionButton
+      {...common}
+      action="rediscover"
+      label={label}
+      primary={primary}
+      busy={busyReason("rediscover", busy)}
+      confirm={{
+        title: `${label} for ${d.hostname}?`,
+        confirmLabel: label,
+        body: (
+          <p>
+            Crawls the website, rebuilds the domain profile (offer, markets, competitors, topics) and then designs prompts with AI. Takes 1–3 minutes
+            and costs about $0.2–0.7.
+          </p>
+        ),
+      }}
+    />
+  );
   return (
     <div className="btn-row">
-      {d.status === "NEW" ? (
-        <ActionButton domainId={d.id} action="rediscover" label="Start discovery" pendingLabel="Queuing…" primary returnTo={returnTo} />
-      ) : (
-        d.status !== "PAUSED" && <ActionButton domainId={d.id} action="run-now" label="Run measurement now" pendingLabel="Queuing…" primary returnTo={returnTo} />
-      )}
+      {d.status === "NEW" ? discovery("Start discovery", true) : d.status !== "PAUSED" && runNow}
       {d.status === "PAUSED" ? (
         <ActionButton domainId={d.id} action="resume" label="Resume monitoring" returnTo={returnTo} />
       ) : (
@@ -124,10 +173,30 @@ function DomainActions({ detail, returnTo }: { detail: Detail; returnTo: string 
         <details className="menu">
           <summary className="btn">More actions</summary>
           <div className="menu__panel">
-            <ActionButton domainId={d.id} action="rediscover" label="Re-run discovery" pendingLabel="Queuing…" returnTo={returnTo} />
-            <ActionButton domainId={d.id} action="regenerate-prompts" label="Regenerate prompts" pendingLabel="Queuing…" returnTo={returnTo} />
-            <ActionButton domainId={d.id} action="explore-prompts" label="Propose exploration prompts" pendingLabel="Queuing…" returnTo={returnTo} />
-            <ActionButton domainId={d.id} action="optimize-portfolio" label="Optimise portfolio" pendingLabel="Queuing…" returnTo={returnTo} />
+            {discovery("Re-run discovery")}
+            <ActionButton
+              {...common}
+              action="regenerate-prompts"
+              label="Regenerate prompts"
+              busy={busyReason("regenerate-prompts", busy)}
+              confirm={{
+                title: "Regenerate prompts?",
+                confirmLabel: "Regenerate",
+                body: <p>Designs new candidate prompts from the current profile with AI (about $0.1–0.3). They join the candidate pool and the optimiser rotates them into measurement.</p>,
+              }}
+            />
+            <ActionButton
+              {...common}
+              action="explore-prompts"
+              label="Propose exploration prompts"
+              busy={busyReason("explore-prompts", busy)}
+              confirm={{
+                title: "Propose exploration prompts?",
+                confirmLabel: "Propose",
+                body: <p>Asks AI for prompts on emerging or uncovered topics (about $0.05–0.2). They appear as proposals for approval.</p>,
+              }}
+            />
+            <ActionButton {...common} action="optimize-portfolio" label="Optimise portfolio" busy={busyReason("optimize-portfolio", busy)} />
             <ActionButton domainId={d.id} action="recalculate-scores" label="Recalculate scores" pendingLabel="Recalculating…" returnTo={returnTo} />
             {detail.umamiUrl && (
               <a className="btn" href={detail.umamiUrl} target="_blank" rel="noreferrer">
