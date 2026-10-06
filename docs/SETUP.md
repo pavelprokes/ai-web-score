@@ -47,6 +47,11 @@ store its id: `pnpm cli`/API `PATCH /api/domains/:id {"umamiWebsiteId": "…"}`.
 
 ## 5. Step by step
 
+The project pins pnpm 11 (`packageManager` in package.json; `corepack enable` or any pnpm ≥ 10 switches to
+it automatically). pnpm 11 refuses packages published less than a day ago (`minimumReleaseAge`), so a
+freshly released dependency can block `pnpm install` for up to 24 hours — pin the previous version rather
+than relaxing the policy. Packages allowed to run install scripts are listed in `pnpm-workspace.yaml`.
+
 ```bash
 docker compose up -d db              # local Postgres (also creates the test database)
 cp .env.example .env.local           # fill in the variables above
