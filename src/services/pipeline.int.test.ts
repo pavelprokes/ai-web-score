@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
- * Runs only when TEST_DATABASE_URL is set (e.g. postgres://app:app@localhost/ai_web_score_test).
+ * Runs only when TEST_DATABASE_URL is set (e.g. postgres://app:app@localhost:5433/ai_web_score_test).
  */
 const url = process.env.TEST_DATABASE_URL;
 
