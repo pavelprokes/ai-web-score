@@ -39,7 +39,8 @@ pnpm cli action <domainId> run-now
    - `DATABASE_URL` — **transaction pooler** (port 6543). The app sets `prepare: false`, which the
      transaction pooler requires.
    - `MIGRATION_DATABASE_URL` — session pooler (port 5432) or direct connection; used by `pnpm db:migrate`.
-3. Run migrations from your machine or CI: `MIGRATION_DATABASE_URL=… pnpm db:migrate`.
+3. Migrations run **automatically on every Vercel deploy** (see below). From your machine:
+   `MIGRATION_DATABASE_URL=… pnpm db:migrate`.
 4. Row Level Security is enabled on every table (no policies). Supabase's Data API (anon/authenticated
    keys) therefore cannot read anything; the app connects as the table owner and is unaffected.
    Do not add the Supabase client/anon key to this app.
@@ -51,6 +52,17 @@ pnpm cli action <domainId> run-now
 
 - Environment variables: everything from `.env.example` (`DATABASE_URL`, `ADMIN_API_TOKEN`, `CRON_SECRET`,
   `AUTH_*`, `ADMIN_EMAILS`, provider keys, `UMAMI_*`). Use separate values for Preview and Production.
+- **Database migrations run on deploy.** `vercel.json` sets the build command to `pnpm vercel-build`
+  (`pnpm db:deploy && next build`): pending Drizzle migrations are applied to the environment's own
+  database before the app is built, so Preview builds migrate the preview project and Production builds
+  the production project. Set `MIGRATION_DATABASE_URL` (session pooler 5432 or direct connection) per
+  environment. A failed migration fails the build and the current deployment keeps serving; concurrent
+  builds are serialised with a Postgres advisory lock. A Preview without a database URL skips migrations;
+  Production without one fails the build.
+  - Keep migrations backward compatible (add columns/tables first, remove in a later deploy): the build
+    migrates while the previous deployment is still serving traffic.
+  - Preview branches share the preview database, so two open branches with conflicting migrations can
+    collide there — merge or rebase one of them first.
 - `vercel.json` schedules `/api/cron` every 15 minutes. Vercel sends `Authorization: Bearer $CRON_SECRET`.
   Each tick plans due domains, polls async providers (DataForSEO queue, Claude batches) and drains the job
   queue for up to ~280 s (`maxDuration = 300`).
