@@ -1,0 +1,6 @@
+# Packages allowed to run install scripts.
+# pnpm 11 reads allowBuilds; onlyBuiltDependencies keeps pnpm 10 (e.g. Vercel without corepack) working.
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild
