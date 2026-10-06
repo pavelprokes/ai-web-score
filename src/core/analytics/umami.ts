@@ -7,7 +7,10 @@
  * creates a session/visitor in Umami and would inflate real visitor counts.
  */
 
+import { deadlineSignal } from "@/lib/deadline";
+
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 ai-web-score";
+const UMAMI_TIMEOUT_MS = 15_000;
 
 export const MEASUREMENT_EVENT = "ai-visibility-measurement";
 
@@ -66,6 +69,7 @@ export async function sendMeasurementEvent(args: {
   if (!base) throw new Error("UMAMI_URL is not set");
   const res = await fetch(`${base.replace(/\/$/, "")}/api/send`, {
     method: "POST",
+    signal: deadlineSignal(UMAMI_TIMEOUT_MS),
     headers: { "Content-Type": "application/json", "User-Agent": UA },
     body: JSON.stringify({
       type: "event",
@@ -108,7 +112,7 @@ export async function fetchAiReferrals(trafficWebsiteId: string, days = 90): Pro
   const startAt = endAt - days * 86_400_000;
   const res = await fetch(
     `${base.replace(/\/$/, "")}/api/websites/${trafficWebsiteId}/metrics?type=referrer&startAt=${startAt}&endAt=${endAt}&limit=500`,
-    { headers: { Authorization: `Bearer ${token}`, "x-umami-api-key": token, Accept: "application/json" } },
+    { headers: { Authorization: `Bearer ${token}`, "x-umami-api-key": token, Accept: "application/json" }, signal: deadlineSignal(UMAMI_TIMEOUT_MS) },
   );
   if (!res.ok) return {};
   const rows = (await res.json()) as Array<{ x: string; y: number }>;

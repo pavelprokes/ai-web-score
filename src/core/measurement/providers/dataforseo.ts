@@ -1,5 +1,6 @@
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
 import { EMPTY_USAGE } from "../types";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import {
   type CollectOutcome,
   httpJson,
@@ -25,6 +26,9 @@ import {
 
 const BASE = process.env.DATAFORSEO_BASE_URL ?? "https://api.dataforseo.com";
 const STANDARD_PRIORITY = 1;
+/** Parallel task_get calls when collecting results (DataForSEO allows up to 2000 calls per minute). */
+const COLLECT_CONCURRENCY = 10;
+const COLLECT_TIMEOUT_MS = 20_000;
 
 /** DataForSEO location codes for common markets (Google geo target ids). */
 export const LOCATION_CODES: Record<string, number> = {
@@ -62,12 +66,12 @@ interface DfsEnvelope<R> {
   tasks: DfsTask<R>[];
 }
 
-async function dfs<R>(path: string, body?: unknown): Promise<DfsEnvelope<R>> {
+async function dfs<R>(path: string, body?: unknown, timeoutMs = 60_000): Promise<DfsEnvelope<R>> {
   const env = await httpJson<DfsEnvelope<R>>(`${BASE}${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { Authorization: auth(), "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    timeoutMs: 60_000,
+    timeoutMs,
   });
   if (env.status_code !== 20000) {
     throw new ProviderError(`DataForSEO ${env.status_code}: ${env.status_message}`, env.status_code >= 50000);
@@ -266,37 +270,35 @@ function createAdapter(args: {
       return out;
     },
     async collect(pending: PendingTask[]): Promise<CollectOutcome[]> {
-      const outcomes: CollectOutcome[] = [];
       // task_get is free and keyed by id; fetch pending tasks directly (avoids tasks_ready paging).
-      for (const p of pending) {
+      // A few in parallel: one by one, a full batch would take minutes.
+      return mapWithConcurrency(pending, COLLECT_CONCURRENCY, async (p): Promise<CollectOutcome> => {
         try {
-          const env = await dfs<unknown>(`${path}/task_get/advanced/${p.externalTaskId}`);
+          const env = await dfs<unknown>(`${path}/task_get/advanced/${p.externalTaskId}`, undefined, COLLECT_TIMEOUT_MS);
           const task = env.tasks[0];
-          if (!task) {
-            outcomes.push({ measurementId: p.measurementId, status: "PENDING" });
-          } else if (task.status_code === 20000 && task.result?.[0]) {
-            outcomes.push({
+          if (!task) return { measurementId: p.measurementId, status: "PENDING" };
+          if (task.status_code === 20000 && task.result?.[0]) {
+            return {
               measurementId: p.measurementId,
               status: "SUCCEEDED",
               result: { answer: parse(task.result[0], p.configuration.model), raw: task, reportedCostUsd: task.cost },
-            });
-          } else if (task.status_code === 40601 || task.status_code === 40602 || task.status_code === 20100) {
-            outcomes.push({ measurementId: p.measurementId, status: "PENDING" });
-          } else {
-            outcomes.push({
-              measurementId: p.measurementId,
-              status: "FAILED",
-              error: `${task.status_code} ${task.status_message}`,
-              retryable: task.status_code >= 50000,
-            });
+            };
           }
+          if (task.status_code === 40601 || task.status_code === 40602 || task.status_code === 20100) {
+            return { measurementId: p.measurementId, status: "PENDING" };
+          }
+          return {
+            measurementId: p.measurementId,
+            status: "FAILED",
+            error: `${task.status_code} ${task.status_message}`,
+            retryable: task.status_code >= 50000,
+          };
         } catch (e) {
           const retryable = e instanceof ProviderError ? e.retryable : true;
-          if (retryable) outcomes.push({ measurementId: p.measurementId, status: "PENDING" });
-          else outcomes.push({ measurementId: p.measurementId, status: "FAILED", error: String(e), retryable });
+          if (retryable) return { measurementId: p.measurementId, status: "PENDING" };
+          return { measurementId: p.measurementId, status: "FAILED", error: String(e), retryable };
         }
-      }
-      return outcomes;
+      });
     },
   };
 }

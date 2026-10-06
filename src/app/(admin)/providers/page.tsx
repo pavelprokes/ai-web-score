@@ -41,6 +41,8 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   const month = rows.reduce((a, p) => a + (p.cost.month?.cost ?? 0), 0);
   const llm = data.internalLlmCostThisMonth.reduce((a, x) => a + x.cost, 0);
   const enabled = rows.filter((p) => p.enabled).length;
+  const withoutCredentials = rows.filter((p) => p.enabled && p.missingEnv.length > 0).length;
+  const labels = new Map(rows.map((p) => [p.id, p.label]));
 
   return (
     <>
@@ -54,7 +56,11 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       <Flash message={done} error={error} />
 
       <dl className="tiles" aria-label="Summary">
-        <StatTile label="Enabled providers" value={enabled} detail={`of ${rows.length} registered in code`} />
+        <StatTile
+          label="Enabled providers"
+          value={enabled}
+          detail={`of ${rows.length} registered in code${withoutCredentials ? ` · ${withoutCredentials} missing credentials` : ""}`}
+        />
         <StatTile label="Measurements this month" value={usd(month)} detail="All domains" />
         <StatTile label={<>Analysis this month <MetricInfo id="analysis-cost" /></>} value={usd(llm)} detail="Discovery, prompt design, answer analysis" />
       </dl>
@@ -90,7 +96,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
             </thead>
             <tbody>
               {rows.map((p) => (
-                <ProviderTableRow key={p.id} p={p} />
+                <ProviderTableRow key={p.id} p={p} labels={labels} />
               ))}
             </tbody>
           </table>
@@ -134,8 +140,10 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   );
 }
 
-function ProviderTableRow({ p }: { p: ProviderRow }) {
+function ProviderTableRow({ p, labels }: { p: ProviderRow; labels: Map<string, string> }) {
   const value = p.value ? VALUE[p.value.recommendation] : null;
+  // Value compares the configurations used for monitoring; reference/candidate answers only calibrate.
+  const calibrationOnly = !p.value && p.enabled && !p.configurations.some((c) => c.enabled && c.role === "STANDARD");
   return (
     <tr>
       <th scope="row">
@@ -172,8 +180,19 @@ function ProviderTableRow({ p }: { p: ProviderRow }) {
       <td className="num">{num(p.cost.total?.succeeded ?? 0)}</td>
       <td className="num">{p.cost.total?.costPerDataPoint == null ? <span className="muted">–</span> : usd(p.cost.total.costPerDataPoint)}</td>
       <td className="value-cell">
-        {value ? <Badge tone={value.tone}>{value.label}</Badge> : <span className="muted">–</span>}
+        {value ? (
+          <Badge tone={value.tone}>{value.label}</Badge>
+        ) : calibrationOnly ? (
+          <span className="cell-sub">Calibration only — no standard configuration</span>
+        ) : (
+          <span className="muted">–</span>
+        )}
         {p.value?.rationale && <span className="cell-sub">{p.value.rationale}</span>}
+        {p.value?.mostSimilarProvider && p.value.similarity != null && (
+          <span className="cell-sub">
+            Most similar: {labels.get(p.value.mostSimilarProvider) ?? p.value.mostSimilarProvider} (r = {p.value.similarity.toFixed(2)})
+          </span>
+        )}
       </td>
       <td>
         <ProviderButton providerId={p.id} action={p.enabled ? "disable" : "enable"} label={p.enabled ? "Disable" : "Enable"} context={p.label} />
@@ -196,9 +215,11 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
             <tr>
               <th scope="col">Configuration</th>
               <th scope="col">Provider</th>
-              <th scope="col">Role <MetricInfo id="active-prompts" /></th>
+              <th scope="col">Role</th>
               <th scope="col">Status</th>
-              <th scope="col">Latest calibration</th>
+              <th scope="col">
+                Latest calibration <MetricInfo id="calibration" />
+              </th>
               <th scope="col">
                 <span className="sr-only">Actions</span>
               </th>
@@ -209,7 +230,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
               p.configurations.map((c) => {
                 const latest = c.calibration.find((x) => x.candidateConfigurationId === c.id);
                 const decision = latest ? DECISION[latest.decision] : null;
-                const report = latest?.report as { pairs?: number; relativeAgreement?: { estimate: number | null }; reasons?: string[] } | undefined;
+                const report = latest?.report as CalibrationReport | undefined;
                 return (
                   <tr key={c.id}>
                     <th scope="row">
@@ -224,10 +245,10 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
                         <>
                           <Badge tone={decision.tone}>{decision.label}</Badge>
                           <span className="cell-sub">
-                            {num(report?.pairs ?? 0)} pairs
-                            {report?.relativeAgreement?.estimate != null && ` · agreement ${pct(report.relativeAgreement.estimate)} of retest`}
+                            {num(report?.pairs ?? 0)} pairs over {num(report?.prompts ?? 0)} prompts
                           </span>
-                          {report?.reasons?.[0] && <span className="cell-sub">{report.reasons[0]}</span>}
+                          {report && agreementText(report) && <span className="cell-sub">{agreementText(report)}</span>}
+                          {report?.reasons?.[0] && <span className="cell-sub">{readableReason(report.reasons[0])}</span>}
                         </>
                       ) : (
                         <span className="muted">–</span>
@@ -247,6 +268,31 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
       </TableScroll>
     </Section>
   );
+}
+
+interface CalibrationReport {
+  pairs?: number;
+  prompts?: number;
+  agreement?: { composite: number | null };
+  testRetestComposite?: number | null;
+  relativeAgreement?: { estimate: number | null };
+  reasons?: string[];
+}
+
+/** "Agreement 0.66 vs retest 0.71 (93 % of retest)". Above 100 % the candidate is as consistent as a retest. */
+function agreementText(r: CalibrationReport): string | null {
+  const cross = r.agreement?.composite;
+  const retest = r.testRetestComposite;
+  const rel = r.relativeAgreement?.estimate;
+  if (cross == null) return null;
+  const base = `Agreement ${cross.toFixed(2)}${retest != null ? ` vs retest ${retest.toFixed(2)}` : ""}`;
+  if (rel == null) return base;
+  return rel >= 1 ? `${base} — as consistent as a retest` : `${base} (${pct(rel)} of retest)`;
+}
+
+/** The counts are shown on the line above; drop the "(have …)" part of the reason. */
+function readableReason(reason: string): string {
+  return reason.replace(/\s*\(have [^)]*\)/, "");
 }
 
 function ProviderButton({

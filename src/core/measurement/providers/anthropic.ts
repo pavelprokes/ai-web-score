@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { deadlineFetch } from "@/lib/deadline";
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
 import type { CollectOutcome, PendingTask, ProviderAdapter, ProviderConfigurationSeed } from "../provider";
 
@@ -14,7 +15,8 @@ import type { CollectOutcome, PendingTask, ProviderAdapter, ProviderConfiguratio
 
 let client: Anthropic | null = null;
 function anthropic() {
-  client ??= new Anthropic();
+  // A web-search answer takes up to a minute or two; requests also stop at the job's deadline.
+  client ??= new Anthropic({ timeout: 120_000, fetch: deadlineFetch });
   return client;
 }
 

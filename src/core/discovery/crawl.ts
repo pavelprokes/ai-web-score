@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { deadlineSignal } from "@/lib/deadline";
 
 /**
  * DISCOVERY — step 1: deterministic crawl. Collects cheap, factual signals
@@ -48,20 +49,16 @@ async function get(url: string): Promise<{ status: number; text: string; content
 }
 
 async function fetchOnce(url: string, ua: string): Promise<{ status: number; text: string; contentType: string } | null> {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "cs,en;q=0.8" },
       redirect: "follow",
-      signal: controller.signal,
+      signal: deadlineSignal(FETCH_TIMEOUT),
     });
     const text = await res.text();
     return { status: res.status, text: text.slice(0, 2_000_000), contentType: res.headers.get("content-type") ?? "" };
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }
 

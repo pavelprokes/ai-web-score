@@ -397,6 +397,22 @@ export const METRICS: MetricDefinition[] = [
     example: "Uniqueness 89 %, reach 72 % → Keep.",
   },
   {
+    id: "calibration",
+    group: "cost",
+    name: "Calibration",
+    short:
+      "Shadow test of a cheaper configuration: both answer the same prompts, and the candidate passes when it agrees with the reference about as well as the reference agrees with itself.",
+    formula:
+      "Agreement of a pair = average of mention, citation, competitor overlap and recommendation-order agreement.\n" +
+      "Relative agreement = agreement(candidate, reference) / agreement(reference, reference retest).\n" +
+      "Passes when ≥ 60 pairs over ≥ 15 prompts, the lower bound of relative agreement ≥ 85 %, the per-prompt trend matches and the mention-rate bias is ≤ 10 points; " +
+      "fails when the upper bound is < 75 % or nothing is proven after 300 pairs.",
+    description:
+      "AI answers vary even for identical requests, so the bar is the reference's own retest, not 100 %. " +
+      "A candidate that agrees better than a retest (relative agreement above 100 %) is as consistent as the reference itself — that is noise, not an error.",
+    example: "Agreement 0.66 vs retest 0.71 → 93 % of retest; 24 of 60 pairs collected → still testing.",
+  },
+  {
     id: "analysis-cost",
     group: "cost",
     name: "Analysis cost",

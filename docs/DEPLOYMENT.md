@@ -65,9 +65,16 @@ pnpm cli action <domainId> run-now
   300 s limit. Pools therefore close idle connections after `DB_IDLE_TIMEOUT_S` (5 s), recycle every
   connection after 10 min, and keep the invocation awake (`waitUntil`) until idle connections are closed
   — the `attachDatabasePool` pattern from `@vercel/functions`, which doesn't support postgres.js.
-- **Jobs fit the invocation.** The runner only claims a job when its worst-case duration fits the time
-  left (discovery 200 s, prompt design 180 s, others ≤ 90 s), so nothing runs into the function limit;
-  prompt-design batches run in parallel.
+  As a last line of defence, a connection that gets no answer for `DB_STALL_TIMEOUT_S` (20 s; jobs
+  `JOB_DB_STALL_TIMEOUT_S`, 60 s) is closed: the query fails with an error and the next one opens a fresh
+  connection, instead of the page hanging for 300 s (`src/db/socket.ts`, logged as `[db] No response …`).
+  It applies to plain-TCP URLs (no `sslmode`), such as the Supabase pooler URL as copied from the dashboard.
+- **Jobs fit the invocation.** Every job type has a time budget (discovery 200 s, prompt design 180 s,
+  one provider answer 150 s, async submit/collect 120 s, others 60–90 s). The runner only claims a job
+  whose budget fits the time left, and aborts it when the budget is spent: provider HTTP calls, the
+  Anthropic SDK, crawling and Umami all follow the job's deadline (`src/lib/deadline.ts`), so a hanging
+  upstream can't keep the function running into its limit. A timed-out job is retried with backoff.
+  Prompt-design batches and DataForSEO result fetching run in parallel.
 - **Deploys don't lose work.** The job queue lives in Postgres. A deploy (or a timeout) that kills an
   instance mid-job only delays that job: its lease expires (5–15 min) and the next cron tick or click
   claims it again; queued jobs, DataForSEO tasks and Claude batches are untouched. Each cron tick also
