@@ -8,7 +8,7 @@ and optimises toward **maximum useful information for minimum justifiable measur
 - **Umami is the analytics layer.** This app does discovery, prompt portfolios, scheduling, measurement,
   raw evidence, cost accounting, scoring and sends normalised events to Umami.
 
-Start here: [docs/METHODOLOGY.md](docs/METHODOLOGY.md) · [docs/COSTS.md](docs/COSTS.md) · [docs/RESEARCH.md](docs/RESEARCH.md) ·
+Start here: [docs/SETUP.md](docs/SETUP.md) · [docs/METHODOLOGY.md](docs/METHODOLOGY.md) · [docs/COSTS.md](docs/COSTS.md) · [docs/RESEARCH.md](docs/RESEARCH.md) ·
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Key design decisions (evidence in docs/RESEARCH.md)

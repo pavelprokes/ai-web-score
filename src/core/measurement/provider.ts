@@ -94,6 +94,7 @@ export interface ProviderAdapter {
    * deliver later (queue/batch APIs are 2–3× cheaper and fit serverless cron well).
    */
   mode: "SYNC" | "ASYNC";
+  /** Synchronous single request. Required for SYNC providers; ASYNC providers may offer it for smoke tests. */
   execute?(req: MeasurementRequest, config: ProviderConfigurationSeed): Promise<ProviderResult>;
   submit?(
     reqs: MeasurementRequest[],

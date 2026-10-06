@@ -93,6 +93,8 @@ export async function generateStructured<T extends z.ZodType>(args: {
   maxTokens?: number;
   /** Classification-style call: disable thinking where the model allows it. */
   classification?: boolean;
+  /** Skip cost accounting in the database (smoke tests without a DB). */
+  skipUsage?: boolean;
 }): Promise<z.infer<T>> {
   const model = args.model ?? INTERNAL_MODEL;
   if (override) {
@@ -116,7 +118,7 @@ export async function generateStructured<T extends z.ZodType>(args: {
     messages: [{ role: "user", content: args.user }],
   });
   const message = await stream.finalMessage();
-  await recordLlmUsage({
+  if (!args.skipUsage) await recordLlmUsage({
     domainId: args.domainId,
     purpose: args.purpose,
     model,

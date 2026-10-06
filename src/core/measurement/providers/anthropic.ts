@@ -163,6 +163,18 @@ export const claudeApi: ProviderAdapter = {
       verifiedAt: "2026-10-06T00:00:00Z",
     },
   ],
+  /** Synchronous call (full token price): smoke tests and urgent single checks. Scheduled runs use Batches. */
+  async execute(req, config) {
+    const params = buildClaudeParams(req, config);
+    const messages: Anthropic.MessageParam[] = [...params.messages];
+    let message = await anthropic().messages.create({ ...params, messages });
+    // Long server-tool turns may pause; resume by sending the partial turn back (bounded).
+    for (let i = 0; i < 3 && message.stop_reason === "pause_turn"; i++) {
+      messages.push({ role: "assistant", content: message.content });
+      message = await anthropic().messages.create({ ...params, messages });
+    }
+    return { answer: parseClaudeMessage(message as never), raw: message };
+  },
   async submit(reqs, config) {
     const batch = await anthropic().messages.batches.create({
       requests: reqs.map((r) => ({ custom_id: r.measurementId, params: buildClaudeParams(r, config) })),

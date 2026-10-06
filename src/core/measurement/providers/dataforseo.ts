@@ -224,6 +224,23 @@ function createAdapter(args: {
         notes: "Standard queue $0.0012; priority $0.0024; live $0.004. Actual task cost is taken from the API response.",
       },
     ],
+    /** Live endpoint ($0.004, 6–90 s): smoke tests and urgent single checks. Scheduled runs use the queue. */
+    async execute(req, config) {
+      const task = {
+        keyword: keyword(req.promptText, MAX_KEYWORD[args.dfsSurface]),
+        ...locationFields(req),
+        language_code: req.language,
+        tag: req.measurementId,
+        ...(args.dfsSurface === "chat_gpt" && config.params.forceWebSearch ? { force_web_search: true } : {}),
+        ...(args.dfsSurface === "ai_mode" ? { device: config.params.device ?? "desktop" } : {}),
+      };
+      const env = await dfs<unknown>(`${path}/live/advanced`, [task]);
+      const t = env.tasks[0];
+      if (!t || t.status_code !== 20000 || !t.result?.[0]) {
+        throw new ProviderError(`DataForSEO ${t?.status_code} ${t?.status_message}`, (t?.status_code ?? 0) >= 50000);
+      }
+      return { answer: parse(t.result[0], config.model), raw: t, reportedCostUsd: t.cost };
+    },
     async submit(reqs, config) {
       const priority = Number(config.params.priority ?? STANDARD_PRIORITY);
       const tasks = reqs.map((r) => ({

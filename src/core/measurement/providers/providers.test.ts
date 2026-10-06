@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseAiMode, parseLlmScraper } from "./dataforseo";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { chatgptUi, parseAiMode, parseLlmScraper } from "./dataforseo";
 import { buildClaudeParams, parseClaudeMessage } from "./anthropic";
 import { buildOpenAiBody, parseOpenAiResponse } from "./openai";
 import { parsePerplexityResponse } from "./perplexity";
@@ -146,5 +146,40 @@ describe("registry & pricing", () => {
     expect(c.totalCostUsd).toBeCloseTo(14.5);
     const reported = computeCost({ answer: { usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0 }, search: { billableUnits: 0, queries: [] } }, price: null, reportedCostUsd: 0.0012 });
     expect(reported.totalCostUsd).toBeCloseTo(0.0012);
+  });
+});
+
+describe("DataForSEO live path (smoke tests)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts one task to live/advanced with CZ location and parses the result", async () => {
+    process.env.DATAFORSEO_LOGIN = "l";
+    process.env.DATAFORSEO_PASSWORD = "p";
+    let captured: { url: string; body: Array<Record<string, unknown>> } | null = null;
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      captured = { url, body: JSON.parse(String(init.body)) };
+      return new Response(
+        JSON.stringify({
+          status_code: 20000,
+          status_message: "Ok.",
+          tasks: [{ id: "t1", status_code: 20000, status_message: "Ok.", cost: 0.004, result: [{ model: "gpt-x", markdown: "Answer text long enough", sources: [{ url: "https://a.cz/" }], fan_out_queries: ["q"] }] }],
+        }),
+        { status: 200 },
+      );
+    });
+    const r = await chatgptUi.execute!(req, chatgptUi.configurations[0]!);
+    expect(captured!.url).toMatch(/chat_gpt\/llm_scraper\/live\/advanced$/);
+    expect(captured!.body).toHaveLength(1);
+    expect(captured!.body[0]).toMatchObject({ location_code: 2203, language_code: "cs" });
+    expect(captured!.body[0]).not.toHaveProperty("force_web_search");
+    expect(r.reportedCostUsd).toBe(0.004);
+    expect(r.answer.citations).toHaveLength(1);
+  });
+
+  it("surfaces task-level errors (e.g. unsupported location) instead of empty answers", async () => {
+    vi.stubGlobal("fetch", async () =>
+      new Response(JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ id: "t", status_code: 40501, status_message: "Invalid Field: 'location_code'.", result: null }] }), { status: 200 }),
+    );
+    await expect(chatgptUi.execute!(req, chatgptUi.configurations[0]!)).rejects.toThrow(/40501/);
   });
 });

@@ -10,12 +10,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts",
-    "cli": "tsx scripts/cli.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env.local src/db/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=.env.local src/db/seed.ts",
+    "cli": "tsx --env-file-if-exists=.env.local scripts/cli.ts",
     "test:int": "vitest run src/services/pipeline.int.test.ts src/e2e",
     "db:up": "docker compose up -d db",
-    "test:e2e": "vitest run src/e2e"
+    "test:e2e": "vitest run src/e2e",
+    "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke-providers.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
