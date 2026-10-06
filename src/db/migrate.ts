@@ -35,8 +35,14 @@ const host = (() => {
     return "database";
   }
 })();
-if (!process.env.MIGRATION_DATABASE_URL && host.endsWith(":6543")) {
-  console.warn("[migrate] DATABASE_URL points at a transaction pooler (6543); set MIGRATION_DATABASE_URL to the session pooler or a direct connection.");
+if (host.endsWith(":6543")) {
+  // Transaction poolers hand each statement to any backend: a session advisory lock can be taken on one
+  // connection and released on another (the next build would then wait forever), and DDL is unsafe there.
+  console.error(
+    `[migrate] ${process.env.MIGRATION_DATABASE_URL ? "MIGRATION_DATABASE_URL" : "DATABASE_URL"} uses a transaction pooler (port 6543). ` +
+      "Set MIGRATION_DATABASE_URL to the Supabase session pooler — the same URL with port 5432 (Connect → Session pooler).",
+  );
+  process.exit(1);
 }
 
 const client = postgres(url, { max: 1, prepare: false, connect_timeout: 30, onnotice: () => {} });
@@ -48,9 +54,21 @@ async function appliedCount(): Promise<number> {
   return Number(count?.n ?? 0);
 }
 
+/** Waits for a concurrent build's migrations instead of blocking forever on a stuck lock. */
+async function acquireLock(timeoutMs = 5 * 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [row] = await client`select pg_try_advisory_lock(${MIGRATION_LOCK_ID}) as locked`;
+    if (row?.locked) return;
+    if (Date.now() > deadline) throw new Error("timed out waiting for another migration run (advisory lock held)");
+    console.log("[migrate] another deployment is migrating — waiting…");
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+
 try {
   console.log(`[migrate] ${environment}: applying migrations on ${host}`);
-  await client`select pg_advisory_lock(${MIGRATION_LOCK_ID})`;
+  await acquireLock();
   try {
     const before = await appliedCount();
     await migrate(drizzle(client), { migrationsFolder: "./drizzle" });

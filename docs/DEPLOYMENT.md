@@ -38,7 +38,9 @@ pnpm cli action <domainId> run-now
 2. Connection strings (Project → Connect):
    - `DATABASE_URL` — **transaction pooler** (port 6543). The app sets `prepare: false`, which the
      transaction pooler requires.
-   - `MIGRATION_DATABASE_URL` — session pooler (port 5432) or direct connection; used by `pnpm db:migrate`.
+   - `MIGRATION_DATABASE_URL` — **session pooler** (same host and user, port **5432**); used by
+     `pnpm db:migrate` and on every deploy. The migration script refuses port 6543. Avoid the direct
+     connection (`db.<ref>.supabase.co`): on the free tier it is IPv6-only and Vercel builds can't reach it.
 3. Migrations run **automatically on every Vercel deploy** (see below). From your machine:
    `MIGRATION_DATABASE_URL=… pnpm db:migrate`.
 4. Row Level Security is enabled on every table (no policies). Supabase's Data API (anon/authenticated
