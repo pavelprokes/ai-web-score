@@ -1,3 +1,4 @@
+import { deadlineSignal } from "@/lib/deadline";
 import type { MeasurementRequest, NormalizedAnswer } from "./types";
 
 /**
@@ -114,15 +115,14 @@ export class ProviderError extends Error {
   }
 }
 
-/** fetch wrapper with timeout and normalised errors. */
+/** fetch wrapper with timeout (capped by the current job's deadline) and normalised errors. */
 export async function httpJson<T = unknown>(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 120_000);
+  const { timeoutMs = 120_000, ...rest } = init;
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...rest, signal: deadlineSignal(timeoutMs) });
     const text = await res.text();
     if (!res.ok) {
       const retryable = res.status === 429 || res.status >= 500;
@@ -132,8 +132,6 @@ export async function httpJson<T = unknown>(
   } catch (e) {
     if (e instanceof ProviderError) throw e;
     throw new ProviderError(e instanceof Error ? e.message : String(e), true);
-  } finally {
-    clearTimeout(timer);
   }
 }
 

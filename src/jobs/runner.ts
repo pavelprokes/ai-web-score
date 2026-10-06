@@ -37,27 +37,36 @@ const HANDLERS: Record<JobType, Handler> = {
 const LEASE_SECONDS: Partial<Record<JobType, number>> = { "discovery.run": 600, "portfolio.generate": 900 };
 
 /**
- * Worst-case run time per job type. A job is only claimed when it fits the time left in the current
- * invocation, so work never runs past the function's limit (Vercel kills it there; the job would then
- * wait for its lease to expire and repeat its AI calls). Unlisted types are short (≤ 60 s).
+ * Time budget per job type. A job is only claimed when its budget fits the time left in the current
+ * invocation, and it is aborted when the budget is spent (`runAsJob`), so work never runs past the
+ * function's limit (Vercel kills it there; the job would then wait for its lease to expire and repeat
+ * its AI calls). Provider and LLM timeouts must fit inside: an external call is cut off at the budget.
+ * Unlisted types get 60 s.
  */
 const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
-  "discovery.run": 200,
-  "portfolio.generate": 180,
+  "discovery.run": 200, // crawl + one long LLM call
+  "portfolio.generate": 180, // parallel LLM calls
+  "measurement.execute": 150, // one provider answer; web-search APIs can take two minutes
+  "measurement.submit": 120, // DataForSEO task_post in chunks of 100 / one Claude batch
+  "measurement.collect": 120, // up to 200 results, fetched in parallel
   "analysis.submit": 90,
-  "measurement.execute": 90,
+  "analysis.collect": 120,
 };
 const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
 const DEFAULT_MAX_JOB_SECONDS = 60;
 
+function maxJobSeconds(type: JobType): number {
+  return MAX_JOB_SECONDS[type] ?? DEFAULT_MAX_JOB_SECONDS;
+}
+
 /** Job types that can still finish before the deadline. */
 export function typesThatFit(remainingMs: number, only?: JobType[]): JobType[] {
-  return (only ?? ALL_JOB_TYPES).filter((t) => (MAX_JOB_SECONDS[t] ?? DEFAULT_MAX_JOB_SECONDS) * 1000 <= remainingMs);
+  return (only ?? ALL_JOB_TYPES).filter((t) => maxJobSeconds(t) * 1000 <= remainingMs);
 }
 
 async function runJob(job: Job) {
   try {
-    await runAsJob(job.id, () => HANDLERS[job.type](job.payload));
+    await runAsJob(job.id, () => HANDLERS[job.type](job.payload), maxJobSeconds(job.type) * 1000);
     await complete(job.id);
   } catch (e) {
     if (e instanceof JobCancelledError) return; // already CANCELLED by the admin

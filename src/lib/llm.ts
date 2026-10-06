@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { llmUsage } from "@/db/schema";
+import { deadlineFetch } from "@/lib/deadline";
 
 /**
  * Internal LLM calls (discovery, prompt generation, answer analysis) — separate
@@ -35,7 +36,8 @@ export function noThinking(model: string): { thinking?: { type: "between_tools" 
 
 let client: Anthropic | null = null;
 export function anthropicClient() {
-  client ??= new Anthropic();
+  // Requests stop at the job's deadline (discovery, prompt design and analysis all run as jobs).
+  client ??= new Anthropic({ timeout: 170_000, fetch: deadlineFetch });
   return client;
 }
 /** Test hook: replace the Anthropic client (null restores the real one). */

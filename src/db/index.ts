@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { waitUntil } from "@/lib/vercel";
+import { stallingSocketFactory, usesTls } from "./socket";
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -27,6 +28,8 @@ function pool(kind: "web" | "jobs"): Pool {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
     const max = kind === "web" ? Number(process.env.DB_POOL_MAX ?? 5) : Number(process.env.JOB_DB_POOL_MAX ?? 4);
+    // A query whose connection went silent fails after this instead of hanging the request (see ./socket).
+    const stallMs = 1000 * Number(kind === "web" ? (process.env.DB_STALL_TIMEOUT_S ?? 20) : (process.env.JOB_DB_STALL_TIMEOUT_S ?? 60));
     const sql = postgres(url, {
       max,
       // prepare:false keeps us compatible with transaction-mode poolers (Neon, Supabase, PgBouncer).
@@ -34,10 +37,13 @@ function pool(kind: "web" | "jobs"): Pool {
       onnotice: () => {},
       // Serverless instances are suspended between requests (Vercel Fluid compute). A connection left open
       // across a suspension is dead on resume and the next query hangs until the function times out, so:
-      // close idle connections quickly, recycle old ones, fail fast when connecting…
+      // close idle connections quickly, recycle old ones, fail fast when connecting or when a query gets
+      // no answer…
       idle_timeout: IDLE_TIMEOUT_S,
       max_lifetime: 10 * 60,
       connect_timeout: 10,
+      // (`socket` is documented — "Custom socket" in the postgres.js README — but missing from its types.)
+      ...(usesTls(url) ? {} : ({ socket: stallingSocketFactory(stallMs) } as object)),
       // …and keep the instance awake until the pool has closed them (like attachDatabasePool in @vercel/functions).
       ...(process.env.VERCEL ? { debug: keepAwakeUntilIdle } : {}),
     });

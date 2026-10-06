@@ -157,7 +157,7 @@ export function evaluateCalibration(
 
   let decision: CalibrationDecision = "KEEP_TESTING";
   if (pairs.length < t.minPairs || byPrompt.size < t.minPrompts) {
-    reasons.push(`Need ≥${t.minPairs} pairs over ≥${t.minPrompts} prompts (have ${pairs.length}/${byPrompt.size}).`);
+    reasons.push(`Need ≥${t.minPairs} pairs over ≥${t.minPrompts} prompts (have ${pairs.length} pairs over ${byPrompt.size} prompts).`);
   } else {
     const relLow = Number.isNaN(rel.low) ? null : rel.low;
     const relHigh = Number.isNaN(rel.high) ? null : rel.high;

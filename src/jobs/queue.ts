@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { runWithDeadline } from "@/lib/deadline";
 
 /**
  * Minimal durable job queue on Postgres — no Redis, no long-running worker.
@@ -40,10 +41,31 @@ export class JobCancelledError extends Error {
   }
 }
 
+/** The job ran past its time budget (see `runAsJob`). Retryable: a slow provider may be quick next time. */
+export class JobTimeoutError extends Error {
+  constructor(seconds: number) {
+    super(`Job did not finish within ${seconds} s`);
+  }
+}
+
 const currentJob = new AsyncLocalStorage<{ id: string }>();
 
-export function runAsJob<T>(id: string, fn: () => Promise<T>): Promise<T> {
-  return currentJob.run({ id }, fn);
+/**
+ * Runs a job handler with a hard time budget. External calls inside it follow the deadline
+ * (lib/deadline) and are aborted when the budget is spent; the returned promise rejects with
+ * JobTimeoutError at that moment even if some step ignores the signal, so the runner never waits past
+ * the budget and the invocation never hits the platform's function limit, which would kill everything
+ * running in it.
+ */
+export function runAsJob<T>(id: string, fn: () => Promise<T>, timeoutMs = Infinity): Promise<T> {
+  const controller = new AbortController();
+  const timeout = new JobTimeoutError(Math.round(timeoutMs / 1000));
+  const timer = Number.isFinite(timeoutMs) ? setTimeout(() => controller.abort(timeout), timeoutMs) : null;
+  const expired = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(timeout), { once: true }));
+  expired.catch(() => {}); // only observed through the race below
+  return Promise.race([currentJob.run({ id }, () => runWithDeadline(controller.signal, fn)), expired]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /** Call between expensive steps of a job handler; a no-op outside the job runner. */
