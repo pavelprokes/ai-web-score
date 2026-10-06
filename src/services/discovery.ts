@@ -26,6 +26,8 @@ export async function runDiscovery(domainId: string, trigger: string) {
 
     const llm = await generateStructured({
       schema: LlmProfile,
+      // The profile schema is too large for the structured-outputs grammar compiler.
+      mode: "prompt",
       system: DISCOVERY_SYSTEM,
       user: discoveryUserPrompt(digest, domain.brandName),
       purpose: "discovery",
