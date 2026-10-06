@@ -21,6 +21,15 @@ interface SocketOptions {
   port: number[];
 }
 
+/** Open database sockets of this process, so an invocation can wait until all are closed. */
+let openSockets = 0;
+let onAllClosed: Array<() => void> = [];
+
+/** Resolves once no database socket is open (immediately if none is). */
+export function allSocketsClosed(): Promise<void> {
+  return openSockets === 0 ? Promise.resolve() : new Promise((resolve) => onAllClosed.push(resolve));
+}
+
 export function usesTls(url: string): boolean {
   try {
     const u = new URL(url);
@@ -45,9 +54,20 @@ export function stallingSocketFactory(stallMs: number) {
     const port = options.port[i] ?? options.port[0] ?? 5432;
     const where = `${host}:${port}`;
     const socket = net.connect(port, host);
+    const openedAt = Date.now();
+    openSockets++;
+    socket.once("close", () => {
+      if (--openSockets > 0) return;
+      const waiting = onAllClosed;
+      onAllClosed = [];
+      for (const resolve of waiting) resolve();
+    });
     socket.setTimeout(stallMs, () => {
       const answered = socket.bytesRead > 0;
-      console.warn(`[db] No response from ${where} for ${stallMs / 1000} s${answered ? "" : " while connecting"} — closing the connection.`);
+      console.warn(
+        `[db] No response from ${where} for ${stallMs / 1000} s${answered ? "" : " while connecting"} ` +
+          `(connection age ${Math.round((Date.now() - openedAt) / 1000)} s, ${socket.bytesRead} bytes received) — closing the connection.`,
+      );
       // Once the server has answered, close *without* an error on purpose: postgres.js then rejects the
       // queries on the connection with CONNECTION_CLOSED, whereas after an `error` event it leaves a query
       // issued before the following `close` pending forever. A connection that never answered must end

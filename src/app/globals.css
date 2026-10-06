@@ -265,7 +265,8 @@ main {
 
 .kv {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* Labels take what they need up to 60 % and wrap beyond it, so long labels never push values off a phone screen. */
+  grid-template-columns: fit-content(60%) minmax(0, 1fr);
   gap: 0.4rem 1rem;
   margin: 0;
 }
@@ -274,6 +275,7 @@ main {
 }
 .kv dd {
   margin: 0;
+  overflow-wrap: break-word;
 }
 
 /* ── Badges, scores ──────────────────────────────────────────────── */

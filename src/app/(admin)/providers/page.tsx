@@ -53,7 +53,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
-      <Flash message={done} error={error} />
+      <Flash message={done} error={error ?? (data.warnings.length ? data.warnings.join(" ") : undefined)} />
 
       <dl className="tiles" aria-label="Summary">
         <StatTile

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { waitUntil } from "@/lib/vercel";
-import { stallingSocketFactory, usesTls } from "./socket";
+import { allSocketsClosed, stallingSocketFactory, usesTls } from "./socket";
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -55,15 +55,20 @@ function pool(kind: "web" | "jobs"): Pool {
 
 const IDLE_TIMEOUT_S = Number(process.env.DB_IDLE_TIMEOUT_S ?? 5);
 
-/** Holds the invocation open for one idle timeout after the latest query, so idle sockets are closed before suspension. */
-let releaseIdle: (() => void) | null = null;
-let idleTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Holds the invocation open until every database socket has been closed by `idle_timeout`, so the
+ * instance is never suspended with a connection open (which would be dead on resume). Waiting for the
+ * sockets themselves, not a fixed delay after the last query: a slow query would otherwise finish after
+ * the delay and leave its connection open across the suspension. Capped, so a busy instance (other
+ * requests keep connections in use) never holds this invocation near its time limit.
+ */
+const KEEP_AWAKE_CAP_MS = (IDLE_TIMEOUT_S + 15) * 1000;
+let keepAwake: Promise<void> | null = null;
 function keepAwakeUntilIdle() {
-  if (idleTimer) clearTimeout(idleTimer);
-  releaseIdle?.();
-  const done = new Promise<void>((resolve) => (releaseIdle = resolve));
-  idleTimer = setTimeout(() => releaseIdle?.(), IDLE_TIMEOUT_S * 1000 + 250);
-  waitUntil(done);
+  keepAwake ??= Promise.race([allSocketsClosed(), new Promise<void>((r) => setTimeout(r, KEEP_AWAKE_CAP_MS).unref())]).finally(() => {
+    keepAwake = null;
+  });
+  waitUntil(keepAwake);
 }
 
 /** Lazily created so `next build` never needs a database connection. */

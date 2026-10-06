@@ -35,10 +35,12 @@ export async function syncProviderRegistry() {
         .orderBy(sql`${capabilityProfiles.version} desc`)
         .limit(1);
       const current = latest[0];
-      if (!current || JSON.stringify(current.profile) !== JSON.stringify(p.capability)) {
+      if (!current || canonicalJson(current.profile) !== canonicalJson(p.capability)) {
+        // Concurrent syncs (cron + a click) may race for the same version; the unique index keeps one.
         await db
           .insert(capabilityProfiles)
-          .values({ providerId: p.id, model, version: (current?.version ?? 0) + 1, profile: p.capability });
+          .values({ providerId: p.id, model, version: (current?.version ?? 0) + 1, profile: p.capability })
+          .onConflictDoNothing();
       }
     }
 
@@ -72,6 +74,19 @@ export async function syncProviderRegistry() {
       });
     }
   }
+}
+
+/**
+ * JSON with object keys sorted at every level. Postgres `jsonb` does not keep key order, so a profile
+ * read back never stringifies like the object in code; comparing raw `JSON.stringify` output added a new
+ * version on every sync (every cron tick).
+ */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
 }
 
 export async function loadPriceBook(): Promise<PriceEntry[]> {

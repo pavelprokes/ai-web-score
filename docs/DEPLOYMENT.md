@@ -63,8 +63,9 @@ pnpm cli action <domainId> run-now
 - **Serverless connection hygiene.** Fluid compute suspends instances between requests; a database
   connection left open across a suspension is dead on resume and the next query would hang until the
   300 s limit. Pools therefore close idle connections after `DB_IDLE_TIMEOUT_S` (5 s), recycle every
-  connection after 10 min, and keep the invocation awake (`waitUntil`) until idle connections are closed
-  — the `attachDatabasePool` pattern from `@vercel/functions`, which doesn't support postgres.js.
+  connection after 10 min, and keep the invocation awake (`waitUntil`) until every database socket is
+  closed (at most 20 s) — the `attachDatabasePool` pattern from `@vercel/functions`, which doesn't
+  support postgres.js.
   As a last line of defence, a connection that gets no answer for `DB_STALL_TIMEOUT_S` (20 s; jobs
   `JOB_DB_STALL_TIMEOUT_S`, 60 s) is closed: the query fails with an error and the next one opens a fresh
   connection, instead of the page hanging for 300 s (`src/db/socket.ts`, logged as `[db] No response …`).

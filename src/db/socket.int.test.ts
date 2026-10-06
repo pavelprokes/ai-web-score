@@ -1,7 +1,7 @@
 import net from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { stallingSocketFactory, usesTls } from "./socket";
+import { allSocketsClosed, stallingSocketFactory, usesTls } from "./socket";
 
 /**
  * A connection that goes silent (suspended instance, dropped NAT entry, stuck pooler) must fail the
@@ -79,6 +79,18 @@ describe.skipIf(!url)("stalled connections", () => {
       blackhole = false;
       await sql.end({ timeout: 1 });
     }
+  }, 15_000);
+
+  it("tells when every socket has been closed by the idle timeout", async () => {
+    const sql = postgres(viaProxy, { max: 2, prepare: false, idle_timeout: 0.3, ...({ socket: stallingSocketFactory(5000) } as object) });
+    await Promise.all([sql`select pg_sleep(0.2)`, sql`select 1`]);
+    let closed = false;
+    void allSocketsClosed().then(() => (closed = true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(closed).toBe(false); // connections are still open (idle)
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(closed).toBe(true);
+    await sql.end({ timeout: 1 });
   }, 15_000);
 
   it("reports a refused connection and keeps the pool usable", async () => {
