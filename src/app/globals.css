@@ -1327,3 +1327,15 @@ dialog.confirm h2 {
 .confirm__actions {
   margin-top: 1rem;
 }
+.activity__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+.btn.btn--danger {
+  border-color: var(--critical);
+  color: var(--critical);
+  font-weight: 650;
+}

@@ -8,7 +8,7 @@ import { DISCOVERY_SYSTEM, discoveryUserPrompt, LlmProfile, toDomainProfile } fr
 import { buildClusters, IMPORTANT_CLUSTER_WEIGHT } from "@/core/portfolio/clusters";
 import { estimatePortfolioSize, type PortfolioSizing } from "@/core/portfolio/sizing";
 import { generateStructured } from "@/lib/llm";
-import { enqueue } from "@/jobs/queue";
+import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
 /**
  * DISCOVERY — "What is this domain and what should it be visible for?"
@@ -23,6 +23,7 @@ export async function runDiscovery(domainId: string, trigger: string) {
   try {
     const digest = await crawlDomain(domain.hostname);
     if (digest.pages.length === 0) throw new Error(digest.errors.join("; ") || "Website could not be crawled");
+    await throwIfJobCancelled();
 
     const llm = await generateStructured({
       schema: LlmProfile,
@@ -34,6 +35,7 @@ export async function runDiscovery(domainId: string, trigger: string) {
       domainId,
       effort: "medium",
     });
+    await throwIfJobCancelled();
     const profile = toDomainProfile(llm, digest);
     const clusters = buildClusters(profile);
     const sizing = estimatePortfolioSize({
@@ -80,6 +82,7 @@ export async function runDiscovery(domainId: string, trigger: string) {
     );
     return { version, sizing };
   } catch (e) {
+    if (e instanceof JobCancelledError) throw e; // the cancel action already closed the run and reset the domain
     const message = e instanceof Error ? e.message : String(e);
     await db.update(runs).set({ status: "FAILED", finishedAt: new Date(), error: message }).where(eq(runs.id, run!.id));
     await db.update(domains).set({ status: "ERROR", lastError: message }).where(eq(domains.id, domainId));

@@ -10,7 +10,7 @@ import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
 import { latestProfile } from "./discovery";
-import { enqueue } from "@/jobs/queue";
+import { enqueue, throwIfJobCancelled } from "@/jobs/queue";
 
 /**
  * PORTFOLIO DESIGN — "Which prompts provide a representative picture of the domain?"
@@ -66,6 +66,7 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
   const status = mode === "INITIAL" || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
   let created = 0;
   for (let i = 0; i < clusters.length; i += CLUSTERS_PER_LLM_CALL) {
+    await throwIfJobCancelled();
     const chunk = clusters.slice(i, i + CLUSTERS_PER_LLM_CALL).filter((c) => allocation.has(c.key));
     if (chunk.length === 0) continue;
     const set = await generateStructured({

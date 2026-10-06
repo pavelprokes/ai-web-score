@@ -51,7 +51,7 @@ export function trackedEntities(profile: DomainProfile): { brand: TrackedEntity;
 export async function executeMeasurement(measurementId: string) {
   const db = getDb();
   const [m] = await db.select().from(measurements).where(eq(measurements.id, measurementId));
-  if (!m || m.status === "SUCCEEDED" || m.status === "FAILED") return;
+  if (!m || m.status === "SUCCEEDED" || m.status === "FAILED" || m.status === "CANCELLED") return;
   const adapter = getProvider(m.providerId);
   if (!adapter.execute) throw new Error(`${m.providerId} is not a sync provider`);
   const req = await loadRequest(m);
@@ -141,7 +141,7 @@ async function recordFailure(m: MeasurementRow, error: unknown, attempts: number
   await db
     .update(measurements)
     .set({ errors, attempts, ...(final ? { status: "FAILED", finishedAt: new Date() } : {}) })
-    .where(eq(measurements.id, m.id));
+    .where(sql`${measurements.id} = ${m.id} and ${measurements.status} <> 'CANCELLED'`);
   if (final) {
     await db.update(runs).set({ failedCount: sql`${runs.failedCount} + 1` }).where(eq(runs.id, m.runId));
     await maybeFinishRun(m.runId);
@@ -160,7 +160,8 @@ async function maybeFinishRun(runId: string) {
 export async function finalizeMeasurement(id: string, result: ProviderResult, startedAt: Date) {
   const db = getDb();
   const [m] = await db.select().from(measurements).where(eq(measurements.id, id));
-  if (!m || m.status === "SUCCEEDED") return;
+  // Late results for a cancelled run are dropped (the run was closed by the admin).
+  if (!m || m.status === "SUCCEEDED" || m.status === "CANCELLED") return;
   const finishedAt = new Date();
 
   const priceBook = await loadPriceBook();

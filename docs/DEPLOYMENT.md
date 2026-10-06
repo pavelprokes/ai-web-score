@@ -60,6 +60,16 @@ pnpm cli action <domainId> run-now
 - Background jobs (`after()`, cron) use their own connection pool (`JOB_DB_POOL_MAX`, default 4) next to
   the request pool (`DB_POOL_MAX`, default 5), so a busy queue doesn't stall pages; work kicked off by a
   click runs with `KICK_JOB_CONCURRENCY` (default 4) parallel jobs, cron with `JOB_CONCURRENCY` (8).
+- **Deploys don't lose work.** The job queue lives in Postgres. A deploy (or a timeout) that kills an
+  instance mid-job only delays that job: its lease expires (5–15 min) and the next cron tick or click
+  claims it again; queued jobs, DataForSEO tasks and Claude batches are untouched. Each cron tick also
+  repairs run records an interrupted attempt left as RUNNING (`services/recovery.ts`): stale discovery
+  runs are closed, measurement runs get their undispatched measurements re-queued or are closed with
+  recounted totals.
+- **Stopping work by hand:** every item in the top-bar activity panel has a *Stop* button
+  (`POST /api/activity/cancel`). Queued work is dropped; running jobs stop at their next checkpoint
+  (between crawl and AI analysis, between prompt batches, before each measurement); a stopped job is
+  never resumed or retried. Money already spent stays spent.
 - **Database migrations run on deploy.** `vercel.json` sets the build command to `pnpm vercel-build`
   (`pnpm db:deploy && next build`): pending Drizzle migrations are applied to the environment's own
   database before the app is built, so Preview builds migrate the preview project and Production builds
