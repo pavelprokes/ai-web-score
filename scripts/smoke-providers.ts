@@ -12,7 +12,10 @@ import { z } from "zod";
 import { listProviders, missingEnv } from "@/core/measurement/providers";
 import type { ProviderAdapter } from "@/core/measurement/provider";
 import { computeCost, selectPrice, type PriceEntry } from "@/core/pricing/cost";
-import { generateStructured, INTERNAL_MODEL, ANALYZER_MODEL } from "@/lib/llm";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { anthropicClient, generateStructured, INTERNAL_MODEL, ANALYZER_MODEL } from "@/lib/llm";
+import { LlmPromptSet } from "@/core/portfolio/generate-llm";
+import { LlmJudgement } from "@/core/signals/analyze-llm";
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: string) => {
@@ -113,6 +116,28 @@ if (args.includes("--llm")) {
       rows.push({ provider: `internal-llm:${model}`, status: "OK", seconds: ((Date.now() - started) / 1000).toFixed(1), model, answerChars: JSON.stringify(out).length });
     } catch (e) {
       rows.push({ provider: `internal-llm:${model}`, status: "ERROR", error: (e instanceof Error ? e.message : String(e)).slice(0, 160) });
+    }
+  }
+}
+
+if (args.includes("--llm")) {
+  // The real schemas sent as structured-output grammars must compile (the API rejects grammars that are
+  // too large with a 400). max_tokens 16 keeps this to a fraction of a cent; truncation is expected.
+  // The discovery profile is not checked here: it uses prompt-enforced JSON (see generateStructured).
+  for (const [name, schema, model] of [
+    ["prompt-set grammar", LlmPromptSet, INTERNAL_MODEL],
+    ["judgement grammar", LlmJudgement, ANALYZER_MODEL],
+  ] as const) {
+    try {
+      await anthropicClient().messages.create({
+        model,
+        max_tokens: 16,
+        output_config: { effort: "low", format: zodOutputFormat(schema) },
+        messages: [{ role: "user", content: "Return an empty example." }],
+      });
+      rows.push({ provider: `internal-llm:${name}`, status: "OK", model });
+    } catch (e) {
+      rows.push({ provider: `internal-llm:${name}`, status: "ERROR", error: (e instanceof Error ? e.message : String(e)).slice(0, 160) });
     }
   }
 }
