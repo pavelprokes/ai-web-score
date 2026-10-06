@@ -51,13 +51,14 @@ export function measurementId(parts: string[]) {
 type ConfigRow = typeof providerConfigurations.$inferSelect;
 
 export async function enabledConfigurations(): Promise<Array<ConfigRow & { reach: number }>> {
-  const known = new Set(listProviders().map((p) => p.id));
+  // Only configurations still defined in code (a removed one may linger in the table until the next sync).
+  const known = new Set(listProviders().flatMap((p) => p.configurations.map((c) => c.id)));
   const rows = await getDb()
     .select({ c: providerConfigurations, reach: providers.reach })
     .from(providerConfigurations)
     .innerJoin(providers, eq(providers.id, providerConfigurations.providerId))
     .where(and(eq(providers.enabled, true), eq(providerConfigurations.enabled, true)));
-  return rows.filter((r) => known.has(r.c.providerId)).map((r) => ({ ...r.c, reach: r.reach }));
+  return rows.filter((r) => known.has(r.c.id)).map((r) => ({ ...r.c, reach: r.reach }));
 }
 
 export async function spentThisMonth(domainId: string, now = new Date()) {

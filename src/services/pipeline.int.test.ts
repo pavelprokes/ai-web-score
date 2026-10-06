@@ -74,7 +74,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const { syncProviderRegistry } = await import("@/services/registry");
     const db = getDb();
     const count = async () => Number((await db.execute(sql`select count(*)::int as n from capability_profiles`))[0]?.n);
+    // A configuration removed from code (e.g. the retired Sonar preset) is disabled and never planned.
+    await db.execute(sql`insert into provider_configurations (id, provider_id, model, params, role, enabled)
+      values ('perplexity-api:sonar-pro', 'perplexity-api', 'sonar-pro', '{}'::jsonb, 'STANDARD', true) on conflict (id) do update set enabled = true`);
     await syncProviderRegistry();
+    const [retired] = await db.execute(sql`select enabled from provider_configurations where id = 'perplexity-api:sonar-pro'`);
+    expect(retired?.enabled).toBe(false);
+    const { enabledConfigurations } = await import("@/services/planning");
+    expect((await enabledConfigurations()).map((c) => c.id)).not.toContain("perplexity-api:sonar-pro");
     const before = await count();
     await Promise.all([syncProviderRegistry(), syncProviderRegistry()]); // cron and a click at once
     await syncProviderRegistry();
@@ -91,6 +98,62 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.execute(sql.raw(readFileSync("drizzle/0001_dedupe_capability_profiles.sql", "utf8")));
     const versions = await db.execute(sql`select version from capability_profiles where provider_id = ${p} and model = ${m} order by version`);
     expect(versions.map((r) => Number(r.version))).toEqual([v, v + 3]);
+  });
+
+  it("batches answer analysis with the domain context in a cached system block and prices cache tokens", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { setAnthropicClient, llmCost, ANALYZER_MODEL } = await import("@/lib/llm");
+    const { submitAnalysis, collectAnalysis } = await import("@/services/analysis");
+    const db = getDb();
+    await db.update(s.llmBatches).set({ status: "DONE" });
+    // Every stored answer waits for a judgement again; brand-mentioning ones are grouped per cell.
+    await db.update(s.measurementSignals).set({ analysisStatus: "PENDING" });
+
+    type Req = { custom_id: string; params: { system: unknown; messages: Array<{ content: string }> } };
+    let sent: Req[] = [];
+    const judgement = { brandRecommended: true, brandDiscouraged: false, sentiment: 0.5, brandDescriptionAccuracy: 1, productAccuracy: -1, pricingAccuracy: -1, answerConfidence: 0.7, untrackedBrands: [] };
+    setAnthropicClient({
+      messages: {
+        batches: {
+          create: async ({ requests }: { requests: Req[] }) => ((sent = requests), { id: "batch-cache-test" }),
+          retrieve: async () => ({ processing_status: "ended" }),
+          results: async () =>
+            (async function* () {
+              for (const r of sent) {
+                yield {
+                  custom_id: r.custom_id,
+                  result: {
+                    type: "succeeded",
+                    message: { content: [{ type: "text", text: JSON.stringify(judgement) }], usage: { input_tokens: 300, output_tokens: 40, cache_read_input_tokens: 600, cache_creation_input_tokens: 0 } },
+                  },
+                };
+              }
+            })(),
+        },
+      },
+    } as never);
+    try {
+      await submitAnalysis();
+      expect(sent.length).toBeGreaterThan(1);
+      const cached = sent.filter((r) => Array.isArray(r.params.system));
+      expect(cached.length).toBeGreaterThan(0);
+      const system = cached[0]!.params.system as Array<{ text: string; cache_control?: unknown }>;
+      expect(system[1]!.cache_control).toEqual({ type: "ephemeral" });
+      expect(system[1]!.text).toMatch(/Fact sheet/);
+      expect(cached[0]!.params.messages[0]!.content).not.toMatch(/Fact sheet/);
+      expect(cached[0]!.params.messages[0]!.content).toMatch(/AI answer:/);
+
+      await db.delete(s.llmUsage);
+      await collectAnalysis();
+      const rows = await db.select().from(s.llmUsage);
+      const total = rows.reduce((a, r) => a + r.costUsd, 0);
+      const n = sent.length;
+      expect(rows.reduce((a, r) => a + r.cacheReadTokens, 0)).toBe(600 * n);
+      expect(total).toBeCloseTo(llmCost(ANALYZER_MODEL, 300 * n, 40 * n, true, 600 * n, 0), 6);
+    } finally {
+      setAnthropicClient(null);
+    }
   });
 
   it("reports background work for the top-bar activity indicator", async () => {

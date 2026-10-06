@@ -381,6 +381,9 @@ export const llmUsage = pgTable(
     model: text("model").notNull(),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
+    /** Prompt-cache hits and writes (not included in input_tokens). */
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
     costUsd: usd("cost_usd"),
     createdAt: createdAt(),
   },

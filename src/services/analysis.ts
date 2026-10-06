@@ -2,7 +2,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { llmBatches, measurementSignals, measurements, promptVersions } from "@/db/schema";
-import { ANALYZER_SYSTEM, analyzerUserPrompt, carryJudgement, LlmJudgement, toJudgementSignals } from "@/core/signals/analyze-llm";
+import { ANALYZER_SYSTEM, analyzerContext, analyzerQuestion, analyzerUserPrompt, carryJudgement, LlmJudgement, toJudgementSignals } from "@/core/signals/analyze-llm";
 import type { DeterministicSignals, RawSignals } from "@/core/signals/extract";
 import { ANALYZER_MODEL, anthropicClient, generateStructured, llmOverrideActive, noThinking, recordLlmUsage } from "@/lib/llm";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
@@ -16,6 +16,12 @@ import { latestProfile } from "./discovery";
  * with the same observable outcome in the same cell (e.g. the initial samples of a new
  * prompt that all mention the brand at position 2) are judged once — one representative
  * goes to the LLM, the others inherit its judgement.
+ *
+ * Prompt caching: the domain context (brand, competitors, fact sheet) is identical for all
+ * answers of a domain, so it goes into a cached system block and requests are grouped by
+ * domain. Batch cache hits are best-effort; the 5-minute cache is used because its writes
+ * cost 1.25× (1-hour: 2×), so a miss costs little. Below the model's minimum cacheable
+ * length (512 tokens) nothing is cached and nothing extra is charged.
  */
 
 const BATCH_LIMIT = 500;
@@ -46,18 +52,27 @@ function groupByOutcome(items: Item[]): Map<Item, Item[]> {
   return new Map([...groups.values()].map((g) => [g[0]!, g.slice(1)]));
 }
 
-async function buildRequest(item: Item) {
+async function buildRequest(item: Item, cacheContext: boolean) {
   const latest = await latestProfile(item.m.domainId);
   if (!latest) return null;
+  const answer = { promptText: item.v.text, answerText: item.m.answerText ?? "" };
   return {
     model: ANALYZER_MODEL,
     max_tokens: 2000,
-    system: ANALYZER_SYSTEM,
+    ...(cacheContext
+      ? {
+          system: [
+            { type: "text" as const, text: ANALYZER_SYSTEM },
+            { type: "text" as const, text: analyzerContext(latest.profile), cache_control: { type: "ephemeral" as const } },
+          ],
+          messages: [{ role: "user" as const, content: analyzerQuestion(answer) }],
+        }
+      : {
+          system: ANALYZER_SYSTEM,
+          messages: [{ role: "user" as const, content: analyzerUserPrompt({ profile: latest.profile, ...answer }) }],
+        }),
     ...noThinking(ANALYZER_MODEL),
     output_config: { effort: "low" as const, format: zodOutputFormat(LlmJudgement) },
-    messages: [
-      { role: "user" as const, content: analyzerUserPrompt({ profile: latest.profile, promptText: item.v.text, answerText: item.m.answerText ?? "" }) },
-    ],
   };
 }
 
@@ -143,8 +158,12 @@ export async function submitAnalysis() {
 
   const requests = [];
   const followers: Record<string, string[]> = {};
-  for (const [rep, fs] of groups) {
-    const params = await buildRequest(rep);
+  // Same-domain requests next to each other, and the context cached only where it is reused.
+  const reps = [...groups].sort(([a], [b]) => a.m.domainId.localeCompare(b.m.domainId));
+  const perDomain = new Map<string, number>();
+  for (const [rep] of reps) perDomain.set(rep.m.domainId, (perDomain.get(rep.m.domainId) ?? 0) + 1);
+  for (const [rep, fs] of reps) {
+    const params = await buildRequest(rep, (perDomain.get(rep.m.domainId) ?? 0) > 1);
     if (!params) continue;
     requests.push({ custom_id: rep.s.measurementId, params });
     followers[rep.s.measurementId] = fs.map((f) => f.s.measurementId);
@@ -174,7 +193,7 @@ export async function collectAnalysis() {
     const items = b.items as { representatives?: string[]; followers?: Record<string, string[]> };
     const followerMap = items.followers ?? {};
     const unseen = new Set(items.representatives ?? []);
-    const usageByDomain = new Map<string, { input: number; output: number }>();
+    const usageByDomain = new Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>();
     for await (const r of await anthropicClient().messages.batches.results(b.id)) {
       unseen.delete(r.custom_id);
       const [row] = await db
@@ -190,9 +209,11 @@ export async function collectAnalysis() {
       let judgement: LlmJudgement | null = null;
       if (r.result.type === "succeeded") {
         const msg = r.result.message;
-        const u = usageByDomain.get(row.domainId) ?? { input: 0, output: 0 };
+        const u = usageByDomain.get(row.domainId) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
         u.input += msg.usage.input_tokens;
         u.output += msg.usage.output_tokens;
+        u.cacheRead += msg.usage.cache_read_input_tokens ?? 0;
+        u.cacheWrite += msg.usage.cache_creation_input_tokens ?? 0;
         usageByDomain.set(row.domainId, u);
         const text = msg.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
         const parsed = LlmJudgement.safeParse(safeJson(text));
@@ -212,7 +233,16 @@ export async function collectAnalysis() {
     // Representatives missing from the results (should not happen) release their group too.
     for (const repId of unseen) await failGroup(repId, followerMap[repId] ?? []);
     for (const [domainId, u] of usageByDomain) {
-      await recordLlmUsage({ domainId, purpose: "analysis", model: b.model, inputTokens: u.input, outputTokens: u.output, batched: true });
+      await recordLlmUsage({
+        domainId,
+        purpose: "analysis",
+        model: b.model,
+        inputTokens: u.input,
+        outputTokens: u.output,
+        cacheReadTokens: u.cacheRead,
+        cacheWriteTokens: u.cacheWrite,
+        batched: true,
+      });
       await enqueue("scores.compute", { domainId }, { dedupeKey: `scores:${domainId}`, runAt: new Date(Date.now() + 60_000) });
     }
     await db.update(llmBatches).set({ status: "DONE", finishedAt: new Date() }).where(eq(llmBatches.id, b.id));

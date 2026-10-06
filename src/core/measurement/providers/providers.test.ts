@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatgptUi, parseAiMode, parseLlmScraper } from "./dataforseo";
 import { buildClaudeParams, parseClaudeMessage } from "./anthropic";
 import { buildOpenAiBody, parseOpenAiResponse } from "./openai";
-import { parsePerplexityResponse } from "./perplexity";
+import { buildPerplexityBody, parsePerplexityResponse, perplexityApi } from "./perplexity";
 import { parseGeminiResponse } from "./gemini";
 import { listProviders } from "./index";
 import { computeCost, selectPrice, type PriceEntry } from "../../pricing/cost";
@@ -10,6 +10,23 @@ import { computeCost, selectPrice, type PriceEntry } from "../../pricing/cost";
 const req = { measurementId: "m1", promptText: "Kde v Brně koupit kolo pro dítě?", language: "cs", country: "cz", location: "Brno" };
 
 describe("provider request builders", () => {
+  it("Perplexity uses the documented fast preset on the flex tier, with location and no retired Sonar fields", () => {
+    const standard = perplexityApi.configurations.find((c) => c.role === "STANDARD")!;
+    const body = buildPerplexityBody(req, standard) as Record<string, unknown>;
+    expect(body.preset).toBe("fast");
+    expect(body.service_tier).toBe("flex");
+    expect(body.model).toBeUndefined();
+    const tool = (body.tools as Array<Record<string, unknown>>)[0]!;
+    expect(tool).toEqual({ type: "web_search", user_location: { country: "CZ", city: "Brno" } });
+    expect(JSON.stringify(body)).not.toMatch(/search_context_size|sonar-pro/);
+    // A direct model gets one search step, an output cap and citation instructions.
+    const direct = buildPerplexityBody(req, { id: "x", model: "perplexity/sonar", params: { searchType: "fast" }, role: "CANDIDATE" }) as Record<string, unknown>;
+    expect(direct).toMatchObject({ model: "perplexity/sonar", max_steps: 1, max_output_tokens: 4096 });
+    expect(String(direct.instructions)).toMatch(/\[1\]/);
+    expect((direct.tools as Array<Record<string, unknown>>)[0]!.search_type).toBe("fast");
+  });
+
+
   it("OpenAI always sends a user_location (default would be US) and never forces search", () => {
     const body = buildOpenAiBody(req, { id: "x", model: "gpt-6-luna", params: {}, role: "STANDARD" });
     expect(body.tools[0]!.user_location).toMatchObject({ type: "approximate", country: "CZ", city: "Brno" });
@@ -19,6 +36,7 @@ describe("provider request builders", () => {
     const p = buildClaudeParams(req, { id: "x", model: "claude-sonnet-5-5", params: {}, role: "STANDARD" });
     expect(p.tools[0]!.allowed_callers).toEqual(["direct"]);
     expect(p.tools[0]!.user_location).toMatchObject({ country: "CZ", city: "Brno" });
+    expect(p.cache_control).toEqual({ type: "ephemeral" }); // caches the prefix between search turns
   });
 });
 
@@ -71,6 +89,16 @@ describe("provider response parsers", () => {
     expect(a.search).toEqual({ billableUnits: 1, queries: ["dětská kola Brno"] });
     expect(a.citations[0]!.url).toBe("https://kolabrno.cz");
     expect(a.answerText).toBe("Zkuste Kola Brno.");
+
+    // Cache reads and writes are input too, priced at 0.1× and 1.25×.
+    const cached = parseClaudeMessage({
+      model: "claude-sonnet-5-5",
+      content: [{ type: "text", text: "x" }],
+      usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 4000, cache_creation_input_tokens: 2000 },
+    });
+    expect(cached.usage).toMatchObject({ inputTokens: 7000, cachedInputTokens: 4000, cacheWriteTokens: 2000 });
+    const price = { providerId: "claude-api", model: "claude-sonnet-5-5", effectiveFrom: new Date(0), inputPerMTok: 2, cachedInputPerMTok: 0.2, outputPerMTok: 10, searchPer1k: 10, requestPer1k: 0, batchDiscount: 0.5 };
+    expect(computeCost({ answer: cached, price }).inputCostUsd).toBeCloseTo((1000 * 2 + 4000 * 0.2 + 2000 * 2 * 1.25) / 1e6, 10);
   });
 
   it("OpenAI responses with sources and annotations", () => {
@@ -97,6 +125,24 @@ describe("provider response parsers", () => {
     });
     expect(a.searchWasUsed).toBe(true);
     expect(a.search.queries).toEqual(["q"]);
+  });
+
+  it("Perplexity inline [n] citations map to the numbered search results", () => {
+    const a = parsePerplexityResponse({
+      output: [
+        { type: "search_results", results: [{ url: "https://a.cz", title: "A" }, { url: "https://b.cz", title: "B" }], queries: ["q"] },
+        { type: "message", content: [{ type: "output_text", text: "Kola prodává A[1]. Servis má B[2][1]. Neplatné [9].", annotations: null }] },
+      ],
+    });
+    expect(a.citations.map((c) => c.url)).toEqual(["https://a.cz", "https://b.cz", "https://a.cz"]);
+    expect(a.answerText.slice(a.citations[0]!.startIndex, a.citations[0]!.endIndex)).toBe("[1]");
+    const typed = parsePerplexityResponse({
+      output: [
+        { type: "search_results", results: [{ url: "https://a.cz" }] },
+        { type: "message", content: [{ type: "output_text", text: "X [web:1]" }] },
+      ],
+    });
+    expect(typed.citations[0]!.url).toBe("https://a.cz");
   });
 
   it("Gemini grounding metadata", () => {
@@ -144,6 +190,14 @@ describe("registry & pricing", () => {
     expect(c.inputCostUsd).toBeCloseTo(0.5);
     expect(c.searchCostUsd).toBeCloseTo(14);
     expect(c.totalCostUsd).toBeCloseTo(14.5);
+    // A discounted tier (flex) reports less than the price book: the reported total wins.
+    const flex = computeCost({
+      answer: { usage: { inputTokens: 2_000_000, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0 }, search: { billableUnits: 0, queries: [] } },
+      price: { providerId: "p", model: "m", effectiveFrom: new Date(0), inputPerMTok: 1, cachedInputPerMTok: 1, outputPerMTok: 1, searchPer1k: 0, requestPer1k: 0, batchDiscount: 0 },
+      reportedCostUsd: 1,
+    });
+    expect(flex.totalCostUsd).toBe(1);
+    expect(flex.inputCostUsd).toBe(1);
     const reported = computeCost({ answer: { usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0 }, search: { billableUnits: 0, queries: [] } }, price: null, reportedCostUsd: 0.0012 });
     expect(reported.totalCostUsd).toBeCloseTo(0.0012);
   });

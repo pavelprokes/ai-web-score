@@ -28,6 +28,9 @@ export function buildClaudeParams(req: MeasurementRequest, config: ProviderConfi
     max_tokens: p.maxTokens ?? 8000,
     // claude.ai tells the model today's date; without it answers skew to the training cutoff.
     system: `The current date is ${today}.`,
+    // Each web search adds a server-tool turn. With a cache marker on the request the API also caches
+    // the prefix after every search result (5 min), so later turns read it at 0.1× instead of full price.
+    cache_control: { type: "ephemeral" as const },
     ...(p.effort ? { output_config: { effort: p.effort } } : {}),
     tools: [
       {
@@ -63,6 +66,7 @@ export function parseClaudeMessage(msg: {
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
     server_tool_use?: { web_search_requests?: number } | null;
   };
 }): NormalizedAnswer {
@@ -93,9 +97,11 @@ export function parseClaudeMessage(msg: {
     sources,
     searchWasUsed: searches > 0,
     usage: {
-      inputTokens: msg.usage.input_tokens,
+      // Anthropic's input_tokens excludes cache reads and writes; TokenUsage counts all input.
+      inputTokens: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0),
       outputTokens: msg.usage.output_tokens,
       cachedInputTokens: msg.usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: msg.usage.cache_creation_input_tokens ?? 0,
       reasoningTokens: 0,
     },
     search: { billableUnits: searches, queries },

@@ -15,6 +15,13 @@
       "when": 1791319500361,
       "tag": "0001_dedupe_capability_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791320520220,
+      "tag": "0002_llm_usage_cache_tokens",
+      "breakpoints": true
     }
   ]
 }

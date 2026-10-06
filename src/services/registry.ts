@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { capabilityProfiles, priceEntries, providerConfigurations, providers } from "@/db/schema";
 import { getProvider, listProviders, missingEnv } from "@/core/measurement/providers";
@@ -7,7 +7,7 @@ import type { PriceEntry } from "@/core/pricing/cost";
 /**
  * Synchronises code-registered providers into the database:
  * - provider rows (disabled by default — enabling is an explicit admin decision)
- * - immutable configurations (a changed configuration must get a new id)
+ * - immutable configurations (a changed configuration must get a new id; ids removed from code are disabled)
  * - versioned capability profiles (new version only when the profile changed)
  * - versioned price entries (append-only; keyed by provider/model/effectiveFrom)
  */
@@ -25,6 +25,20 @@ export async function syncProviderRegistry() {
         .values({ id: c.id, providerId: p.id, model: c.model, params: c.params, role: c.role })
         .onConflictDoNothing();
     }
+    // Configurations removed from code are retired (kept for history, never planned again).
+    await db
+      .update(providerConfigurations)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(providerConfigurations.providerId, p.id),
+          eq(providerConfigurations.enabled, true),
+          notInArray(
+            providerConfigurations.id,
+            p.configurations.map((c) => c.id),
+          ),
+        ),
+      );
 
     const models = [...new Set(p.configurations.map((c) => c.model))];
     for (const model of models) {

@@ -11,10 +11,10 @@ equivalence to the more expensive reference.
 | ChatGPT | DataForSEO consumer-UI capture, standard queue | 0.0012 | queue instead of live (−70 %); provider-reported cost is authoritative |
 | Google AI Mode | DataForSEO, standard queue | 0.0012 | same |
 | Gemini | DataForSEO consumer-UI capture | 0.0012 | same (Gemini API grounding would be ≈0.05 with ~10 billed queries) |
-| Claude | API + web search, Message Batches | 0.03–0.05 | Batches (−50 % tokens); candidate `sonnet-5-5-lean` (≤2 searches, effort low) ≈ 0.015–0.025 if calibration promotes it |
-| Perplexity | Agent API, `sonar-pro` preset | ≈ 0.01 | candidate `fast` preset ≈ 0.003 if calibration promotes it |
+| Claude | API + web search, Message Batches | 0.03–0.05 | Batches (−50 % tokens); automatic prompt caching between search turns (later turns read the prefix at 0.1×); candidate `sonnet-5-5-lean` (≤2 searches, effort low) ≈ 0.015–0.025 if calibration promotes it |
+| Perplexity | Agent API `/v1/agent`, `fast` preset on the `flex` tier | ≈ 0.0013 | `fast` is Perplexity's documented replacement for Sonar / Sonar Pro; the preset runs on `priority` (2× tokens), `service_tier: "flex"` gives 0.5× tokens; Fast Search $1/1k calls. Was ≈ 0.01 with the retired `sonar-pro` name |
 | OpenAI API | web search, calibration only | ≈ 0.011 | never used as a ChatGPT substitute unless calibration proves equivalence (it did not in simulation) |
-| Answer analysis | Sonnet 5.5, Batches, thinking off | ≈ 0.0025 per call | brand mentions only + 10 % sample; judgement carry-over; outcome grouping → ≈ 0.0005–0.001 per measured answer |
+| Answer analysis | Sonnet 5.5, Batches, thinking off | ≈ 0.0025 per call | brand mentions only + 10 % sample; judgement carry-over; outcome grouping → ≈ 0.0005–0.001 per measured answer; the domain context (brand, competitors, fact sheet) is a cached system block — hits cost 0.1× (stacks with the batch discount), requests are grouped by domain |
 
 Discovery + prompt design (one-off per domain, Opus 5.5): ≈ $0.2–0.7.
 
@@ -26,7 +26,8 @@ Discovery + prompt design (one-off per domain, Opus 5.5): ≈ $0.2–0.7.
 | Anthropic (Claude) | Message Batches (usually < 1 h, max 24 h) | −50 % tokens | **no** — $10/1k searches unchanged | yes — measurements and analysis |
 | OpenAI | Batch API / Flex | −50 % tokens | Batch historically rejects `web_search` ⚠; Flex + web search unverified | no (calibration only) |
 | Google Gemini API | Batch mode | −50 % tokens | grounding fee most likely not discounted ⚠ | no (API disabled) |
-| Perplexity Agent API | `background` mode | none found | — | no |
+| Perplexity Agent API | `service_tier: "flex"` (sync, best-effort capacity) | −50 % tokens (vs. 2× on the preset's default `priority`) | no — $1/1k Fast Search calls | yes |
+| Anthropic | prompt caching (5-min) | reads 0.1× input, writes 1.25× | — | yes — analysis context, Claude search turns |
 
 Because search fees are not discounted, a batched Claude measurement saves ≈ 35–45 % in total, not 50 %
 (tokens ≈ 60 % of its cost). Latency of hours is irrelevant for daily monitoring; each measurement stores
@@ -46,8 +47,8 @@ calibration) with the real planner (`SIMULATE_DAYS=60 pnpm vitest run src/e2e/si
 | 31–45 | 108 | $0.14 | $0.18 | $0.05 | $0.37 |
 | 46–60 | 94 | $0.12 | $0.17 | $0.05 | $0.34 |
 
-(Fake world prices: DataForSEO $0.0012, Perplexity $0.0097, analysis at sync Sonnet price — production analysis
-runs through Batches and is cheaper.) Monitoring itself settles at ≈ **$4–5/month** for this domain. The
+(Fake world prices at the time: DataForSEO $0.0012, Perplexity $0.0097 — now ≈ $0.0013 with the flex tier —
+analysis at sync Sonnet price; production analysis runs through Batches and is cheaper.) Monitoring itself settles at ≈ **$4–5/month** for this domain. The
 calibration line is a *global* cost per configuration pair (shared by all monitored domains, capped at 15 % of
 each cycle budget) and falls to one weekly control group once a pair is decided: in the simulation the
 Perplexity `fast` preset was promoted, the OpenAI API was correctly **not** accepted as a substitute for the
@@ -77,6 +78,9 @@ Issues found by the simulation and fixed:
 
 | Lever | Expected effect | Prerequisite |
 |---|---|---|
+| OpenAI `service_tier: "flex"` for the calibration configurations | tokens −50 % (search fee unchanged) | live check that `web_search` works under flex and fits the 150 s job budget |
+| Gemini API Batch mode for scheduled runs | tokens −50 % (grounding fee most likely not) | `gemini-api` enabled; prices double on 2027-01-01 |
+| Measure the API arms (Claude, OpenAI, Gemini) weekly or on a rotating subset | proportional | product decision — the consumer-UI capture stays the primary instrument (API ≠ UI answers) |
 | Cheaper analyzer model (e.g. a nano/luna-class model), adopted via the same calibration logic against Sonnet | analysis −80–90 % | OpenAI structured-output path in `lib/llm.ts`, pilot comparison |
 | Several answers per analysis request | analysis input −25 % | prompt + parser change |
 | Shared market prompt library: identical prompt × locale × provider measured once per cycle and scored for every monitored brand in that market | measurement cost ÷ number of brands in the same vertical | product decision (agency use-case), cross-domain signal extraction |
