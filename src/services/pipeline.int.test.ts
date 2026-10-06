@@ -89,9 +89,33 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ id: `run:${run!.id}`, kind: "DISCOVERY", state: "running" });
 
+    // The same work can't be started twice while it runs.
+    const { actionBlockedReason } = await import("@/services/action-guards");
+    expect(await actionBlockedReason(domain.id, "rediscover")).toBe("Discovery in progress");
+    expect(await actionBlockedReason(domain.id, "regenerate-prompts")).toBe("Discovery in progress");
+    expect(await actionBlockedReason(domain.id, "run-now")).toBeNull();
+    expect(await actionBlockedReason(domain.id, "recalculate-scores")).toBeNull();
+
     // Finished work disappears.
     await db.update(s.runs).set({ status: "SUCCEEDED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
     await db.update(s.jobs).set({ status: "SUCCEEDED" }).where(eq(s.jobs.type, "discovery.run"));
     expect((await currentActivity()).filter((i) => i.domainId === domain.id)).toHaveLength(0);
+  });
+
+  it("does not start a second measurement run while one is in flight", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { planMeasurements } = await import("@/services/planning");
+    const db = getDb();
+    const [domain] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [run] = await db.insert(s.runs).values({ domainId: domain!.id, kind: "MEASUREMENT", trigger: "MANUAL" }).returning();
+    const before = await db.select().from(s.runs).where(eq(s.runs.domainId, domain!.id));
+    expect(await planMeasurements(domain!.id, "CRON")).toBeNull();
+    expect(await planMeasurements(domain!.id, "MANUAL")).toBeNull();
+    const after = await db.select().from(s.runs).where(eq(s.runs.domainId, domain!.id));
+    expect(after).toHaveLength(before.length);
+    const [d] = await db.select().from(s.domains).where(eq(s.domains.id, domain!.id));
+    expect(d!.nextPlanAt!.getTime()).toBeGreaterThan(Date.now() + 20 * 60_000);
+    await db.update(s.runs).set({ status: "SUCCEEDED" }).where(eq(s.runs.id, run!.id));
   });
 });

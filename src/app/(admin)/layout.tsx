@@ -33,7 +33,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               </li>
             </ul>
           </nav>
-          <ActivityIndicator initial={activity} />
+          <ActivityIndicator initial={activity} renderedAt={Date.now()} />
           <div className="topbar__user">
             <span>{admin}</span>
             {!isAuthDisabled() && (

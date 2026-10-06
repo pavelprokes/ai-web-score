@@ -11,6 +11,7 @@ import { enqueue } from "@/jobs/queue";
 import { createDomain, InvalidDomainError, runMeasurementNow, setDomainPaused, startDiscovery } from "@/services/domains";
 import { decideProposals } from "@/services/portfolio";
 import { recomputeHistory } from "@/services/scores";
+import { actionBlockedReason } from "@/services/action-guards";
 import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/services/registry";
 import { promoteConfiguration } from "@/services/optimizer";
 
@@ -77,6 +78,11 @@ export async function domainAction(formData: FormData) {
   const actor = await requireAdminAction();
   const id = String(formData.get("domainId"));
   const action = String(formData.get("action")) as DomainActionName;
+  // Only same-site relative paths (no open redirect via "//host" or absolute URLs).
+  const requested = String(formData.get("returnTo") ?? "");
+  const back = /^\/(?!\/)[\w\-/]*$/.test(requested) ? requested : `/domains/${id}`;
+  const blocked = await actionBlockedReason(id, action);
+  if (blocked) redirect(`${back}?error=${encodeURIComponent(`${blocked} — wait until it finishes, then try again.`)}`);
   switch (action) {
     case "run-now":
       await runMeasurementNow(id);
@@ -120,9 +126,6 @@ export async function domainAction(formData: FormData) {
   }
   revalidatePath("/");
   revalidatePath(`/domains/${id}`);
-  // Only same-site relative paths (no open redirect via "//host" or absolute URLs).
-  const requested = String(formData.get("returnTo") ?? "");
-  const back = /^\/(?!\/)[\w\-/]*$/.test(requested) ? requested : `/domains/${id}`;
   redirect(`${back}${back.includes("?") ? "&" : "?"}done=${encodeURIComponent(MESSAGES[action])}`);
 }
 

@@ -30,10 +30,12 @@ function spokenElapsed(ms: number): string {
 
 const describe = (i: ActivityItem) => `${i.label}${i.hostname ? ` for ${i.hostname}` : ""}`;
 
-export function ActivityIndicator({ initial }: { initial: ActivityItem[] }) {
+export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityItem[]; renderedAt: number }) {
   const router = useRouter();
   const [items, setItems] = useState<ActivityItem[]>(initial);
-  const [now, setNow] = useState(() => Date.now());
+  // Start from the server's clock so the server HTML and the first client render match (no hydration
+  // mismatch); the interval below switches to the live clock right after mount.
+  const [now, setNow] = useState(renderedAt);
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const previous = useRef(new Map(initial.map((i) => [i.id, i])));
@@ -88,6 +90,7 @@ export function ActivityIndicator({ initial }: { initial: ActivityItem[] }) {
 
   useEffect(() => {
     if (!active) return;
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [active]);

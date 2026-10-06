@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { adminRoute, jsonBody } from "@/lib/api";
+import { adminRoute, HttpError, jsonBody } from "@/lib/api";
+import { actionBlockedReason } from "@/services/action-guards";
 import { kickJobs } from "@/lib/kick";
 import { enqueue } from "@/jobs/queue";
 import { runMeasurementNow, setDomainPaused, startDiscovery } from "@/services/domains";
@@ -27,6 +28,8 @@ const Action = z.discriminatedUnion("action", [
 export const POST = adminRoute<{ id: string }>(async (req, { params, actor }) => {
   const a = Action.parse(await jsonBody(req));
   const id = params.id;
+  const blocked = await actionBlockedReason(id, a.action);
+  if (blocked) throw new HttpError(409, blocked);
   switch (a.action) {
     case "run-now":
       await runMeasurementNow(id);

@@ -5,6 +5,8 @@ import { listDomainsOverview } from "@/services/overview";
 type DomainRow = Awaited<ReturnType<typeof listDomainsOverview>>[number];
 import { AddDomainDialog } from "@/components/AddDomainDialog";
 import { ActionButton } from "@/components/ActionButton";
+import { busyKindsByDomain, busyReason } from "@/services/action-guards";
+import type { ActivityKind } from "@/services/activity";
 import { Flash } from "@/components/Flash";
 import { MetricInfo } from "@/components/MetricInfo";
 import { usd } from "@/components/format";
@@ -25,10 +27,10 @@ export const dynamic = "force-dynamic";
 export default async function DomainsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ done?: string }>;
+  searchParams: Promise<{ done?: string; error?: string }>;
 }) {
-  const { done } = await searchParams;
-  const domains = await listDomainsOverview();
+  const { done, error } = await searchParams;
+  const [domains, busyMap] = await Promise.all([listDomainsOverview(), busyKindsByDomain()]);
   const now = new Date();
   const monthCost = domains.reduce((a, d) => a + d.cost.monthUsd, 0);
   const monthBudget = domains.reduce((a, d) => a + d.cost.monthlyBudgetUsd, 0);
@@ -49,7 +51,7 @@ export default async function DomainsPage({
         <AddDomainDialog />
       </div>
 
-      <Flash message={done} />
+      <Flash message={done} error={error} />
 
       <dl className="tiles" aria-label="Summary">
         <StatTile
@@ -123,6 +125,7 @@ export default async function DomainsPage({
                       const measurement = d.lastRuns.find(
                         (r) => r.kind === "MEASUREMENT",
                       );
+                      const busy = busyMap.get(d.id);
                       return (
                         <tr key={d.id}>
                           <th scope="row">
@@ -194,15 +197,7 @@ export default async function DomainsPage({
                           </td>
                           <td>
                             {d.status !== "PAUSED" && d.status !== "NEW" && (
-                              <ActionButton
-                                domainId={d.id}
-                                action="run-now"
-                                label="Run now"
-                                pendingLabel="Queuing…"
-                                small
-                                returnTo="/"
-                                accessibleLabel={`for ${d.hostname}`}
-                              />
+                              <RunNowButton d={d} busy={busy} />
                             )}
                           </td>
                         </tr>
@@ -217,7 +212,7 @@ export default async function DomainsPage({
               aria-label="Monitored domains"
             >
               {domains.map((d) => (
-                <DomainCard key={d.id} d={d} now={now} />
+                <DomainCard key={d.id} d={d} now={now} busy={busyMap.get(d.id)} />
               ))}
             </ul>
           </>
@@ -228,7 +223,7 @@ export default async function DomainsPage({
 }
 
 /** Narrow-screen rendering of one table row: the same data as a description list. */
-function DomainCard({ d, now }: { d: DomainRow; now: Date }) {
+function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<ActivityKind> | undefined }) {
   const measurement = d.lastRuns.find((r) => r.kind === "MEASUREMENT");
   return (
     <li className="domain-card">
@@ -292,17 +287,36 @@ function DomainCard({ d, now }: { d: DomainRow; now: Date }) {
       <BudgetMeter spent={d.cost.monthUsd} budget={d.cost.monthlyBudgetUsd} />
       {d.status !== "PAUSED" && d.status !== "NEW" && (
         <div style={{ marginTop: "0.75rem" }}>
-          <ActionButton
-            domainId={d.id}
-            action="run-now"
-            label="Run now"
-            pendingLabel="Queuing…"
-            small
-            returnTo="/"
-            accessibleLabel={`for ${d.hostname}`}
-          />
+          <RunNowButton d={d} busy={busy} />
         </div>
       )}
     </li>
+  );
+}
+
+/** Run-now with a cost confirmation; disabled while a measurement for the domain is in progress. */
+function RunNowButton({ d, busy }: { d: DomainRow; busy: Set<ActivityKind> | undefined }) {
+  const left = Math.max(0, d.cost.monthlyBudgetUsd - d.cost.monthUsd);
+  return (
+    <ActionButton
+      domainId={d.id}
+      action="run-now"
+      label="Run now"
+      pendingLabel="Queuing…"
+      small
+      returnTo="/"
+      accessibleLabel={`for ${d.hostname}`}
+      busy={busyReason("run-now", busy)}
+      confirm={{
+        title: `Run a measurement for ${d.hostname}?`,
+        confirmLabel: "Run measurement",
+        body: (
+          <p>
+            Asks the enabled AI providers every core prompt now, within this month&apos;s budget ({usd(left)} of {usd(d.cost.monthlyBudgetUsd)} left).
+            Answers from queue-based providers arrive within about 45 minutes.
+          </p>
+        ),
+      }}
+    />
   );
 }

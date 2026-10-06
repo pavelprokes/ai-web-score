@@ -1286,3 +1286,44 @@ code {
 .activity + .topbar__user {
   margin-left: 0;
 }
+
+/* ── Busy buttons and pop-confirm ────────────────────────────────── */
+.btn.btn--busy,
+.btn.btn--busy:hover {
+  cursor: not-allowed;
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+.btn__spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--link);
+  animation: activity-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn__spinner {
+    animation: none;
+    border-color: var(--link);
+  }
+}
+dialog.confirm {
+  width: min(460px, calc(100vw - 2rem));
+}
+dialog.confirm h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1.15rem;
+}
+.confirm__body {
+  color: var(--text-2);
+  font-size: 0.95rem;
+}
+.confirm__body p {
+  margin: 0 0 0.5rem;
+}
+.confirm__actions {
+  margin-top: 1rem;
+}
