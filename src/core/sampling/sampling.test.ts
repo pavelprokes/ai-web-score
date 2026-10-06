@@ -70,27 +70,41 @@ describe("cell state (Kalman visibility estimator)", () => {
 
   it("settles at low volatility for a stationary noisy cell (no upward bias)", () => {
     const rand = rng(7);
-    const s = feed(initialCellState(0.3, 0.8), Array.from({ length: 120 }, () => (rand() < 0.3 ? 1 : 0)));
-    expect(s.processNoisePerDay).toBeLessThan(0.002);
+    const s = feed(initialCellState(0.3, 0.8), Array.from({ length: 300 }, () => (rand() < 0.3 ? 1 : 0)));
+    expect(s.processNoisePerDay).toBeLessThan(0.0015);
     expect(recommendedIntervalDays(s, 0.15 ** 2, { min: 1, max: 30 })).toBeGreaterThan(3);
   });
 
-  it("reacts to genuine regime shifts but not to stationary noise", () => {
-    const run = (p: (i: number) => number, seed: number) => {
-      const rand = rng(seed);
-      let st = initialCellState(0.3, 0.5);
-      let changes = 0;
-      for (let i = 0; i < 80; i++) {
-        const r = updateCell(st, [rand() < p(i) ? 1 : 0], day(i));
-        st = r.state;
-        if (r.changeDetected) changes++;
+  it("detects large level shifts within a week and rarely raises false alarms", () => {
+    // Operating point chosen by a parameter sweep (CUSUM k=0.5, h=5): ~1 false alarm per
+    // 6000 stationary cell-days; a 0.05 → 0.95 shift is detected within 7 days.
+    let falseAlarms = 0;
+    for (const p of [0.05, 0.3, 0.5]) {
+      for (let seed = 1; seed <= 10; seed++) {
+        const rand = rng(seed * 7 + Math.round(p * 100));
+        let st = initialCellState(0.3, 0.5);
+        for (let i = 0; i < 200; i++) {
+          const r = updateCell(st, [rand() < p ? 1 : 0], day(i));
+          st = r.state;
+          if (r.changeDetected) falseAlarms++;
+        }
       }
-      return changes;
-    };
-    expect(run(() => 0.5, 1)).toBe(0);
-    expect(run(() => 0.05, 2)).toBe(0);
-    // Visibility swings between ~5 % and ~95 % every 10 days.
-    expect(run((i) => (Math.floor(i / 10) % 2 ? 0.95 : 0.05), 3)).toBeGreaterThanOrEqual(5);
+    }
+    expect(falseAlarms).toBeLessThanOrEqual(2);
+
+    let detected = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const rand = rng(seed * 13 + 5);
+      let st = initialCellState(0.3, 0.5);
+      let delay = -1;
+      for (let i = 0; i < 75; i++) {
+        const r = updateCell(st, [rand() < (i < 60 ? 0.05 : 0.95) ? 1 : 0], day(i));
+        st = r.state;
+        if (i >= 60 && r.changeDetected && delay < 0) delay = i - 60;
+      }
+      if (delay >= 0 && delay <= 7) detected++;
+    }
+    expect(detected).toBeGreaterThanOrEqual(27);
   });
 
   it("does not flag a regime change for one rare mention", () => {

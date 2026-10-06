@@ -114,18 +114,23 @@ frequently sampled providers do not dominate). Snapshots (domain / provider / cl
 
 ## 7. Calibration & optimization
 
-Shadow measurements run reference ×2 and candidate ×1 on the same prompt in the same run. The candidate
-is judged **relative to the reference's own test–retest agreement**: if
-`agreement(ref, cand) / agreement(ref, ref')` has a cluster-bootstrap lower bound ≥ 0.85, the per-prompt
-mention-rate correlation reaches ≥ 0.8 × the reference's own retest correlation, and bias ≤ 10 pp over
-≥ 60 pairs / 15 prompts, it may be promoted to
-the high-frequency STANDARD configuration; the old one stays as low-frequency REFERENCE. Agreement uses
-mention/citation agreement, competitor Jaccard and rank-biased overlap of recommendation order. Absolute
-bars do not work here: with ~3 samples per prompt even an identical configuration cannot reach a high
-per-prompt correlation, so every criterion is relative to test–retest. Undecided after 300 pairs →
-rejected (keep the current configuration); decided pairs drop to one control group per week. The quota is
-global per pair (configuration equivalence is not domain-specific) and only half of the groups carry the
-replicate reference sample.
+Shadow measurements run the reference (plus a replicate on half of the groups) and the candidate on the
+same prompt in the same run, on a fixed panel of 15 prompts per domain (core first), so every prompt
+collects several samples. Rows carry their calibration pair; the global per-pair quota is consumed under an
+advisory lock (no over-spend when many domains plan at once). The candidate is judged **relative to the
+reference's own test–retest behaviour**: promote when, over ≥ 60 pairs / 15 prompts,
+
+- the cluster-bootstrap lower bound of `agreement(ref, cand) / agreement(ref, ref')` is ≥ 0.85
+  (agreement = mention/citation agreement, competitor Jaccard, rank-biased overlap of recommendations),
+- the per-prompt mention-rate correlation (ref vs cand) reaches ≥ 0.8 × the reference's retest correlation,
+  both computed on the same replicated groups — and the trend must be measurable (retest ≥ 0.3); thin
+  data keeps testing, it never counts as a pass,
+- the mention-rate bias is ≤ 10 pp.
+
+Undecided after 300 pairs → rejected (keep the current configuration), unless the retest shows the prompts
+genuinely behave alike, in which case agreement + bias decide. Decided pairs drop to one control group per
+week. A promoted candidate becomes the high-frequency STANDARD configuration; the previous one stays as a
+low-frequency REFERENCE.
 
 Provider value analysis: uniqueness = 1 − R² of the best single-provider predictor of per-prompt rates,
 combined with reach (Umami AI referrals per domain, shrunk towards the market prior) and cost per data

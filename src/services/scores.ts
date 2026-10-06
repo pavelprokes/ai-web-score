@@ -27,6 +27,7 @@ async function loadObservations(domainId: string, start: Date, end: Date): Promi
   const rows = await db
     .select({
       signals: measurementSignals.signals,
+      measurementId: measurements.id,
       providerId: measurements.providerId,
       promptId: promptVersions.promptId,
       importance: promptVersions.importance,
@@ -58,6 +59,7 @@ async function loadObservations(domainId: string, start: Date, end: Date): Promi
 
   return rows.map((r) => ({
     signals: r.signals as RawSignals,
+    measurementId: r.measurementId,
     providerId: r.providerId,
     promptId: r.promptId,
     clusterKey: r.clusterKey,

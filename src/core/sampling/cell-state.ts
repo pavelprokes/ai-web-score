@@ -44,8 +44,10 @@ const CUSUM_K = 0.5;
 const CUSUM_H = 5;
 /** Standardized innovations are clipped so one rare Bernoulli outcome cannot raise an alarm alone. */
 const CUSUM_CLIP = 3;
-/** Log-scale step of the volatility estimate per cycle (covariance matching on NIS). */
-const Q_LOG_RATE = 0.15;
+/** Log-scale step of the volatility estimate per unit of (NIS − 1) — covariance matching. */
+const Q_LOG_RATE = 0.06;
+/** Symmetric bound of one log-step; wide enough that it rarely binds (an asymmetric bound biases q). */
+const Q_LOG_STEP_MAX = 0.6;
 
 /** Observations closer together than this belong to the same measurement cycle. */
 const SAME_CYCLE_DAYS = 0.25;
@@ -109,7 +111,6 @@ export function updateCell(state: CellState, observations: number[], now: Date):
   }
   const k = observations.length;
   const xbar = observations.reduce((a, b) => a + b, 0) / k;
-  const dt = Math.max(daysBetween(state.lastObservedAt, now), 1 / 24);
 
   const vPred = predictedVariance(state, now);
   const r = observationNoise(state) / k;
@@ -134,11 +135,13 @@ export function updateCell(state: CellState, observations: number[], now: Date):
   let cusumUp = state.cusumUp ?? 0;
   let cusumDown = state.cusumDown ?? 0;
   if (!isFirst && !sameCycle) {
-    // Covariance matching: if innovations are larger than predicted (NIS > 1) the latent rate
-    // drifts more than assumed → raise q; smaller → lower it. Multiplicative and bounded so a
-    // single rare Bernoulli outcome (NIS ≫ 1 when p ≈ 0) cannot dominate; the expected log-step
-    // is ≈ 0 for a correctly specified model, so stationary cells settle at low volatility.
-    q = clamp(q * Math.exp(Q_LOG_RATE * clamp(nis - 1, -1, 2)), MIN_PROCESS_NOISE, MAX_PROCESS_NOISE);
+    // Covariance matching: E[NIS] = 1 for a correctly specified model, so a log-step linear in
+    // (NIS − 1) has zero expectation — q only moves systematically when innovations are larger
+    // (drift) or smaller (overestimated volatility) than predicted. The step must stay linear:
+    // Bernoulli NIS is heavily right-skewed (rare hits give NIS ≫ 1), so any asymmetric
+    // truncation would bias q. The small rate keeps single rare outcomes from dominating; the
+    // symmetric cap only binds for the rarest brands (where it is conservative and CUSUM covers).
+    q = clamp(q * Math.exp(clamp(Q_LOG_RATE * (nis - 1), -Q_LOG_STEP_MAX, Q_LOG_STEP_MAX)), MIN_PROCESS_NOISE, MAX_PROCESS_NOISE);
 
     // Regime change: innovations of a well-specified filter are white noise; a shift shows up as
     // a run of same-signed innovations while the estimate lags behind. A two-sided CUSUM on the

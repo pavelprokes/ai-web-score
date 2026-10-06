@@ -265,6 +265,8 @@ export const measurements = pgTable(
     sampleIndex: integer("sample_index").notNull(),
     /** STANDARD | CALIBRATION */
     purpose: text("purpose").notNull().default("STANDARD"),
+    /** Calibration pair "<referenceConfigId>><candidateConfigId>" this shadow measurement belongs to. */
+    calibrationPair: text("calibration_pair"),
     /** SCHEDULED | SUBMITTED (async task posted) | SUCCEEDED | FAILED */
     status: text("status").notNull().default("SCHEDULED"),
     externalTaskId: text("external_task_id"),
@@ -293,6 +295,7 @@ export const measurements = pgTable(
     index("measurements_domain_finished").on(t.domainId, t.finishedAt),
     index("measurements_status").on(t.status),
     index("measurements_cell").on(t.promptVersionId, t.configurationId),
+    index("measurements_calibration").on(t.calibrationPair, t.scheduledAt),
   ],
 ).enableRLS();
 

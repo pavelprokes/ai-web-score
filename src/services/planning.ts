@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   calibrationResults,
@@ -35,6 +35,8 @@ const CALIBRATION_PROMPTS_PER_CYCLE = 3;
  * global per pair and day — with N monitored domains calibration does not cost N×.
  */
 const CALIBRATION_GROUPS_PER_PAIR_PER_DAY = 3;
+/** Prompts per domain used for calibration (≥ minPrompts of the evaluation). */
+const CALIBRATION_PANEL_SIZE = 15;
 
 /** Cross-provider calibration: cheaper API candidate vs. consumer-UI reference. */
 const CROSS_CALIBRATION: Array<{ reference: string; candidate: string }> = [
@@ -147,19 +149,19 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
     ...DEFAULT_PLAN_OPTIONS,
     now,
     budgetUsd: budget - calibrationBudget,
-    ...(manual ? { minIntervalDays: 0, coreMaxIntervalDays: 0 } : {}),
+    // A manual run re-measures every core prompt on every enabled provider (within budget).
+    ...(manual ? { minIntervalDays: 0, coreMaxIntervalDays: 0, nonCoreProviderMaxIntervalDays: 0 } : {}),
   });
 
-  const calibration = await planCalibration(domainId, active.map(({ p, v }) => ({ promptVersionId: v.id, role: p.role })), configs, calibrationBudget, costOf, now);
-
+  const plannedStandard = plan.items.reduce((a, i) => a + i.samples, 0);
   const [run] = await db
     .insert(runs)
     .values({
       domainId,
       kind: "MEASUREMENT",
       trigger,
-      plannedCount: plan.items.reduce((a, i) => a + i.samples, 0) + calibration.length,
-      estimatedCostUsd: plan.totalCostUsd + calibration.reduce((a, c) => a + c.cost, 0),
+      plannedCount: plannedStandard,
+      estimatedCostUsd: plan.totalCostUsd,
       plan: {
         budgetUsd: budget,
         spentThisMonthUsd: spent,
@@ -167,42 +169,59 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
         cells: cells.length,
         unfundedCoreCells: plan.unfundedCoreCells.length,
         explorationCostUsd: plan.explorationCostUsd,
-        calibrationMeasurements: calibration.length,
       },
     })
     .returning();
   const runId = run!.id;
   const configById = new Map(configs.map((c) => [c.id, c]));
-
-  const rowsToInsert: Array<typeof measurements.$inferInsert> = [];
-  const add = (promptVersionId: string, configurationId: string, sampleIndex: number, purpose: string) => {
-    const c = configById.get(configurationId)!;
-    rowsToInsert.push({
-      id: measurementId([runId, promptVersionId, configurationId, String(sampleIndex), purpose]),
+  const row = (args: { promptVersionId: string; configurationId: string; sampleIndex: number; purpose: string; pair?: string }) => {
+    const c = configById.get(args.configurationId)!;
+    return {
+      id: measurementId([runId, args.promptVersionId, args.configurationId, String(args.sampleIndex), args.purpose, args.pair ?? ""]),
       runId,
       domainId,
-      promptVersionId,
-      configurationId,
+      promptVersionId: args.promptVersionId,
+      configurationId: args.configurationId,
       providerId: c.providerId,
       model: c.model,
-      sampleIndex,
-      purpose,
+      sampleIndex: args.sampleIndex,
+      purpose: args.purpose,
+      calibrationPair: args.pair ?? null,
       configuration: { id: c.id, providerId: c.providerId, model: c.model, params: c.params, role: c.role },
-    });
+    } satisfies typeof measurements.$inferInsert;
   };
-  for (const item of plan.items) for (let s = 0; s < item.samples; s++) add(item.promptVersionId, item.configurationId, s, "STANDARD");
-  for (const c of calibration) add(c.promptVersionId, c.configurationId, c.sampleIndex, "CALIBRATION");
 
-  if (rowsToInsert.length === 0) {
-    await db.update(runs).set({ status: "SUCCEEDED", finishedAt: now }).where(eq(runs.id, runId));
-  } else {
-    await db.insert(measurements).values(rowsToInsert).onConflictDoNothing();
-    await dispatchRun(runId);
-  }
+  const standardRows = plan.items.flatMap((item) =>
+    Array.from({ length: item.samples }, (_, s) =>
+      row({ promptVersionId: item.promptVersionId, configurationId: item.configurationId, sampleIndex: s, purpose: "STANDARD" }),
+    ),
+  );
+  if (standardRows.length) await db.insert(measurements).values(standardRows).onConflictDoNothing();
+
+  const calibration = await scheduleCalibration({
+    activePromptVersions: active.map(({ p, v }) => ({ promptVersionId: v.id, role: p.role })),
+    configs,
+    budget: calibrationBudget,
+    costOf,
+    now,
+    makeRow: (r) => row({ ...r, purpose: "CALIBRATION" }),
+  });
+
+  const total = standardRows.length + calibration.count;
+  await db
+    .update(runs)
+    .set({
+      plannedCount: total,
+      estimatedCostUsd: plan.totalCostUsd + calibration.cost,
+      plan: { ...(run!.plan as object), calibrationMeasurements: calibration.count },
+      ...(total === 0 ? { status: "SUCCEEDED", finishedAt: now } : {}),
+    })
+    .where(eq(runs.id, runId));
+  if (total > 0) await dispatchRun(runId);
 
   const intervalMs = (24 / Math.max(1, domain.cyclesPerDay)) * 3600_000;
   await db.update(domains).set({ nextPlanAt: new Date(now.getTime() + intervalMs) }).where(eq(domains.id, domainId));
-  return { runId, measurements: rowsToInsert.length, estimatedCostUsd: run!.estimatedCostUsd };
+  return { runId, measurements: total, estimatedCostUsd: plan.totalCostUsd + calibration.cost };
 }
 
 /** Enqueue execution: one job per sync measurement, one submit job per async configuration. */
@@ -229,13 +248,6 @@ export async function dispatchRun(runId: string) {
   }
 }
 
-interface CalibrationItem {
-  promptVersionId: string;
-  configurationId: string;
-  sampleIndex: number;
-  cost: number;
-}
-
 export function calibrationPairs(configs: ConfigRow[]): Array<{ reference: ConfigRow; candidate: ConfigRow }> {
   const byId = new Map(configs.map((c) => [c.id, c]));
   const pairs: Array<{ reference: ConfigRow; candidate: ConfigRow }> = [];
@@ -258,85 +270,109 @@ export function calibrationPairs(configs: ConfigRow[]): Array<{ reference: Confi
   return pairs;
 }
 
+export function calibrationPairKey(pair: { reference: { id: string }; candidate: { id: string } }) {
+  return `${pair.reference.id}>${pair.candidate.id}`;
+}
+
 /**
- * Shadow measurements (§6): reference ×2 (test–retest ceiling) + candidate ×1 on the
- * same prompt at the same time. Decided pairs drop to a weekly control cadence.
+ * Shadow measurements (§6): reference (+ replicate on half of the groups) and candidate on the
+ * same prompt at the same time. Rows carry their pair key, so a configuration that is the
+ * reference of one pair and the candidate of another never consumes the other pair's quota.
+ * The global per-pair quota is checked and consumed under a per-pair advisory lock, so
+ * concurrent domain plans cannot exceed it. Decided pairs drop to a weekly control group.
  */
-async function planCalibration(
-  domainId: string,
-  active: Array<{ promptVersionId: string; role: string | null }>,
-  configs: ConfigRow[],
-  budget: number,
-  costOf: (c: ConfigRow) => number,
-  now: Date,
-): Promise<CalibrationItem[]> {
-  const pairs = calibrationPairs(configs);
-  if (pairs.length === 0 || budget <= 0) return [];
-  const recent = await getDb()
+async function scheduleCalibration(args: {
+  activePromptVersions: Array<{ promptVersionId: string; role: string | null }>;
+  configs: ConfigRow[];
+  budget: number;
+  costOf: (c: ConfigRow) => number;
+  now: Date;
+  makeRow: (r: { promptVersionId: string; configurationId: string; sampleIndex: number; pair: string }) => typeof measurements.$inferInsert;
+}): Promise<{ count: number; cost: number }> {
+  const { activePromptVersions, costOf, now } = args;
+  const pairs = calibrationPairs(args.configs);
+  if (pairs.length === 0 || args.budget <= 0 || activePromptVersions.length === 0) return { count: 0, cost: 0 };
+  const db = getDb();
+  const recent = await db
     .select()
     .from(calibrationResults)
     .where(gte(calibrationResults.createdAt, new Date(now.getTime() - 30 * 86_400_000)))
     .orderBy(desc(calibrationResults.createdAt));
-  const ordered = [...active].sort((a, b) => (a.role === "CORE" ? -1 : 0) - (b.role === "CORE" ? -1 : 0));
-  const out: CalibrationItem[] = [];
-  let spent = 0;
+  // A fixed calibration panel (core prompts first): per-prompt rates need several samples each,
+  // so spreading groups over the whole portfolio (1 sample per prompt) would make the per-prompt
+  // trend check uninformative.
+  const panel = [...activePromptVersions]
+    .sort((a, b) => Number(b.role === "CORE") - Number(a.role === "CORE") || a.promptVersionId.localeCompare(b.promptVersionId))
+    .slice(0, CALIBRATION_PANEL_SIZE);
+  const pvIds = panel.map((a) => a.promptVersionId);
+  const coreFirst = panel;
+  let count = 0;
+  let cost = 0;
+
   for (const pair of pairs) {
+    const key = calibrationPairKey(pair);
+    const refCost = costOf(pair.reference);
+    const candCost = costOf(pair.candidate);
+    if (cost + refCost + candCost > args.budget) break;
     const decided = recent.find(
       (r) => r.referenceConfigurationId === pair.reference.id && r.candidateConfigurationId === pair.candidate.id && r.decision !== "KEEP_TESTING",
     );
-    const recentGroups = async (days: number) => {
-      const [row] = await getDb()
-        .select({ n: sql<number>`count(*)::int` })
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`);
+      // One candidate row per group → counting candidate rows of this pair counts groups.
+      const groupsSince = async (days: number) => {
+        const [r] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(measurements)
+          .where(
+            and(
+              eq(measurements.calibrationPair, key),
+              eq(measurements.configurationId, pair.candidate.id),
+              gte(measurements.scheduledAt, new Date(now.getTime() - days * 86_400_000)),
+            ),
+          );
+        return Number(r?.n ?? 0);
+      };
+      if (decided && (await groupsSince(7)) > 0) return;
+      const quota = Math.min(CALIBRATION_PROMPTS_PER_CYCLE, (decided ? 1 : CALIBRATION_GROUPS_PER_PAIR_PER_DAY) - (await groupsSince(1)));
+      if (quota <= 0) return;
+
+      // Least-calibrated prompts of this domain first (core first on ties): uniform coverage,
+      // which the per-prompt correlation check needs, independent of when the cron runs.
+      const counts = await tx
+        .select({ pv: measurements.promptVersionId, n: sql<number>`count(*)::int` })
         .from(measurements)
         .where(
           and(
-            eq(measurements.purpose, "CALIBRATION"),
+            eq(measurements.calibrationPair, key),
             eq(measurements.configurationId, pair.candidate.id),
-            gte(measurements.scheduledAt, new Date(now.getTime() - days * 86_400_000)),
+            inArray(measurements.promptVersionId, pvIds),
           ),
-        );
-      return Number(row?.n ?? 0);
-    };
-    // A decided pair only needs a weekly control sample.
-    if (decided && (await recentGroups(7)) > 0) continue;
-    const done = { n: await recentGroups(1) };
-    const quota = Math.min(CALIBRATION_PROMPTS_PER_CYCLE, CALIBRATION_GROUPS_PER_PAIR_PER_DAY - Number(done?.n ?? 0));
-    const pairCost = 2 * costOf(pair.reference) + costOf(pair.candidate);
-    // Least-calibrated prompts first (core before rotating): uniform prompt coverage, which the
-    // per-prompt correlation check needs, independent of when the cron happens to run.
-    const counts = await getDb()
-      .select({ pv: measurements.promptVersionId, n: sql<number>`count(*)::int` })
-      .from(measurements)
-      .where(and(eq(measurements.purpose, "CALIBRATION"), eq(measurements.configurationId, pair.candidate.id)))
-      .groupBy(measurements.promptVersionId);
-    const calibrated = new Map(counts.map((c) => [c.pv, Number(c.n)]));
-    const candidates = [...ordered].sort(
-      (a, b) => (calibrated.get(a.promptVersionId) ?? 0) - (calibrated.get(b.promptVersionId) ?? 0),
-    );
-    for (let k = 0; k < quota && candidates.length; k++) {
-      if (spent + pairCost > budget) break;
-      const pv = candidates[k % candidates.length]!;
-      // The test–retest replicate (reference ×2) is only needed to estimate the agreement ceiling;
-      // half of the groups are enough for that and save a third of calibration cost.
-      const withReplicate = ((calibrated.get(pv.promptVersionId) ?? 0) + k) % 2 === 0;
-      out.push(
-        { promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 100, cost: costOf(pair.reference) },
-        ...(withReplicate
-          ? [{ promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 101, cost: costOf(pair.reference) }]
-          : []),
-        { promptVersionId: pv.promptVersionId, configurationId: pair.candidate.id, sampleIndex: 100, cost: costOf(pair.candidate) },
-      );
-      spent += withReplicate ? pairCost : pairCost - costOf(pair.reference);
-    }
+        )
+        .groupBy(measurements.promptVersionId);
+      const calibrated = new Map(counts.map((c) => [c.pv, Number(c.n)]));
+      const chosen = [...coreFirst]
+        .sort((a, b) => (calibrated.get(a.promptVersionId) ?? 0) - (calibrated.get(b.promptVersionId) ?? 0))
+        .slice(0, quota);
+
+      const rows: Array<typeof measurements.$inferInsert> = [];
+      for (const pv of chosen) {
+        // The replicate is only needed to estimate the test–retest ceiling: half of the groups.
+        const withReplicate = (calibrated.get(pv.promptVersionId) ?? 0) % 2 === 0;
+        const groupCost = refCost * (withReplicate ? 2 : 1) + candCost;
+        if (cost + groupCost > args.budget) break;
+        rows.push(args.makeRow({ promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 100, pair: key }));
+        if (withReplicate) rows.push(args.makeRow({ promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 101, pair: key }));
+        rows.push(args.makeRow({ promptVersionId: pv.promptVersionId, configurationId: pair.candidate.id, sampleIndex: 100, pair: key }));
+        cost += groupCost;
+      }
+      if (rows.length) {
+        await tx.insert(measurements).values(rows).onConflictDoNothing();
+        count += rows.length;
+      }
+    });
   }
-  // Deduplicate (a config may be reference in one pair and candidate in another).
-  const seen = new Set<string>();
-  return out.filter((c) => {
-    const k = `${c.promptVersionId}|${c.configurationId}|${c.sampleIndex}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return { count, cost };
 }
 
 export async function configurationSeed(configurationId: string): Promise<ProviderConfigurationSeed> {

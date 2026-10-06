@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { calibrationResults, domains, measurementSignals, measurements, providerConfigurations, providers } from "@/db/schema";
 import { reachFromReferrals } from "@/core/optimization/provider-value";
@@ -6,7 +6,10 @@ import { type CalibrationPair, evaluateCalibration } from "@/core/optimization/c
 import { fetchAiReferrals } from "@/core/analytics/umami";
 import { listProviders } from "@/core/measurement/providers";
 import type { DeterministicSignals } from "@/core/signals/extract";
-import { calibrationPairs, enabledConfigurations } from "./planning";
+import { calibrationPairKey, calibrationPairs, enabledConfigurations } from "./planning";
+
+/** Enough rows for the max-pairs stop (≤3 rows per group). */
+const MAX_CALIBRATION_ROWS = 1200;
 
 /**
  * OPTIMIZATION — "How can we measure this reliably for the lowest reasonable cost?"
@@ -21,8 +24,9 @@ export async function runOptimizer() {
 export async function evaluateCalibrations() {
   const db = getDb();
   const configs = await enabledConfigurations();
-  const since = new Date(Date.now() - 90 * 86_400_000);
   for (const pair of calibrationPairs(configs)) {
+    // All groups of exactly this pair (no time window, so the max-pairs stop is reachable);
+    // newest first, bounded so evaluation cost stays flat.
     const rows = await db
       .select({
         runId: measurements.runId,
@@ -33,25 +37,20 @@ export async function evaluateCalibrations() {
       })
       .from(measurements)
       .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
-      .where(
-        and(
-          eq(measurements.purpose, "CALIBRATION"),
-          eq(measurements.status, "SUCCEEDED"),
-          gte(measurements.finishedAt, since),
-          sql`${measurements.configurationId} in (${pair.reference.id}, ${pair.candidate.id})`,
-        ),
-      );
+      .where(and(eq(measurements.calibrationPair, calibrationPairKey(pair)), eq(measurements.status, "SUCCEEDED")))
+      .orderBy(desc(measurements.scheduledAt))
+      .limit(MAX_CALIBRATION_ROWS);
     const groups = new Map<string, { ref: DeterministicSignals[]; cand?: DeterministicSignals; promptId: string }>();
     for (const r of rows) {
       const key = `${r.runId}|${r.promptVersionId}`;
       const g = groups.get(key) ?? { ref: [], promptId: r.promptVersionId };
-      if (r.configurationId === pair.reference.id) g.ref.push(r.signals as DeterministicSignals);
+      if (r.configurationId === pair.reference.id) g.ref[r.sampleIndex === 101 ? 1 : 0] = r.signals as DeterministicSignals;
       else g.cand = r.signals as DeterministicSignals;
       groups.set(key, g);
     }
     const pairs: CalibrationPair[] = [];
     for (const g of groups.values()) {
-      if (!g.cand || g.ref.length === 0) continue;
+      if (!g.cand || !g.ref[0]) continue;
       pairs.push({ promptId: g.promptId, reference: g.ref[0]!, candidate: g.cand, referenceReplicate: g.ref[1] });
     }
     if (pairs.length === 0) continue;

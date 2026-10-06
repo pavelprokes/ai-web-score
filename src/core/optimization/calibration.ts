@@ -50,6 +50,9 @@ export const DEFAULT_CALIBRATION_THRESHOLDS: CalibrationThresholds = {
   maxPairs: 300,
 };
 
+/** Below this test–retest correlation the per-prompt trend carries no usable signal. */
+const MIN_INFORMATIVE_RETEST = 0.3;
+
 export type CalibrationDecision = "PROMOTE" | "KEEP_TESTING" | "REJECT";
 
 export interface CalibrationReport {
@@ -136,19 +139,21 @@ export function evaluateCalibration(
   const bias = groups.length ? mean(candRates)! - mean(refRates)! : null;
   // With few samples per prompt, per-prompt rates are noisy and even an identical configuration
   // cannot reach a high correlation. Judge the candidate against the reference's own retest
-  // correlation (same prompts, independent reference samples) instead of an absolute bar.
-  const retestPrompts = new Map<string, { a: number[]; b: number[] }>();
+  // correlation — computed on the SAME replicated groups for both, so the two correlations
+  // average the same number of samples per prompt (apples to apples).
+  const rep = new Map<string, { ref: number[]; cand: number[]; ref2: number[] }>();
   for (const p of pairs) {
     if (!p.referenceReplicate) continue;
-    const g = retestPrompts.get(p.promptId) ?? { a: [], b: [] };
-    g.a.push(Number(p.reference.brandMentioned));
-    g.b.push(Number(p.referenceReplicate.brandMentioned));
-    retestPrompts.set(p.promptId, g);
+    const g = rep.get(p.promptId) ?? { ref: [], cand: [], ref2: [] };
+    g.ref.push(Number(p.reference.brandMentioned));
+    g.cand.push(Number(p.candidate.brandMentioned));
+    g.ref2.push(Number(p.referenceReplicate.brandMentioned));
+    rep.set(p.promptId, g);
   }
-  const retestCorr =
-    retestPrompts.size >= 10
-      ? spearman([...retestPrompts.values()].map((g) => mean(g.a)!), [...retestPrompts.values()].map((g) => mean(g.b)!))
-      : null;
+  const repGroups = [...rep.values()];
+  const enoughRetest = repGroups.length >= 10;
+  const retestCorr = enoughRetest ? spearman(repGroups.map((g) => mean(g.ref)!), repGroups.map((g) => mean(g.ref2)!)) : null;
+  const subsetCorr = enoughRetest ? spearman(repGroups.map((g) => mean(g.ref)!), repGroups.map((g) => mean(g.cand)!)) : null;
 
   let decision: CalibrationDecision = "KEEP_TESTING";
   if (pairs.length < t.minPairs || byPrompt.size < t.minPrompts) {
@@ -160,9 +165,13 @@ export function evaluateCalibration(
       relLow !== null ? relLow >= t.promoteRelativeAgreement : (crossComposite ?? 0) >= t.absoluteAgreement;
     const agreementBad =
       relHigh !== null ? relHigh < t.rejectRelativeAgreement : (crossComposite ?? 0) < t.absoluteAgreement - 0.15;
-    const trendOk =
-      corr === null ||
-      (retestCorr !== null && retestCorr > 0 ? corr >= t.minPromptRateCorrelation * retestCorr : corr >= t.minPromptRateCorrelation);
+    // The per-prompt trend must be measurable before a promotion: the reference has to reproduce
+    // its own per-prompt pattern (retest ≥ 0.3). Thin data never counts as a pass — testing goes on.
+    // Only after the max-pairs budget, a still-flat retest means the prompts genuinely behave alike;
+    // equivalence then rests on the agreement ratio and the bias check alone.
+    const trendMeasurable = retestCorr !== null && retestCorr >= MIN_INFORMATIVE_RETEST && subsetCorr !== null;
+    const exhausted = pairs.length >= t.maxPairs;
+    const trendOk = trendMeasurable ? subsetCorr! >= t.minPromptRateCorrelation * retestCorr! : exhausted;
     const biasOk = bias === null || Math.abs(bias) <= t.maxMentionRateBias;
 
     if (agreementBad) {
@@ -176,7 +185,11 @@ export function evaluateCalibration(
       reasons.push(`Not shown to be equivalent after ${pairs.length} pairs — keeping the current configuration.`);
     } else {
       if (!agreementOk) reasons.push("Agreement not yet conclusively high enough.");
-      if (!trendOk) reasons.push(`Per-prompt mention-rate correlation ${corr?.toFixed(2)} below threshold.`);
+      if (!trendOk && trendMeasurable) {
+        reasons.push(`Per-prompt mention-rate correlation ${subsetCorr?.toFixed(2)} < ${t.minPromptRateCorrelation} × retest ${retestCorr?.toFixed(2)}.`);
+      } else if (!trendOk) {
+        reasons.push("Per-prompt trend not measurable yet (too few samples per prompt).");
+      }
       if (!biasOk) reasons.push(`Systematic mention-rate bias ${bias?.toFixed(2)} too large.`);
     }
   }

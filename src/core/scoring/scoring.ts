@@ -15,6 +15,8 @@ export interface ScoringObservation {
   weight: number;
   providerId: string;
   promptId: string;
+  /** Lets judgement-based metrics count an inherited judgement only once. */
+  measurementId?: string;
 }
 
 export interface RateWithCi {
@@ -103,6 +105,16 @@ function weightedMean(obs: ScoringObservation[], pick: (o: ScoringObservation) =
   return w > 0 ? s / w : null;
 }
 
+function uniqueJudgements(obs: ScoringObservation[]): ScoringObservation[] {
+  const byKey = new Map<string, ScoringObservation>();
+  obs.forEach((o, i) => {
+    const key = o.signals.judgementCarriedFrom ?? o.measurementId ?? `#${i}`;
+    const prev = byKey.get(key);
+    if (!prev || o.weight > prev.weight) byKey.set(key, o);
+  });
+  return [...byKey.values()];
+}
+
 export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SCORING_VERSION): VisibilityMetrics {
   const version = getScoringVersion(versionId);
   const valid = obs.filter((o) => !o.signals.noAnswer && o.weight > 0);
@@ -137,7 +149,9 @@ export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SC
   const citationShare = allCit > 0 ? ownCit / allCit : null;
   const shareOfVoice = allVoice > 0 ? ownVoice / allVoice : valid.length ? 0 : null;
 
-  const mentioned = valid.filter((o) => o.signals.brandMentioned);
+  // Judgement-based metrics: an inherited (carried) judgement is one LLM observation, not N —
+  // count each distinct judgement once so duplicates neither dominate the mean nor fake precision.
+  const mentioned = uniqueJudgements(valid.filter((o) => o.signals.brandMentioned));
   const sentimentRaw = weightedMean(mentioned, (o) => o.signals.sentiment);
   const sentimentScore = sentimentRaw === null ? null : (sentimentRaw + 1) / 2;
   const accuracyScore = weightedMean(mentioned, (o) => {

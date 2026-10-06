@@ -61,6 +61,8 @@ export interface JudgementSignals {
   answerConfidence: number | null;
   /** Brands/companies recommended in the answer that are not tracked yet. */
   untrackedEntities: string[];
+  /** Set when the judgement was inherited from another measurement instead of an own LLM call. */
+  judgementCarriedFrom?: string;
 }
 
 export type RawSignals = DeterministicSignals & Partial<JudgementSignals>;

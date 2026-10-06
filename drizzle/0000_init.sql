@@ -129,6 +129,7 @@ CREATE TABLE "measurements" (
 	"model" text NOT NULL,
 	"sample_index" integer NOT NULL,
 	"purpose" text DEFAULT 'STANDARD' NOT NULL,
+	"calibration_pair" text,
 	"status" text DEFAULT 'SCHEDULED' NOT NULL,
 	"external_task_id" text,
 	"attempts" integer DEFAULT 0 NOT NULL,
@@ -307,6 +308,7 @@ CREATE INDEX "measurement_signals_analysis" ON "measurement_signals" USING btree
 CREATE INDEX "measurements_domain_finished" ON "measurements" USING btree ("domain_id","finished_at");--> statement-breakpoint
 CREATE INDEX "measurements_status" ON "measurements" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "measurements_cell" ON "measurements" USING btree ("prompt_version_id","configuration_id");--> statement-breakpoint
+CREATE INDEX "measurements_calibration" ON "measurements" USING btree ("calibration_pair","created_at");--> statement-breakpoint
 CREATE INDEX "price_entries_lookup" ON "price_entries" USING btree ("provider_id","model","effective_from");--> statement-breakpoint
 CREATE UNIQUE INDEX "prompt_versions_prompt_version" ON "prompt_versions" USING btree ("prompt_id","version");--> statement-breakpoint
 CREATE INDEX "prompts_domain_status" ON "prompts" USING btree ("domain_id","status");--> statement-breakpoint

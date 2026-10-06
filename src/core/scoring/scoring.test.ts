@@ -67,6 +67,20 @@ describe("scoring geo-v1", () => {
     // Missing sentiment/accuracy must not drag the score to zero.
     expect(m.components.sentiment).toBeNull();
   });
+  it("counts an inherited judgement once in sentiment/accuracy", () => {
+    const own = { ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: 1 };
+    const carried = { ...own, judgementCarriedFrom: "a" };
+    const other = { ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: -1 };
+    const obs = [
+      { signals: own, weight: 1, providerId: "p", promptId: "q", measurementId: "a" },
+      { signals: carried, weight: 1, providerId: "p", promptId: "q", measurementId: "b" },
+      { signals: carried, weight: 1, providerId: "p", promptId: "q", measurementId: "c" },
+      { signals: other, weight: 1, providerId: "p", promptId: "q", measurementId: "d" },
+    ];
+    // Two distinct judgements (+1 and −1) → neutral, not 3:1 positive.
+    expect(computeMetrics(obs).sentimentScore).toBeCloseTo(0.5);
+  });
+
   it("ignores refusals", () => {
     const m = computeMetrics([{ signals: sig({ noAnswer: true }), weight: 1, providerId: "p", promptId: "q" }]);
     expect(m.sampleCount).toBe(0);
@@ -111,6 +125,21 @@ describe("calibration", () => {
     };
     expect(make(0).decision).toBe("PROMOTE");
     expect(make(0.35).decision).not.toBe("PROMOTE");
+  });
+
+  it("does not promote a candidate with the right average but a scrambled per-prompt pattern", () => {
+    const rand = rng(9);
+    const pairs: CalibrationPair[] = [];
+    for (let p = 0; p < 30; p++) {
+      const rate = (p % 10) / 10;
+      const scrambled = ((p * 7) % 10) / 10; // same distribution of rates, different prompts
+      for (let k = 0; k < 6; k++) {
+        pairs.push({ promptId: `p${p}`, reference: mk(0, rand() < rate), candidate: mk(0, rand() < scrambled), referenceReplicate: mk(0, rand() < rate) });
+      }
+    }
+    const report = evaluateCalibration(pairs);
+    expect(report.promptMentionRateRetestCorrelation!).toBeGreaterThan(0.5);
+    expect(report.decision).not.toBe("PROMOTE");
   });
 
   it("keeps testing with too few pairs", () => {

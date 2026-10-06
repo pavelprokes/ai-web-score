@@ -171,15 +171,22 @@ export async function collectAnalysis() {
       pending++;
       continue;
     }
-    const followerMap = (b.items as { followers?: Record<string, string[]> }).followers ?? {};
+    const items = b.items as { representatives?: string[]; followers?: Record<string, string[]> };
+    const followerMap = items.followers ?? {};
+    const unseen = new Set(items.representatives ?? []);
     const usageByDomain = new Map<string, { input: number; output: number }>();
     for await (const r of await anthropicClient().messages.batches.results(b.id)) {
+      unseen.delete(r.custom_id);
       const [row] = await db
         .select({ s: measurementSignals, domainId: measurements.domainId })
         .from(measurementSignals)
         .innerJoin(measurements, eq(measurements.id, measurementSignals.measurementId))
         .where(eq(measurementSignals.measurementId, r.custom_id));
-      if (!row) continue;
+      if (!row) {
+        // Representative vanished (e.g. measurement deleted): its followers must not stay SUBMITTED.
+        await setStatus(followerMap[r.custom_id] ?? [], "PENDING");
+        continue;
+      }
       let judgement: LlmJudgement | null = null;
       if (r.result.type === "succeeded") {
         const msg = r.result.message;
@@ -202,6 +209,8 @@ export async function collectAnalysis() {
         await failGroup(r.custom_id, fids);
       }
     }
+    // Representatives missing from the results (should not happen) release their group too.
+    for (const repId of unseen) await failGroup(repId, followerMap[repId] ?? []);
     for (const [domainId, u] of usageByDomain) {
       await recordLlmUsage({ domainId, purpose: "analysis", model: b.model, inputTokens: u.input, outputTokens: u.output, batched: true });
       await enqueue("scores.compute", { domainId }, { dedupeKey: `scores:${domainId}`, runAt: new Date(Date.now() + 60_000) });

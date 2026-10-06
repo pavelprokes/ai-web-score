@@ -1,5 +1,5 @@
 {
-  "id": "8df39e47-c21c-4569-8a96-b3559cdc8f81",
+  "id": "bf24fbc7-fb1f-450c-9d28-81a094aad935",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -909,6 +909,12 @@
           "notNull": true,
           "default": "'STANDARD'"
         },
+        "calibration_pair": {
+          "name": "calibration_pair",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -1098,6 +1104,27 @@
             },
             {
               "expression": "configuration_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "measurements_calibration": {
+          "name": "measurements_calibration",
+          "columns": [
+            {
+              "expression": "calibration_pair",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
