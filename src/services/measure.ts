@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { cellStates, domains, measurementSignals, measurements, promptVersions, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
@@ -7,8 +7,8 @@ import type { MeasurementRequest } from "@/core/measurement/types";
 import { computeCost, selectPrice } from "@/core/pricing/cost";
 import { type CellState, confidence, initialCellState, recommendedIntervalDays, recommendedSampleCount, updateCell } from "@/core/sampling/cell-state";
 import { TARGET_SD } from "@/core/sampling/planner";
-import { shouldAnalyze } from "@/core/signals/analyze-llm";
-import { extractSignals, presenceIndex, type TrackedEntity } from "@/core/signals/extract";
+import { carryJudgement, JUDGEMENT_MAX_AGE_DAYS, shouldAnalyze } from "@/core/signals/analyze-llm";
+import { extractSignals, presenceIndex, type RawSignals, type TrackedEntity } from "@/core/signals/extract";
 import type { DomainProfile } from "@/core/domain-profile";
 import type { PromptRole } from "@/core/prompt";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
@@ -172,7 +172,17 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
   const { brand, competitors } = trackedEntities(latest.profile);
   const signals = extractSignals(result.answer, brand, competitors);
   const presence = presenceIndex(signals);
-  const needsAnalysis = shouldAnalyze(signals, id) && llmAvailable();
+  let needsAnalysis = shouldAnalyze(signals, id) && llmAvailable();
+  let storedSignals: RawSignals = signals;
+  let analysisStatus = needsAnalysis ? "PENDING" : "NOT_NEEDED";
+  if (needsAnalysis) {
+    const carried = carryJudgement(signals, await lastJudgement(m.domainId, m.promptVersionId, m.configurationId));
+    if (carried) {
+      storedSignals = carried;
+      analysisStatus = "CARRIED";
+      needsAnalysis = false;
+    }
+  }
 
   await db
     .update(measurements)
@@ -197,12 +207,12 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
     .values({
       measurementId: id,
       extractorVersion: signals.extractorVersion,
-      signals,
+      signals: storedSignals,
       brandMentioned: signals.brandMentioned,
       domainCited: signals.domainCited,
       recommendationPosition: signals.recommendationPosition,
       presence,
-      analysisStatus: needsAnalysis ? "PENDING" : "NOT_NEEDED",
+      analysisStatus,
     })
     .onConflictDoNothing();
 
@@ -247,4 +257,31 @@ async function updateCellState(domainId: string, promptVersionId: string, config
     .insert(cellStates)
     .values(values)
     .onConflictDoUpdate({ target: [cellStates.domainId, cellStates.promptVersionId, cellStates.configurationId], set: values });
+}
+
+/** Most recent LLM-judged measurement of the same cell (for judgement carry-over). */
+async function lastJudgement(domainId: string, promptVersionId: string, configurationId: string) {
+  const since = new Date(Date.now() - JUDGEMENT_MAX_AGE_DAYS * 86_400_000);
+  const [row] = await getDb()
+    .select({ id: measurements.id, finishedAt: measurements.finishedAt, signals: measurementSignals.signals })
+    .from(measurementSignals)
+    .innerJoin(measurements, eq(measurements.id, measurementSignals.measurementId))
+    .where(
+      and(
+        eq(measurements.domainId, domainId),
+        eq(measurements.promptVersionId, promptVersionId),
+        eq(measurements.configurationId, configurationId),
+        eq(measurementSignals.analysisStatus, "DONE"),
+        eq(measurementSignals.brandMentioned, true),
+        gte(measurements.finishedAt, since),
+      ),
+    )
+    .orderBy(desc(measurements.finishedAt))
+    .limit(1);
+  if (!row) return null;
+  return {
+    measurementId: row.id,
+    signals: row.signals as RawSignals,
+    ageDays: (Date.now() - (row.finishedAt ?? new Date()).getTime()) / 86_400_000,
+  };
 }

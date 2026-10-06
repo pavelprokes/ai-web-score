@@ -24,6 +24,15 @@ const INTERNAL_PRICES: Record<string, { input: number; output: number }> = {
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
+/**
+ * Thinking setting for classification-style calls: reasoning tokens add cost without
+ * improving a sentiment/accuracy label. Sonnet 5.5 turns thinking off with `between_tools`;
+ * Haiku 4.5 has it off by default; Opus 5.5 cannot disable it (lower effort instead).
+ */
+export function noThinking(model: string): { thinking?: { type: "between_tools" } } {
+  return model.startsWith("claude-sonnet-5-5") ? { thinking: { type: "between_tools" } } : {};
+}
+
 let client: Anthropic | null = null;
 export function anthropicClient() {
   client ??= new Anthropic();
@@ -82,6 +91,8 @@ export async function generateStructured<T extends z.ZodType>(args: {
   model?: string;
   effort?: "low" | "medium" | "high";
   maxTokens?: number;
+  /** Classification-style call: disable thinking where the model allows it. */
+  classification?: boolean;
 }): Promise<z.infer<T>> {
   const model = args.model ?? INTERNAL_MODEL;
   if (override) {
@@ -100,6 +111,7 @@ export async function generateStructured<T extends z.ZodType>(args: {
     model,
     max_tokens: args.maxTokens ?? 32000,
     system: args.system,
+    ...(args.classification ? noThinking(model) : {}),
     output_config: { effort: args.effort ?? "medium", format: zodOutputFormat(args.schema) },
     messages: [{ role: "user", content: args.user }],
   });

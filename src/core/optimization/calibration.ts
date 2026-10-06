@@ -29,18 +29,25 @@ export interface CalibrationThresholds {
   rejectRelativeAgreement: number;
   /** Absolute agreement threshold used when no replicates are available. */
   absoluteAgreement: number;
+  /** Per-prompt rate correlation (cand vs ref) relative to the reference's own test–retest correlation. */
   minPromptRateCorrelation: number;
   maxMentionRateBias: number;
+  /** Stop testing (keep the current configuration) when still undecided after this many pairs. */
+  maxPairs: number;
 }
 
 export const DEFAULT_CALIBRATION_THRESHOLDS: CalibrationThresholds = {
   minPairs: 60,
   minPrompts: 15,
-  promoteRelativeAgreement: 0.9,
+  // Binary answers are noisy: even an identical configuration needs hundreds of pairs for a tight
+  // bound. 0.85 tolerates at most ~15 % loss of agreement vs. the reference's own retest ceiling;
+  // the bias and relative-correlation checks guard the trend.
+  promoteRelativeAgreement: 0.85,
   rejectRelativeAgreement: 0.75,
   absoluteAgreement: 0.75,
   minPromptRateCorrelation: 0.8,
   maxMentionRateBias: 0.1,
+  maxPairs: 300,
 };
 
 export type CalibrationDecision = "PROMOTE" | "KEEP_TESTING" | "REJECT";
@@ -59,6 +66,8 @@ export interface CalibrationReport {
   testRetestComposite: number | null;
   relativeAgreement: { estimate: number | null; low: number; high: number };
   promptMentionRateCorrelation: number | null;
+  /** Same correlation between two reference samples — the attainable ceiling. */
+  promptMentionRateRetestCorrelation: number | null;
   mentionRateBias: number | null;
   decision: CalibrationDecision;
   reasons: string[];
@@ -125,6 +134,21 @@ export function evaluateCalibration(
   const candRates = groups.map((g) => mean(g.candM)!);
   const corr = spearman(refRates, candRates);
   const bias = groups.length ? mean(candRates)! - mean(refRates)! : null;
+  // With few samples per prompt, per-prompt rates are noisy and even an identical configuration
+  // cannot reach a high correlation. Judge the candidate against the reference's own retest
+  // correlation (same prompts, independent reference samples) instead of an absolute bar.
+  const retestPrompts = new Map<string, { a: number[]; b: number[] }>();
+  for (const p of pairs) {
+    if (!p.referenceReplicate) continue;
+    const g = retestPrompts.get(p.promptId) ?? { a: [], b: [] };
+    g.a.push(Number(p.reference.brandMentioned));
+    g.b.push(Number(p.referenceReplicate.brandMentioned));
+    retestPrompts.set(p.promptId, g);
+  }
+  const retestCorr =
+    retestPrompts.size >= 10
+      ? spearman([...retestPrompts.values()].map((g) => mean(g.a)!), [...retestPrompts.values()].map((g) => mean(g.b)!))
+      : null;
 
   let decision: CalibrationDecision = "KEEP_TESTING";
   if (pairs.length < t.minPairs || byPrompt.size < t.minPrompts) {
@@ -136,7 +160,9 @@ export function evaluateCalibration(
       relLow !== null ? relLow >= t.promoteRelativeAgreement : (crossComposite ?? 0) >= t.absoluteAgreement;
     const agreementBad =
       relHigh !== null ? relHigh < t.rejectRelativeAgreement : (crossComposite ?? 0) < t.absoluteAgreement - 0.15;
-    const trendOk = corr === null || corr >= t.minPromptRateCorrelation;
+    const trendOk =
+      corr === null ||
+      (retestCorr !== null && retestCorr > 0 ? corr >= t.minPromptRateCorrelation * retestCorr : corr >= t.minPromptRateCorrelation);
     const biasOk = bias === null || Math.abs(bias) <= t.maxMentionRateBias;
 
     if (agreementBad) {
@@ -145,6 +171,9 @@ export function evaluateCalibration(
     } else if (agreementOk && trendOk && biasOk) {
       decision = "PROMOTE";
       reasons.push("Candidate is statistically interchangeable with the reference for visibility signals.");
+    } else if (pairs.length >= t.maxPairs) {
+      decision = "REJECT";
+      reasons.push(`Not shown to be equivalent after ${pairs.length} pairs — keeping the current configuration.`);
     } else {
       if (!agreementOk) reasons.push("Agreement not yet conclusively high enough.");
       if (!trendOk) reasons.push(`Per-prompt mention-rate correlation ${corr?.toFixed(2)} below threshold.`);
@@ -166,6 +195,7 @@ export function evaluateCalibration(
     testRetestComposite: retestComposite,
     relativeAgreement: { estimate: rel.estimate, low: rel.low, high: rel.high },
     promptMentionRateCorrelation: corr,
+    promptMentionRateRetestCorrelation: retestCorr,
     mentionRateBias: bias,
     decision,
     reasons,

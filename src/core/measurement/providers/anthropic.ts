@@ -114,6 +114,9 @@ export const claudeApi: ProviderAdapter = {
   configurations: [
     { id: "claude-api:sonnet-5-5", model: "claude-sonnet-5-5", params: { maxUses: 5 }, role: "STANDARD" },
     { id: "claude-api:opus-5-5", model: "claude-opus-5-5", params: { maxUses: 5 }, role: "REFERENCE" },
+    // Cost candidate: fewer searches + low effort (fewer tool calls, shorter answers). Search fees and
+    // re-fed search results dominate Claude's cost; calibration decides whether results stay equivalent.
+    { id: "claude-api:sonnet-5-5-lean", model: "claude-sonnet-5-5", params: { maxUses: 2, effort: "low", maxTokens: 3000 }, role: "CANDIDATE" },
   ],
   capability: {
     webSearchCapability: true,

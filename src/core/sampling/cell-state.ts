@@ -27,6 +27,9 @@ export interface CellState {
   changeDetectedAt: string | null;
   /** EWMA of the within-batch sample variance (stochasticity of a single prompt run). */
   responseVariance: number;
+  /** Two-sided CUSUM statistics of standardized innovations (change detection). */
+  cusumUp?: number;
+  cusumDown?: number;
 }
 
 /** Variance of Uniform(0,1) — what we know about a rate we have never measured. */
@@ -36,9 +39,14 @@ export const MAX_PROCESS_NOISE = 0.02;
 const DEFAULT_PROCESS_NOISE = 0.002;
 /** Floor for Bernoulli observation noise so p≈0 or p≈1 cells still learn. */
 const MIN_OBSERVATION_NOISE = 0.04;
-/** χ²(1) at 99% — an innovation this surprising is treated as a probable regime change. */
-const CHANGE_NIS_THRESHOLD = 6.63;
-const Q_LEARNING_RATE = 0.25;
+/** CUSUM reference value (allowance) and decision interval, in standard deviations. */
+const CUSUM_K = 0.5;
+const CUSUM_H = 5;
+/** Standardized innovations are clipped so one rare Bernoulli outcome cannot raise an alarm alone. */
+const CUSUM_CLIP = 3;
+/** Log-scale step of the volatility estimate per cycle (covariance matching on NIS). */
+const Q_LOG_RATE = 0.15;
+
 /** Observations closer together than this belong to the same measurement cycle. */
 const SAME_CYCLE_DAYS = 0.25;
 const DAY_MS = 86_400_000;
@@ -107,7 +115,10 @@ export function updateCell(state: CellState, observations: number[], now: Date):
   const r = observationNoise(state) / k;
   const innovation = xbar - state.mean;
   const s = vPred + r;
-  const nis = (innovation * innovation) / s;
+  // Expected squared innovation for Bernoulli data: p(1−p) + Var(estimate), and since
+  // E[m(1−m)] = p(1−p) − Var(m), the unbiased form is m(1−m) + 2·Var. Without the extra
+  // term an imprecise mean understates noise, noise looks like drift and q never settles.
+  const nis = (innovation * innovation) / (vPred + (observationNoise(state) + vPred) / k);
   const gain = vPred / s;
 
   let mean = clamp(state.mean + gain * innovation, 0, 1);
@@ -120,20 +131,30 @@ export function updateCell(state: CellState, observations: number[], now: Date):
   const sameCycle = daysBetween(state.lastObservedAt, now) < SAME_CYCLE_DAYS;
   let changeDetected = false;
 
+  let cusumUp = state.cusumUp ?? 0;
+  let cusumDown = state.cusumDown ?? 0;
   if (!isFirst && !sameCycle) {
-    // Innovation excess over what noise + known drift explain → evidence of more drift.
-    const excess = innovation * innovation - s;
-    // Clamp the single-observation estimate first: one surprising Bernoulli draw is weak evidence.
-    const qObserved = clamp(excess > 0 ? q + excess / dt : q * 0.85, MIN_PROCESS_NOISE, MAX_PROCESS_NOISE);
-    q = clamp((1 - Q_LEARNING_RATE) * q + Q_LEARNING_RATE * qObserved, MIN_PROCESS_NOISE, MAX_PROCESS_NOISE);
+    // Covariance matching: if innovations are larger than predicted (NIS > 1) the latent rate
+    // drifts more than assumed → raise q; smaller → lower it. Multiplicative and bounded so a
+    // single rare Bernoulli outcome (NIS ≫ 1 when p ≈ 0) cannot dominate; the expected log-step
+    // is ≈ 0 for a correctly specified model, so stationary cells settle at low volatility.
+    q = clamp(q * Math.exp(Q_LOG_RATE * clamp(nis - 1, -1, 2)), MIN_PROCESS_NOISE, MAX_PROCESS_NOISE);
 
-    if (nis > CHANGE_NIS_THRESHOLD && state.n >= 3) {
-      // Probable regime change: re-open the estimate so it tracks the new level fast
-      // and the planner temporarily increases sampling (§7 "sudden score change").
+    // Regime change: innovations of a well-specified filter are white noise; a shift shows up as
+    // a run of same-signed innovations while the estimate lags behind. A two-sided CUSUM on the
+    // clipped standardized innovation detects that run (and ignores isolated rare outcomes).
+    const z = clamp(Math.sign(innovation) * Math.sqrt(nis), -CUSUM_CLIP, CUSUM_CLIP);
+    cusumUp = Math.max(0, cusumUp + z - CUSUM_K);
+    cusumDown = Math.max(0, cusumDown - z - CUSUM_K);
+    if ((cusumUp > CUSUM_H || cusumDown > CUSUM_H) && state.n >= 3) {
+      // Re-open the estimate so it tracks the new level fast and the planner temporarily
+      // increases sampling (§7 "sudden score change").
       changeDetected = true;
       changeDetectedAt = now.toISOString();
       variance = Math.min(PRIOR_VARIANCE, variance + innovation * innovation);
       mean = clamp(state.mean + 0.75 * innovation, 0, 1);
+      cusumUp = 0;
+      cusumDown = 0;
     }
   }
 
@@ -152,6 +173,8 @@ export function updateCell(state: CellState, observations: number[], now: Date):
       lastObservedAt: now.toISOString(),
       changeDetectedAt,
       responseVariance,
+      cusumUp,
+      cusumDown,
     },
     innovation,
     normalizedInnovation: nis,

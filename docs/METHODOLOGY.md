@@ -58,16 +58,20 @@ Each cell = domain × prompt version × provider configuration keeps a scalar Ka
 latent visibility rate (presence index = mean of mentioned / cited / recommended):
 
 - observation noise `R = p(1−p)` — normal LLM response variance;
-- process noise `q` (learned per cell) — real drift of the rate (trend). Samples within the same
-  cycle never teach `q`, and a single surprising draw cannot jump `q` to the maximum;
-- innovation outliers (NIS > 6.63, χ²₁ 99 %) mark a regime change → variance re-opens and the cell's
+- process noise `q` (learned per cell) — real drift of the rate (trend), adapted by covariance matching
+  on the normalized innovation with the unbiased Bernoulli expectation `m(1−m) + 2·Var`, in bounded
+  multiplicative steps (stationary cells settle at low volatility; samples within one cycle never
+  teach `q`);
+- regime changes are detected with a two-sided CUSUM on clipped standardized innovations (a shift shows up
+  as a run of same-signed innovations; one rare mention does not) → variance re-opens and the cell's
   weight is boosted for 7 days ("sudden score change → measure more").
 
 Uncertainty grows between measurements at rate `q`, so the **value of information** of a sample is
 `VOI = weight × (Var_before − Var_after)` with `weight = role × prompt importance × provider weight`.
 Each cycle the planner buys samples greedily by VOI per dollar within the paced budget:
 
-- core prompts on core providers have a hard guarantee (at least weekly);
+- core prompts on core providers have a hard guarantee (at least weekly); on low-reach providers a sparse
+  monthly baseline, so the optimizer always has data to judge them;
 - diminishing VOI sheds repetitions first, then low-weight providers, exploration, stable prompts;
 - samples whose variance reduction is negligible, or whose VOI per USD is below a floor, are skipped
   even if budget remains — the budget is a ceiling, not a target. In practice cheap consumer-UI captures
@@ -112,10 +116,16 @@ frequently sampled providers do not dominate). Snapshots (domain / provider / cl
 
 Shadow measurements run reference ×2 and candidate ×1 on the same prompt in the same run. The candidate
 is judged **relative to the reference's own test–retest agreement**: if
-`agreement(ref, cand) / agreement(ref, ref')` has a cluster-bootstrap lower bound ≥ 0.9, per-prompt
-mention-rate correlation ≥ 0.8 and bias ≤ 10 pp over ≥ 60 pairs / 15 prompts, it may be promoted to
+`agreement(ref, cand) / agreement(ref, ref')` has a cluster-bootstrap lower bound ≥ 0.85, the per-prompt
+mention-rate correlation reaches ≥ 0.8 × the reference's own retest correlation, and bias ≤ 10 pp over
+≥ 60 pairs / 15 prompts, it may be promoted to
 the high-frequency STANDARD configuration; the old one stays as low-frequency REFERENCE. Agreement uses
-mention/citation agreement, competitor Jaccard and rank-biased overlap of recommendation order.
+mention/citation agreement, competitor Jaccard and rank-biased overlap of recommendation order. Absolute
+bars do not work here: with ~3 samples per prompt even an identical configuration cannot reach a high
+per-prompt correlation, so every criterion is relative to test–retest. Undecided after 300 pairs →
+rejected (keep the current configuration); decided pairs drop to one control group per week. The quota is
+global per pair (configuration equivalence is not domain-specific) and only half of the groups carry the
+replicate reference sample.
 
 Provider value analysis: uniqueness = 1 − R² of the best single-provider predictor of per-prompt rates,
 combined with reach (Umami AI referrals per domain, shrunk towards the market prior) and cost per data

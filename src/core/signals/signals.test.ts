@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildEntityPattern, findEntity, normalizeText } from "./matcher";
 import { extractSignals, presenceIndex, type TrackedEntity } from "./extract";
+import { carryJudgement, shouldAnalyze } from "./analyze-llm";
 import type { NormalizedAnswer } from "../measurement/types";
 import { EMPTY_USAGE } from "../measurement/types";
 
@@ -80,5 +81,33 @@ describe("signal extraction", () => {
     expect(extractSignals(answer("Nemohu doporučit konkrétní obchod."), brand, competitors).noAnswer).toBe(true);
     const s = extractSignals(answer("1. Alza\n2. Datart", { citations: [{ url: "https://alza.cz" }] }), brand, competitors);
     expect(presenceIndex(s)).toBeCloseTo(1);
+  });
+});
+
+describe("analysis cost controls", () => {
+  const list = (...names: string[]) => `Doporučuji tyto obchody:\n${names.map((n, i) => `${i + 1}. ${n} – dobrá volba`).join("\n")}`;
+  const base = extractSignals(answer(list("Datart", "Alza", "CZC")), brand, competitors);
+  const judged = { ...base, sentiment: 0.5, positiveRecommendation: true, brandDescriptionAccuracy: 0.9, untrackedEntities: ["X"] };
+
+  it("always analyses brand mentions, samples competitor-only answers", () => {
+    expect(shouldAnalyze(base, "any")).toBe(true);
+    const noBrand = extractSignals(answer(list("Datart", "CZC")), brand, competitors);
+    const sampled = Array.from({ length: 1000 }, (_, i) => shouldAnalyze(noBrand, `m${i}`)).filter(Boolean).length;
+    expect(sampled).toBeGreaterThan(50);
+    expect(sampled).toBeLessThan(150);
+  });
+
+  it("carries a recent judgement when the observable outcome is unchanged", () => {
+    const c = carryJudgement(base, { measurementId: "prev", signals: judged, ageDays: 2 });
+    expect(c?.sentiment).toBe(0.5);
+    expect(c?.judgementCarriedFrom).toBe("prev");
+    expect(c?.untrackedEntities).toEqual([]);
+  });
+
+  it("re-judges when the position changed or the judgement is stale", () => {
+    const moved = extractSignals(answer(list("Alza", "Datart")), brand, competitors);
+    expect(carryJudgement(moved, { measurementId: "prev", signals: judged, ageDays: 2 })).toBeNull();
+    expect(carryJudgement(base, { measurementId: "prev", signals: judged, ageDays: 8 })).toBeNull();
+    expect(carryJudgement(base, null)).toBeNull();
   });
 });

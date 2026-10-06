@@ -48,6 +48,12 @@ export interface PlanOptions {
   /** Core prompts on core providers must be measured at least this often. */
   coreMaxIntervalDays: number;
   /**
+   * Core prompts on low-reach providers still get a sparse baseline (default monthly), so the
+   * optimizer always has data to judge whether the provider adds value — even when the value
+   * floor would otherwise never buy a sample from an expensive, low-reach provider.
+   */
+  nonCoreProviderMaxIntervalDays: number;
+  /**
    * Skip samples whose value of information per USD is below this floor: the budget is a
    * ceiling, not a target — information that is not worth its price is not bought.
    */
@@ -60,6 +66,7 @@ export const DEFAULT_PLAN_OPTIONS: Omit<PlanOptions, "now" | "budgetUsd"> = {
   minVarianceReduction: 0.0015,
   minIntervalDays: 0.9,
   coreMaxIntervalDays: 7,
+  nonCoreProviderMaxIntervalDays: 28,
   minValuePerDollar: 0.3,
 };
 
@@ -121,9 +128,10 @@ function eligible(cell: PlanCell, opts: PlanOptions): boolean {
 }
 
 function coreGuaranteeDue(cell: PlanCell, opts: PlanOptions): boolean {
-  if (cell.role !== "CORE" || !cell.coreProvider) return false;
+  if (cell.role !== "CORE") return false;
   if (cell.state.n === 0 || !cell.state.lastObservedAt) return true;
-  return daysBetween(cell.state.lastObservedAt, opts.now) >= opts.coreMaxIntervalDays;
+  const interval = cell.coreProvider ? opts.coreMaxIntervalDays : opts.nonCoreProviderMaxIntervalDays;
+  return daysBetween(cell.state.lastObservedAt, opts.now) >= interval;
 }
 
 export function planCycle(cells: PlanCell[], opts: PlanOptions): Plan {

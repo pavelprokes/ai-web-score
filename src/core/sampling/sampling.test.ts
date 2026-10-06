@@ -9,6 +9,7 @@ import {
   recommendedSampleCount,
   updateCell,
 } from "./cell-state";
+import { rng } from "../scoring/stats";
 import { cycleBudget, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS } from "./planner";
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, 1 + n, 6));
@@ -65,6 +66,39 @@ describe("cell state (Kalman visibility estimator)", () => {
     expect(q1).toBeLessThan(0.01); // one surprise must not jump to max volatility
     for (const [i, v] of [0, 1, 0, 1].entries()) s = updateCell(s, [v], new Date(t.getTime() + (i + 1) * 1000)).state;
     expect(s.processNoisePerDay).toBe(q1);
+  });
+
+  it("settles at low volatility for a stationary noisy cell (no upward bias)", () => {
+    const rand = rng(7);
+    const s = feed(initialCellState(0.3, 0.8), Array.from({ length: 120 }, () => (rand() < 0.3 ? 1 : 0)));
+    expect(s.processNoisePerDay).toBeLessThan(0.002);
+    expect(recommendedIntervalDays(s, 0.15 ** 2, { min: 1, max: 30 })).toBeGreaterThan(3);
+  });
+
+  it("reacts to genuine regime shifts but not to stationary noise", () => {
+    const run = (p: (i: number) => number, seed: number) => {
+      const rand = rng(seed);
+      let st = initialCellState(0.3, 0.5);
+      let changes = 0;
+      for (let i = 0; i < 80; i++) {
+        const r = updateCell(st, [rand() < p(i) ? 1 : 0], day(i));
+        st = r.state;
+        if (r.changeDetected) changes++;
+      }
+      return changes;
+    };
+    expect(run(() => 0.5, 1)).toBe(0);
+    expect(run(() => 0.05, 2)).toBe(0);
+    // Visibility swings between ~5 % and ~95 % every 10 days.
+    expect(run((i) => (Math.floor(i / 10) % 2 ? 0.95 : 0.05), 3)).toBeGreaterThanOrEqual(5);
+  });
+
+  it("does not flag a regime change for one rare mention", () => {
+    let s = feed(initialCellState(), Array(30).fill(0));
+    const r = updateCell(s, [1], day(31));
+    expect(r.changeDetected).toBe(false);
+    s = feed(r.state, Array(5).fill(0), 32);
+    expect(s.changeDetectedAt).toBeNull();
   });
 
   it("recommends more samples when uncertain and one when confident", () => {
@@ -134,6 +168,14 @@ describe("VOI planner", () => {
     expect(plan.items.find((i) => i.cellKey === "a")!.samples).toBeGreaterThan(1);
     expect(plan.items.find((i) => i.cellKey === "b")).toBeUndefined();
     expect(plan.totalCostUsd).toBeLessThan(1);
+  });
+
+  it("keeps a sparse baseline for core prompts on expensive low-reach providers", () => {
+    const measured = (daysAgo: number) => feed(initialCellState(), Array(5).fill(0), -daysAgo - 4);
+    const lowReach = (k: string, daysAgo: number) =>
+      cell({ cellKey: k, role: "CORE", providerWeight: 0.28, coreProvider: false, costPerSample: 0.05, state: measured(daysAgo) });
+    const plan = planCycle([lowReach("recent", 10), lowReach("stale", 30)], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 1 });
+    expect(plan.items.map((i) => [i.cellKey, i.reason])).toEqual([["stale", "CORE_GUARANTEE"]]);
   });
 
   it("paces the monthly budget across remaining cycles", () => {

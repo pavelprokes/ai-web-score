@@ -90,7 +90,11 @@ export const perplexityApi: ProviderAdapter = {
   defaultReach: 0.05,
   warnings: ["Consumer perplexity.ai uses its own routing; presets approximate it. Verify preset names in docs."],
   mode: "SYNC",
-  configurations: [{ id: "perplexity-api:sonar-pro", model: "sonar-pro", params: { searchContextSize: "low" }, role: "STANDARD" }],
+  configurations: [
+    { id: "perplexity-api:sonar-pro", model: "sonar-pro", params: { searchContextSize: "low" }, role: "STANDARD" },
+    // Cost candidate: the cheapest preset (verify the preset name in the Agent API docs).
+    { id: "perplexity-api:fast", model: "fast", params: { searchContextSize: "low" }, role: "CANDIDATE" },
+  ],
   capability: {
     webSearchCapability: true,
     liveSearchCapability: true,
@@ -118,6 +122,13 @@ export const perplexityApi: ProviderAdapter = {
       searchPer1k: 2.5,
       source: "https://docs.perplexity.ai/docs/getting-started/pricing",
       notes: "Preset token prices unverified; provider-reported usage.cost is used when present.",
+    },
+    {
+      model: "fast",
+      effectiveFrom: "2026-09-27T00:00:00Z",
+      searchPer1k: 2.5,
+      source: "https://docs.perplexity.ai/docs/getting-started/pricing",
+      notes: "Preset model tokens unverified; provider-reported usage.cost is authoritative.",
     },
   ],
   async execute(req, config) {

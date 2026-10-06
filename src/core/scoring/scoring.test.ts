@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cohenKappa, jaccard, rbo, spearman, wilson } from "./stats";
+import { cohenKappa, jaccard, rbo, rng, spearman, wilson } from "./stats";
 import { computeMetrics } from "./scoring";
 import { evaluateCalibration, type CalibrationPair } from "../optimization/calibration";
 import { analyzeProviderValue } from "../optimization/provider-value";
@@ -94,6 +94,23 @@ describe("calibration", () => {
       pairs.push({ promptId: `p${p}`, reference: mk(p, m), candidate: mk(p, !m), referenceReplicate: mk(p, m) });
     }
     expect(evaluateCalibration(pairs).decision).toBe("REJECT");
+  });
+
+  it("promotes an equivalent but noisy candidate with only ~3 samples per prompt", () => {
+    const rand = rng(5);
+    const draw = (p: number) => mk(0, rand() < p);
+    const make = (shift: number) => {
+      const pairs: CalibrationPair[] = [];
+      for (let p = 0; p < 30; p++) {
+        const rate = (p % 10) / 10;
+        for (let k = 0; k < 3; k++) {
+          pairs.push({ promptId: `p${p}`, reference: draw(rate), candidate: draw(Math.max(0, rate - shift)), referenceReplicate: draw(rate) });
+        }
+      }
+      return evaluateCalibration(pairs);
+    };
+    expect(make(0).decision).toBe("PROMOTE");
+    expect(make(0.35).decision).not.toBe("PROMOTE");
   });
 
   it("keeps testing with too few pairs", () => {

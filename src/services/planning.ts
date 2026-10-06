@@ -30,6 +30,11 @@ import { enqueue } from "@/jobs/queue";
 export const DEFAULT_MONTHLY_BUDGET_USD = Number(process.env.DEFAULT_MONTHLY_BUDGET_USD ?? 30);
 const CALIBRATION_BUDGET_SHARE = 0.15;
 const CALIBRATION_PROMPTS_PER_CYCLE = 3;
+/**
+ * Configuration equivalence is not domain-specific, so the shadow-measurement quota is
+ * global per pair and day — with N monitored domains calibration does not cost N×.
+ */
+const CALIBRATION_GROUPS_PER_PAIR_PER_DAY = 3;
 
 /** Cross-provider calibration: cheaper API candidate vs. consumer-UI reference. */
 const CROSS_CALIBRATION: Array<{ reference: string; candidate: string }> = [
@@ -275,22 +280,53 @@ async function planCalibration(
   const ordered = [...active].sort((a, b) => (a.role === "CORE" ? -1 : 0) - (b.role === "CORE" ? -1 : 0));
   const out: CalibrationItem[] = [];
   let spent = 0;
-  const dayIndex = Math.floor(now.getTime() / 86_400_000);
-  for (const [i, pair] of pairs.entries()) {
+  for (const pair of pairs) {
     const decided = recent.find(
       (r) => r.referenceConfigurationId === pair.reference.id && r.candidateConfigurationId === pair.candidate.id && r.decision !== "KEEP_TESTING",
     );
-    if (decided && (dayIndex + i) % 7 !== 0) continue;
+    const recentGroups = async (days: number) => {
+      const [row] = await getDb()
+        .select({ n: sql<number>`count(*)::int` })
+        .from(measurements)
+        .where(
+          and(
+            eq(measurements.purpose, "CALIBRATION"),
+            eq(measurements.configurationId, pair.candidate.id),
+            gte(measurements.scheduledAt, new Date(now.getTime() - days * 86_400_000)),
+          ),
+        );
+      return Number(row?.n ?? 0);
+    };
+    // A decided pair only needs a weekly control sample.
+    if (decided && (await recentGroups(7)) > 0) continue;
+    const done = { n: await recentGroups(1) };
+    const quota = Math.min(CALIBRATION_PROMPTS_PER_CYCLE, CALIBRATION_GROUPS_PER_PAIR_PER_DAY - Number(done?.n ?? 0));
     const pairCost = 2 * costOf(pair.reference) + costOf(pair.candidate);
-    for (let k = 0; k < CALIBRATION_PROMPTS_PER_CYCLE && ordered.length; k++) {
+    // Least-calibrated prompts first (core before rotating): uniform prompt coverage, which the
+    // per-prompt correlation check needs, independent of when the cron happens to run.
+    const counts = await getDb()
+      .select({ pv: measurements.promptVersionId, n: sql<number>`count(*)::int` })
+      .from(measurements)
+      .where(and(eq(measurements.purpose, "CALIBRATION"), eq(measurements.configurationId, pair.candidate.id)))
+      .groupBy(measurements.promptVersionId);
+    const calibrated = new Map(counts.map((c) => [c.pv, Number(c.n)]));
+    const candidates = [...ordered].sort(
+      (a, b) => (calibrated.get(a.promptVersionId) ?? 0) - (calibrated.get(b.promptVersionId) ?? 0),
+    );
+    for (let k = 0; k < quota && candidates.length; k++) {
       if (spent + pairCost > budget) break;
-      const pv = ordered[(dayIndex * CALIBRATION_PROMPTS_PER_CYCLE + k + i) % ordered.length]!;
+      const pv = candidates[k % candidates.length]!;
+      // The test–retest replicate (reference ×2) is only needed to estimate the agreement ceiling;
+      // half of the groups are enough for that and save a third of calibration cost.
+      const withReplicate = ((calibrated.get(pv.promptVersionId) ?? 0) + k) % 2 === 0;
       out.push(
         { promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 100, cost: costOf(pair.reference) },
-        { promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 101, cost: costOf(pair.reference) },
+        ...(withReplicate
+          ? [{ promptVersionId: pv.promptVersionId, configurationId: pair.reference.id, sampleIndex: 101, cost: costOf(pair.reference) }]
+          : []),
         { promptVersionId: pv.promptVersionId, configurationId: pair.candidate.id, sampleIndex: 100, cost: costOf(pair.candidate) },
       );
-      spent += pairCost;
+      spent += withReplicate ? pairCost : pairCost - costOf(pair.reference);
     }
   }
   // Deduplicate (a config may be reference in one pair and candidate in another).
