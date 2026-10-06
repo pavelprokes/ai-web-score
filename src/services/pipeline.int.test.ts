@@ -40,9 +40,9 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(active.filter((p) => p.role === "CORE").length).toBe(3);
 
     await runMeasurementNow(domain.id);
-    await processJobs({ deadlineMs: 30_000 });
+    await processJobs({ deadlineMs: 600_000 });
     await db.execute(sql`update jobs set run_at = now() where status = 'QUEUED'`);
-    await processJobs({ deadlineMs: 30_000 });
+    await processJobs({ deadlineMs: 600_000 });
 
     const ms = await db.select().from(s.measurements);
     expect(ms.length).toBeGreaterThan(0);

@@ -18,7 +18,8 @@ export function startLocalCron() {
     busy = true;
     try {
       await schedulerTick();
-      await processJobs({ deadlineMs: INTERVAL_MS - 5_000 });
+      // No platform time limit locally: let long jobs (discovery, prompt design) finish; ticks never overlap.
+      await processJobs({ deadlineMs: 15 * 60_000 });
       lastError = "";
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

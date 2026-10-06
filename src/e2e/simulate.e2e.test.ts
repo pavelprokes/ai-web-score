@@ -41,7 +41,7 @@ describe.skipIf(!url || !days)("cost simulation", () => {
     const { getDb } = await import("@/db");
     const { processJobs } = await import("@/jobs/runner");
     for (let i = 0; i < 30; i++) {
-      await processJobs({ deadlineMs: 60_000, concurrency: 8 });
+      await processJobs({ deadlineMs: 600_000, concurrency: 8 });
       const [open] = await getDb().execute(sql`
         select (select count(*) from jobs where status in ('QUEUED','RUNNING'))::int as jobs,
                (select count(*) from measurements where status in ('SCHEDULED','SUBMITTED'))::int as pending`);
