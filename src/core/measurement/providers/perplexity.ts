@@ -2,26 +2,49 @@ import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } 
 import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, requireEnv } from "../provider";
 
 /**
- * Perplexity Agent API (POST /v1/responses). The Sonar chat-completions API was
- * retired on 2026-09-27; presets reproduce the old Sonar behaviour. Shapes verified
- * against the official perplexity-py SDK (2026-10-02).
+ * Perplexity Agent API (POST /v1/agent). The Sonar chat-completions API was retired on
+ * 2026-09-27; Perplexity maps both `sonar` and `sonar-pro` to the `fast` preset — its own
+ * system prompt ("You are Perplexity…"), Fast Search and numbered inline citations `[n]`.
+ *
+ * Cost: the `fast` preset runs on the `priority` tier (2× token prices). Monitoring needs no
+ * low latency, so `service_tier: "flex"` (0.5× token prices, best-effort capacity) is set;
+ * an unsupported tier is ignored by the API, never rejected. Web search stays $1 per 1k
+ * Fast Search calls. Docs: docs.perplexity.ai/docs/agent-api (presets, models, web-search).
  */
 
 const BASE = process.env.PERPLEXITY_BASE_URL ?? "https://api.perplexity.ai";
 
+/** Same instruction Perplexity documents for explicit models, so answers carry `[n]` citations. */
+const CITATION_INSTRUCTIONS =
+  "Base every factual statement on the numbered web search results provided. " +
+  "After each sentence that uses information from those results, cite the exact source number(s) in square brackets " +
+  "right after the statement, like [1] or [1][2]. Only cite a source that actually contains that information, " +
+  "do not invent source numbers, and do not add a separate references section.";
+
+interface PerplexityParams {
+  serviceTier?: string;
+  searchType?: "web" | "fast";
+  maxResults?: number;
+}
+
 export function buildPerplexityBody(req: MeasurementRequest, config: ProviderConfigurationSeed) {
-  const p = config.params as { preset?: string; searchContextSize?: string };
+  const p = config.params as PerplexityParams;
+  // "provider/model" ids select a model directly (one search step, explicit citation instructions);
+  // anything else is a preset name.
+  const direct = config.model.includes("/");
   return {
-    ...(config.model.includes("/") ? { model: config.model } : { preset: p.preset ?? config.model }),
+    ...(direct ? { model: config.model, max_steps: 1, max_output_tokens: 4096, instructions: CITATION_INSTRUCTIONS } : { preset: config.model }),
     input: req.promptText,
     tools: [
       {
         type: "web_search",
-        search_context_size: p.searchContextSize ?? "low",
+        ...(p.searchType ? { search_type: p.searchType } : {}),
+        ...(p.maxResults ? { max_results: p.maxResults } : {}),
         // lat/lon reportedly rejected; country/city only.
         user_location: { country: req.country.toUpperCase(), ...(req.location ? { city: req.location } : {}) },
       },
     ],
+    ...(p.serviceTier ? { service_tier: p.serviceTier } : {}),
     language_preference: req.language,
     store: false,
   };
@@ -63,6 +86,13 @@ export function parsePerplexityResponse(json: PplxResponse): NormalizedAnswer {
       }
     }
   }
+  // Presets cite inline — `[1]` (fast) or `[web:1]` (low and up) — numbered over the search results.
+  if (citations.length === 0) {
+    for (const m of text.matchAll(/\[(?:web:)?(\d{1,3})\]/g)) {
+      const source = sources[Number(m[1]) - 1];
+      if (source) citations.push({ url: source.url, title: source.title, startIndex: m.index, endIndex: m.index + m[0].length });
+    }
+  }
   const invocations = json.usage?.tool_calls_details?.web_search?.invocation ?? (sources.length ? 1 : 0);
   return {
     answerText: text,
@@ -88,12 +118,10 @@ export const perplexityApi: ProviderAdapter = {
   kind: "OFFICIAL_API",
   requiredEnv: ["PERPLEXITY_API_KEY"],
   defaultReach: 0.05,
-  warnings: ["Consumer perplexity.ai uses its own routing; presets approximate it. Verify preset names in docs."],
+  warnings: ["Consumer perplexity.ai uses its own routing; the `fast` preset is Perplexity's documented replacement for Sonar / Sonar Pro."],
   mode: "SYNC",
   configurations: [
-    { id: "perplexity-api:sonar-pro", model: "sonar-pro", params: { searchContextSize: "low" }, role: "STANDARD" },
-    // Cost candidate: the cheapest preset (verify the preset name in the Agent API docs).
-    { id: "perplexity-api:fast", model: "fast", params: { searchContextSize: "low" }, role: "CANDIDATE" },
+    { id: "perplexity-api:fast-flex", model: "fast", params: { serviceTier: "flex" }, role: "STANDARD" },
   ],
   capability: {
     webSearchCapability: true,
@@ -110,29 +138,26 @@ export const perplexityApi: ProviderAdapter = {
     reliability: "MEDIUM",
     similarityToConsumerProduct: 0.55,
     measurementQuality: 0.6,
-    estimatedCostPerMeasurement: 0.006,
-    notes: ["web_search $2.50/1k invocations + preset model tokens; itemised cost returned in usage.cost."],
+    estimatedCostPerMeasurement: 0.0015,
+    notes: [
+      "fast preset: openai/gpt-6-luna, 1 step, Fast Search ($1/1k calls); flex tier halves token prices.",
+      "Itemised cost is returned in usage.cost and used as the measurement cost.",
+    ],
   },
   prices: [
     {
-      model: "sonar-pro",
-      effectiveFrom: "2026-09-27T00:00:00Z",
-      inputPerMTok: 3,
-      outputPerMTok: 15,
-      searchPer1k: 2.5,
-      source: "https://docs.perplexity.ai/docs/getting-started/pricing",
-      notes: "Preset token prices unverified; provider-reported usage.cost is used when present.",
-    },
-    {
       model: "fast",
-      effectiveFrom: "2026-09-27T00:00:00Z",
-      searchPer1k: 2.5,
-      source: "https://docs.perplexity.ai/docs/getting-started/pricing",
-      notes: "Preset model tokens unverified; provider-reported usage.cost is authoritative.",
+      effectiveFrom: "2026-10-06T00:00:00Z",
+      // gpt-6-luna $0.10 / $0.50 per MTok at 0.5× (flex); Fast Search $1 per 1k calls.
+      inputPerMTok: 0.05,
+      outputPerMTok: 0.25,
+      searchPer1k: 1,
+      source: "https://docs.perplexity.ai/docs/agent-api/models",
+      notes: "Provider-reported usage.cost is authoritative.",
     },
   ],
   async execute(req, config) {
-    const json = await httpJson<PplxResponse>(`${BASE}/v1/responses`, {
+    const json = await httpJson<PplxResponse>(`${BASE}/v1/agent`, {
       method: "POST",
       headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify(buildPerplexityBody(req, config)),

@@ -106,7 +106,7 @@ runs axe-core and saves screenshots.
 - credentials of every provider with keys,
 - that DataForSEO supports the market (`location_code 2203` / `cs`) for ChatGPT, Gemini and AI Mode —
   an unsupported combination fails with an explicit task error,
-- Perplexity preset names (`sonar-pro`; candidate `fast`),
+- the Perplexity `fast` preset on the `flex` tier (`/v1/agent`),
 - response parsing (answer, citations, sources, fan-out queries) and the cost per answer,
 - with `--llm`: the internal models and structured output.
 

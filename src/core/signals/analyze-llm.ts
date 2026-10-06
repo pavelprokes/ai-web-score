@@ -54,19 +54,23 @@ function unitHash(s: string): number {
   return (h >>> 0) / 4294967296;
 }
 
-export function analyzerUserPrompt(args: { profile: DomainProfile; promptText: string; answerText: string }) {
-  const { profile } = args;
+/** The part shared by every answer of a domain (brand, competitors, fact sheet) — cacheable. */
+export function analyzerContext(profile: DomainProfile) {
   return [
     `Tracked brand: ${profile.brandName} (aliases: ${profile.brand.aliases.join(", ") || "-"})`,
     `Tracked competitors: ${profile.competitors.map((c) => c.name).join(", ") || "-"}`,
     "Fact sheet:",
     ...profile.factSheet.map((f) => `- [${f.category}] ${f.claim}`),
-    "",
-    `User prompt: ${args.promptText}`,
-    "",
-    "AI answer:",
-    args.answerText.slice(0, 12_000),
   ].join("\n");
+}
+
+/** The part specific to one answer. */
+export function analyzerQuestion(args: { promptText: string; answerText: string }) {
+  return [`User prompt: ${args.promptText}`, "", "AI answer:", args.answerText.slice(0, 12_000)].join("\n");
+}
+
+export function analyzerUserPrompt(args: { profile: DomainProfile; promptText: string; answerText: string }) {
+  return [analyzerContext(args.profile), "", analyzerQuestion(args)].join("\n");
 }
 
 const acc = (x: number) => (x < 0 ? null : Math.min(1, Math.max(0, x)));

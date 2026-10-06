@@ -181,7 +181,8 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       const oa = ms.find((m) => m.providerId === "openai-api")!;
       expect(oa.searchCostUsd).toBeCloseTo(0.01, 6); // 1 web_search call × $10/1k
       expect(oa.inputCostUsd).toBeGreaterThan(0);
-      expect(ms.find((m) => m.providerId === "perplexity-api")!.totalCostUsd).toBeCloseTo(0.0097, 6);
+      // Provider-reported usage.cost of the flex tier is the measurement cost.
+      expect(ms.find((m) => m.providerId === "perplexity-api")!.totalCostUsd).toBeCloseTo(0.001225, 6);
     }
 
     // Raw signals for every answer; judgement signals where the brand/competitors appear.

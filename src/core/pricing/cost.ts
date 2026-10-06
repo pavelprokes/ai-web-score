@@ -38,6 +38,9 @@ export function selectPrice(entries: PriceEntry[], providerId: string, model: st
   return best;
 }
 
+/** Anthropic 5-minute prompt-cache writes cost 1.25× the input rate. */
+const CACHE_WRITE_FACTOR = 1.25;
+
 export function computeCost(args: {
   answer: Pick<NormalizedAnswer, "usage" | "search">;
   price: PriceEntry | null;
@@ -46,24 +49,28 @@ export function computeCost(args: {
 }): CostBreakdown {
   const { answer, price } = args;
   const tokenFactor = args.batched && price ? 1 - price.batchDiscount : 1;
-  const uncached = Math.max(0, answer.usage.inputTokens - answer.usage.cachedInputTokens);
+  const cacheWrite = answer.usage.cacheWriteTokens ?? 0;
+  const uncached = Math.max(0, answer.usage.inputTokens - answer.usage.cachedInputTokens - cacheWrite);
   const inputCostUsd = price
-    ? ((uncached * price.inputPerMTok + answer.usage.cachedInputTokens * price.cachedInputPerMTok) / 1e6) * tokenFactor
+    ? ((uncached * price.inputPerMTok + answer.usage.cachedInputTokens * price.cachedInputPerMTok + cacheWrite * price.inputPerMTok * CACHE_WRITE_FACTOR) / 1e6) *
+      tokenFactor
     : 0;
   const outputCostUsd = price ? ((answer.usage.outputTokens * price.outputPerMTok) / 1e6) * tokenFactor : 0;
   const searchCostUsd = price ? (answer.search.billableUnits * price.searchPer1k) / 1000 : 0;
   const estimatedRequest = price ? price.requestPer1k / 1000 : 0;
 
-  // A provider-reported total (DataForSEO task cost, Perplexity usage.cost) is authoritative.
+  // A provider-reported total (DataForSEO task cost, Perplexity usage.cost) is authoritative — also when it
+  // is below the price-book estimate (discounted tiers such as flex); the breakdown is scaled to match.
   if (args.reportedCostUsd !== undefined && args.reportedCostUsd !== null) {
+    const reported = Math.max(0, args.reportedCostUsd);
     const known = inputCostUsd + outputCostUsd + searchCostUsd;
-    const providerCostUsd = Math.max(0, args.reportedCostUsd - known);
+    const scale = known > reported ? reported / known : 1;
     return round({
-      inputCostUsd,
-      outputCostUsd,
-      searchCostUsd,
-      providerCostUsd,
-      totalCostUsd: Math.max(args.reportedCostUsd, known),
+      inputCostUsd: inputCostUsd * scale,
+      outputCostUsd: outputCostUsd * scale,
+      searchCostUsd: searchCostUsd * scale,
+      providerCostUsd: Math.max(0, reported - known * scale),
+      totalCostUsd: reported,
     });
   }
   return round({

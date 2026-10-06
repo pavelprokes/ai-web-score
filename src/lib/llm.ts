@@ -18,12 +18,14 @@ export const INTERNAL_MODEL = process.env.INTERNAL_LLM_MODEL ?? "claude-opus-5-5
 export const ANALYZER_MODEL = process.env.ANALYZER_LLM_MODEL ?? "claude-sonnet-5-5";
 
 /** USD per 1M tokens for internal models (keep in sync with the provider price book). */
-const INTERNAL_PRICES: Record<string, { input: number; output: number }> = {
-  "claude-fable-5-1": { input: 10, output: 50 },
-  "claude-opus-5-5": { input: 4, output: 20 },
-  "claude-sonnet-5-5": { input: 2, output: 10 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
+/** $ per MTok. `cacheRead`: prompt-cache hits; writes cost 1.25× input (5-minute cache). */
+const INTERNAL_PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
+  "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
+  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
 };
+const CACHE_WRITE_FACTOR = 1.25;
 
 /**
  * Thinking setting for classification-style calls: reasoning tokens add cost without
@@ -45,9 +47,14 @@ export function setAnthropicClient(c: Anthropic | null) {
   client = c;
 }
 
-export function llmCost(model: string, inputTokens: number, outputTokens: number, batched = false) {
-  const p = INTERNAL_PRICES[model] ?? { input: 4, output: 20 };
-  return ((inputTokens * p.input + outputTokens * p.output) / 1e6) * (batched ? 0.5 : 1);
+/**
+ * Cost of internal LLM usage. `inputTokens` is Anthropic's `input_tokens` (uncached input only); cache
+ * reads and writes come separately. Batch discount (50 %) stacks with the cache multipliers.
+ */
+export function llmCost(model: string, inputTokens: number, outputTokens: number, batched = false, cacheReadTokens = 0, cacheWriteTokens = 0) {
+  const p = INTERNAL_PRICES[model] ?? { input: 4, output: 20, cacheRead: 0.4 };
+  const input = inputTokens * p.input + cacheReadTokens * p.cacheRead + cacheWriteTokens * p.input * CACHE_WRITE_FACTOR;
+  return ((input + outputTokens * p.output) / 1e6) * (batched ? 0.5 : 1);
 }
 
 export async function recordLlmUsage(args: {
@@ -56,6 +63,8 @@ export async function recordLlmUsage(args: {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   batched?: boolean;
 }) {
   await getDb()
@@ -67,7 +76,9 @@ export async function recordLlmUsage(args: {
       model: args.model,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
-      costUsd: llmCost(args.model, args.inputTokens, args.outputTokens, args.batched),
+      cacheReadTokens: args.cacheReadTokens ?? 0,
+      cacheWriteTokens: args.cacheWriteTokens ?? 0,
+      costUsd: llmCost(args.model, args.inputTokens, args.outputTokens, args.batched, args.cacheReadTokens, args.cacheWriteTokens),
     });
 }
 
@@ -127,7 +138,7 @@ export async function generateStructured<T extends z.ZodType>(args: {
     return result;
   }
 
-  const usage = { input: 0, output: 0 };
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const request = async (system: string, messages: Anthropic.MessageParam[], grammar: boolean) => {
     const stream = anthropicClient().messages.stream({
       model,
@@ -140,6 +151,8 @@ export async function generateStructured<T extends z.ZodType>(args: {
     const message = await stream.finalMessage();
     usage.input += message.usage.input_tokens;
     usage.output += message.usage.output_tokens;
+    usage.cacheRead += message.usage.cache_read_input_tokens ?? 0;
+    usage.cacheWrite += message.usage.cache_creation_input_tokens ?? 0;
     if (message.stop_reason === "refusal") throw new Error(`LLM refused (${args.purpose})`);
     if (message.stop_reason === "max_tokens") throw new Error(`LLM output truncated (${args.purpose})`);
     return message;
@@ -175,7 +188,15 @@ export async function generateStructured<T extends z.ZodType>(args: {
     }
   } finally {
     if (!args.skipUsage && (usage.input || usage.output)) {
-      await recordLlmUsage({ domainId: args.domainId, purpose: args.purpose, model, inputTokens: usage.input, outputTokens: usage.output });
+      await recordLlmUsage({
+        domainId: args.domainId,
+        purpose: args.purpose,
+        model,
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        cacheReadTokens: usage.cacheRead,
+        cacheWriteTokens: usage.cacheWrite,
+      });
     }
   }
 }

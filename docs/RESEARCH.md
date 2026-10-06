@@ -32,7 +32,7 @@ used as a substitute for the consumer product.
 | OpenAI web_search | $10 / 1k calls + search content tokens | Batch API historically rejects web_search ⚠ |
 | Claude web search | $10 / 1k searches + tokens | Message Batches support server tools: tokens −50 %, search fee not discounted (platform.claude.com docs) |
 | Gemini 3.x grounding | $14 / 1k **search queries** (≈10 per prompt) | 5k/month free; terms restrict analysing grounded results ⚠ legal review |
-| Perplexity Agent API | web_search $2.50 / 1k + model tokens | Sonar chat-completions retired 2026-09-27 |
+| Perplexity Agent API (`/v1/agent`) | web_search $2.50 / 1k (Fast Search $1 / 1k) + model tokens; `flex` 0.5×, `priority` 2× tokens | Sonar chat-completions retired 2026-09-27; `sonar` and `sonar-pro` map to the `fast` preset |
 | Commercial GEO tools (Peec, Profound, Semrush, Ahrefs, Otterly) | 0.016–0.08 per answer | 5–50× markup over raw UI capture |
 
 ## 3. Pitfalls verified in SDKs/docs
@@ -92,6 +92,6 @@ domain's own AI referral traffic in Umami when configured.
 
 1. Live-check DataForSEO CZ/`cs` support for the ChatGPT and Gemini scrapers (`/locations`, `/languages`).
 2. OpenAI: `web_search` inside Batch/Flex; gpt-6-luna / gpt-6.1-sol prices (third-party sources only).
-3. Perplexity preset names (`sonar-pro` vs `fast/low/medium`) — docs conflict.
+3. ~~Perplexity preset names~~ — resolved: presets are `fast`, `low`, `medium`, `high`, `xhigh` (docs.perplexity.ai/docs/agent-api/presets); `sonar-pro` is not a preset.
 4. Gemini grounding terms for internal analytics — legal review before enabling `gemini-api`.
 5. Run a pilot (≈20 prompts × 10 runs × providers) to measure real between-prompt variance and per-call costs; feed it into sizing.

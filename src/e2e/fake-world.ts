@@ -248,17 +248,32 @@ const openAi: Route = async (url, init) => {
 
 const perplexity: Route = async (url, init) => {
   if (url.hostname !== "api.perplexity.ai") return null;
-  const body = JSON.parse(String(init?.body)) as { input: string };
+  if (url.pathname !== "/v1/agent") return new Response(JSON.stringify({ error: { message: "Not found" } }), { status: 404 });
+  const body = JSON.parse(String(init?.body)) as { input: string; preset?: string; service_tier?: string };
+  if (body.preset && !["fast", "low", "medium", "high", "xhigh"].includes(body.preset)) {
+    return new Response(JSON.stringify({ error: { message: `Unknown preset ${body.preset}` } }), { status: 400 });
+  }
   await new Promise((r) => setTimeout(r, 60));
   const a = fakeAnswer("perplexity", body.input, String(Math.random()));
+  // Like the fast preset: numbered inline citations, no annotation objects.
+  const text = `${a.text} ${a.citations.map((_, i) => `[${i + 1}]`).join("")}`;
+  const flex = body.service_tier === "flex";
   return json({
-    model: "sonar-pro",
+    model: "openai/gpt-6-luna",
     status: "completed",
+    service_tier: flex ? "flex" : "priority",
     output: [
       { type: "search_results", results: a.citations.map((c, i) => ({ id: i, url: c.url, title: c.title, snippet: "" })), queries: a.queries },
-      { type: "message", content: [{ type: "output_text", text: a.text, annotations: a.citations.map((c) => ({ type: "url_citation", url: c.url, title: c.title })) }] },
+      { type: "message", content: [{ type: "output_text", text, annotations: null }] },
     ],
-    usage: { input_tokens: 900, output_tokens: 300, cost: { currency: "USD", input_cost: 0.0027, output_cost: 0.0045, total_cost: 0.0097, tool_calls_cost: 0.0025 }, tool_calls_details: { web_search: { invocation: 1 } } },
+    usage: {
+      input_tokens: 3000,
+      output_tokens: 300,
+      cost: flex
+        ? { currency: "USD", input_cost: 0.00015, output_cost: 0.000075, tool_calls_cost: 0.001, total_cost: 0.001225 }
+        : { currency: "USD", input_cost: 0.0006, output_cost: 0.0003, tool_calls_cost: 0.001, total_cost: 0.0019 },
+      tool_calls_details: { web_search: { invocation: 1 } },
+    },
   });
 };
 

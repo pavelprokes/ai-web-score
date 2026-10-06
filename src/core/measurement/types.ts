@@ -17,9 +17,13 @@ export interface RetrievedSource {
 }
 
 export interface TokenUsage {
+  /** All input tokens, including cache reads and writes. */
   inputTokens: number;
   outputTokens: number;
+  /** Part of inputTokens read from a prompt cache (billed at the cached rate). */
   cachedInputTokens: number;
+  /** Part of inputTokens written to a prompt cache (Anthropic: 1.25× the input rate for the 5-minute cache). */
+  cacheWriteTokens?: number;
   reasoningTokens: number;
 }
 
