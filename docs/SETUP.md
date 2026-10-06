@@ -53,7 +53,8 @@ freshly released dependency can block `pnpm install` for up to 24 hours — pin 
 than relaxing the policy. Packages allowed to run install scripts are listed in `pnpm-workspace.yaml`.
 
 ```bash
-docker compose up -d db              # local Postgres (also creates the test database)
+docker compose up -d db              # local Postgres on port 5433 (also creates the test database);
+                                     # port taken? DB_PORT=5434 docker compose up -d db and change DATABASE_URL
 cp .env.example .env.local           # fill in the variables above
 pnpm install
 pnpm db:migrate
