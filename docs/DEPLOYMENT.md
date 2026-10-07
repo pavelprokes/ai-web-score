@@ -70,6 +70,9 @@ pnpm cli action <domainId> run-now
   `JOB_DB_STALL_TIMEOUT_S`, 60 s) is closed: the query fails with an error and the next one opens a fresh
   connection, instead of the page hanging for 300 s (`src/db/socket.ts`, logged as `[db] No response …`).
   It applies to plain-TCP URLs (no `sslmode`), such as the Supabase pooler URL as copied from the dashboard.
+  Pipelining is off (`max_pipeline: 1`): with more parallel queries than connections, postgres.js would
+  send several queries back-to-back on one busy connection, which a transaction pooler may not answer.
+  `pnpm db:probe` (with `DATABASE_URL` set to the pooler URL) compares both modes against the real pooler.
 - **Jobs fit the invocation.** Every job type has a time budget (discovery 200 s, prompt design 180 s,
   one provider answer 150 s, async submit/collect 120 s, others 60–90 s). The runner only claims a job
   whose budget fits the time left, and aborts it when the budget is spent: provider HTTP calls, the

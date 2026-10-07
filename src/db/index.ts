@@ -37,6 +37,10 @@ function pool(kind: "web" | "jobs"): Pool {
       max,
       // prepare:false keeps us compatible with transaction-mode poolers (Neon, Supabase, PgBouncer).
       prepare: false,
+      // No pipelining: with more parallel queries than connections, postgres.js would otherwise send
+      // several queries back-to-back on one busy connection. Through a transaction pooler (Supavisor)
+      // that is a known source of answers that never arrive; queries wait for a free connection instead.
+      ...({ max_pipeline: Number(process.env.DB_MAX_PIPELINE ?? 1) } as object), // documented, missing from the types
       onnotice: () => {},
       // Serverless instances are suspended between requests (Vercel Fluid compute). A connection left open
       // across a suspension is dead on resume and the next query hangs until the function times out, so:
