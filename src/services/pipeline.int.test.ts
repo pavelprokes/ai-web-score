@@ -279,4 +279,40 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(exec!.status).toBe("CANCELLED");
     expect(await cancelActivity(`run:${run!.id}`, "test")).toBe("Already finished.");
   });
+
+  it("recovers a domain whose first prompt design was stopped", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { cancelActivity } = await import("@/services/cancel");
+    const { enqueue } = await import("@/jobs/queue");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const { generatePortfolio, promptCounts } = await import("@/services/portfolio");
+    const db = getDb();
+    await db.execute(sql`delete from jobs`);
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+
+    // Discovery done, initial prompt design queued and then stopped: nothing is active.
+    await db.update(s.prompts).set({ status: "CANDIDATE" }).where(eq(s.prompts.domainId, demo!.id));
+    await db.update(s.domains).set({ status: "READY", lastError: null }).where(eq(s.domains.id, demo!.id));
+    await enqueue("portfolio.generate", { domainId: demo!.id, mode: "INITIAL" }, { dedupeKey: `portfolio:${demo!.id}` });
+    const [job] = await db.select().from(s.jobs).where(eq(s.jobs.type, "portfolio.generate"));
+    await cancelActivity(`job:${job!.id}`, "test");
+    const [stopped] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
+    expect(stopped!.status).toBe("ERROR");
+    expect(stopped!.lastError).toMatch(/Design prompts/);
+
+    // "Design prompts" (the regenerate action) sets the portfolio up like the first time.
+    setLlmOverride((await import("@/e2e/fake-world")).fakeLlm);
+    try {
+      await generatePortfolio(demo!.id, "REGENERATE");
+    } finally {
+      setLlmOverride(null);
+    }
+    const [after] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
+    expect(after!.status).toBe("ACTIVE");
+    expect(after!.lastError).toBeNull();
+    expect((await promptCounts(demo!.id)).active).toBeGreaterThan(0);
+    const [plan] = await db.select().from(s.jobs).where(eq(s.jobs.type, "measurement.plan"));
+    expect(plan).toBeTruthy();
+  });
 });
