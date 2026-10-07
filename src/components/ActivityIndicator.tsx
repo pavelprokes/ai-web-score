@@ -269,6 +269,7 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
                     )}
                     {i.state === "waiting" && !i.note && <span className="activity__note">Waiting for the provider</span>}
                     {i.note && <span className="activity__note">{i.note}</span>}
+                    {i.error && <span className="activity__note activity__error">{i.error}</span>}
                     <div className="activity__actions">
                       <button
                         type="button"

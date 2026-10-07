@@ -10,6 +10,8 @@ import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
 import { SubmitButton } from "@/components/SubmitButton";
+import { ProviderErrors } from "@/components/ProviderErrors";
+import { recentProviderErrors } from "@/services/errors";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
 import { num, pct, usd } from "@/components/format";
@@ -42,12 +44,13 @@ export default async function DomainPage({
 }) {
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
     busyKindsByDomain(),
     latestRecommendations(id),
+    recentProviderErrors({ domainId: id }),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -81,6 +84,8 @@ export default async function DomainPage({
       </div>
 
       <Flash message={done ?? addedMessage} error={error} />
+
+      <ProviderErrors errors={errors} now={now} />
 
       <ScoreTiles detail={detail} />
 

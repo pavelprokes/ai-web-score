@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { getProvider } from "@/core/measurement/providers";
 import { domains, jobs, measurementSignals, measurements, runs } from "@/db/schema";
 
 /**
@@ -24,6 +25,8 @@ export interface ActivityItem {
   state: "running" | "queued" | "waiting";
   progress?: { done: number; total: number; failed: number };
   note?: string;
+  /** The most recent failure in this work (provider and message), so problems show while it runs. */
+  error?: string;
 }
 
 const LABELS: Record<ActivityKind, string> = {
@@ -65,6 +68,9 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
         completed: runs.completedCount,
         failed: runs.failedCount,
         atProvider: sql<number>`(select count(*)::int from ${measurements} m where m.run_id = ${runs.id} and m.status = 'SUBMITTED')`,
+        waitingOn: sql<string | null>`(select m.provider_id from ${measurements} m where m.run_id = ${runs.id} and m.status = 'SUBMITTED' group by 1 order by count(*) desc limit 1)`,
+        lastError: sql<string | null>`(select m.provider_id || ': ' || left(m.errors->-1->>'message', 200) from ${measurements} m
+          where m.run_id = ${runs.id} and m.status = 'FAILED' order by m.finished_at desc nulls last limit 1)`,
       })
       .from(runs)
       .innerJoin(domains, eq(domains.id, runs.domainId))
@@ -113,7 +119,8 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
       startedAt: r.startedAt.toISOString(),
       state: atProvider > 0 && r.completed + r.failed + atProvider >= r.planned ? "waiting" : "running",
       ...(r.planned > 0 ? { progress: { done: r.completed, total: r.planned, failed: r.failed } } : {}),
-      ...(atProvider > 0 ? { note: `${atProvider} answers queued at the provider (usually back within 45 minutes)` } : {}),
+      ...(atProvider > 0 ? { note: waitingNote(atProvider, r.waitingOn) } : {}),
+      ...(r.failed > 0 && r.lastError ? { error: providerError(r.lastError) } : {}),
     });
   }
 
@@ -154,3 +161,24 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
 
 /** Same result for the layout and the page within one server render (one set of queries per request). */
 export const currentActivityForRequest = cache(() => currentActivity());
+
+function adapterOf(providerId: string | null) {
+  try {
+    return providerId ? getProvider(providerId) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "52 answers queued at Claude (API) (batch: usually < 1 h, max 24 h)" — the provider's own turnaround. */
+function waitingNote(count: number, providerId: string | null): string {
+  const adapter = adapterOf(providerId);
+  return adapter ? `${count} answers queued at ${adapter.label} (${adapter.capability.latency})` : `${count} answers queued at the provider`;
+}
+
+/** "perplexity-api: HTTP 400: {…}" → "Last error · Perplexity (Agent API): HTTP 400: {…}". */
+function providerError(raw: string): string {
+  const i = raw.indexOf(": ");
+  const label = adapterOf(raw.slice(0, i))?.label ?? raw.slice(0, i);
+  return `Last error · ${label}: ${raw.slice(i + 2)}`;
+}

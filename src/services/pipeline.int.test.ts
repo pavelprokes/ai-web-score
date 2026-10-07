@@ -439,4 +439,66 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       globalThis.fetch = realFetch;
     }
   });
+
+  it("stops a provider that rejects every request and shows the error", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { executeMeasurement, REJECTIONS_TO_STOP } = await import("@/services/measure");
+    const { recentProviderErrors } = await import("@/services/errors");
+    const { currentActivity } = await import("@/services/activity");
+    const { syncProviderRegistry } = await import("@/services/registry");
+    const db = getDb();
+    await syncProviderRegistry();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "perplexity-api")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 6 }).returning();
+    const ids = Array.from({ length: 6 }, (_, i) => `reject-${i}`);
+    await db.insert(s.measurements).values(
+      ids.map((id, i) => ({
+        id,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "perplexity-api",
+        model: config!.model,
+        sampleIndex: i,
+        configuration: { id: config!.id, model: config!.model, params: { serviceTier: "flex" }, role: "STANDARD" },
+      })),
+    );
+    const saved = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response('{"error":{"message":"invalid request","code":400}}', { status: 400 });
+    }) as typeof fetch;
+    try {
+      for (const id of ids) await executeMeasurement(id);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;
+      else process.env.PERPLEXITY_API_KEY = saved;
+    }
+    // Two HTTP calls per answer (with and without service_tier) until the provider is stopped.
+    expect(calls).toBeLessThanOrEqual(REJECTIONS_TO_STOP * 2);
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(rows.every((r) => r.status === "FAILED")).toBe(true);
+    const skipped = rows.filter((r) => JSON.stringify(r.errors).includes("Skipped: perplexity-api rejected"));
+    expect(skipped.length).toBe(6 - REJECTIONS_TO_STOP);
+    const [finished] = await db.select().from(s.runs).where(eq(s.runs.id, run!.id));
+    expect(finished!.status).toBe("FAILED");
+    expect(finished!.failedCount).toBe(6);
+
+    const errors = await recentProviderErrors({ domainId: demo!.id });
+    expect(errors.find((e) => e.providerId === "perplexity-api" && e.message.startsWith("HTTP 400"))?.count).toBe(REJECTIONS_TO_STOP);
+
+    // While a run is in progress, the activity panel shows its latest error.
+    await db.update(s.runs).set({ status: "RUNNING", finishedAt: null }).where(eq(s.runs.id, run!.id));
+    const item = (await currentActivity()).find((a) => a.id === `run:${run!.id}`);
+    expect(item?.error).toMatch(/^Last error · Perplexity \(Agent API\): /);
+    await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+  });
 });
