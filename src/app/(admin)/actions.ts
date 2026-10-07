@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import { domains } from "@/db/schema";
 import { requireAdminAction } from "@/lib/auth-guard";
 import { kickJobs } from "@/lib/kick";
+import { measurementBlocker } from "@/services/planning";
 import { enqueue } from "@/jobs/queue";
 import { createDomain, InvalidDomainError, runMeasurementNow, setDomainPaused, startDiscovery } from "@/services/domains";
 import { decideProposals } from "@/services/portfolio";
@@ -84,10 +85,13 @@ export async function domainAction(formData: FormData) {
   const blocked = await actionBlockedReason(id, action);
   if (blocked) redirect(`${back}?error=${encodeURIComponent(`${blocked} — wait until it finishes, then try again.`)}`);
   switch (action) {
-    case "run-now":
+    case "run-now": {
+      const blocker = await measurementBlocker(id);
+      if (blocker) redirect(`${back}?error=${encodeURIComponent(blocker)}`);
       await runMeasurementNow(id);
       kickJobs();
       break;
+    }
     case "pause":
       await setDomainPaused(id, true);
       break;

@@ -289,6 +289,47 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(await cancelActivity(`run:${run!.id}`, "test")).toBe("Already finished.");
   });
 
+  it("refuses a measurement run that would measure nothing, and reports a failed first prompt design", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { measurementBlocker, enabledConfigurations } = await import("@/services/planning");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const { generatePortfolio } = await import("@/services/portfolio");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    expect(await measurementBlocker(demo!.id)).toBeNull();
+
+    // A provider enabled without its credentials is never planned.
+    const saved = { login: process.env.DATAFORSEO_LOGIN, password: process.env.DATAFORSEO_PASSWORD };
+    delete process.env.DATAFORSEO_LOGIN;
+    delete process.env.DATAFORSEO_PASSWORD;
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "chatgpt-ui"));
+    expect((await enabledConfigurations()).map((c) => c.providerId)).not.toContain("chatgpt-ui");
+    await db.update(s.providers).set({ enabled: false }).where(eq(s.providers.id, "chatgpt-ui"));
+    Object.assign(process.env, saved.login ? { DATAFORSEO_LOGIN: saved.login, DATAFORSEO_PASSWORD: saved.password } : {});
+
+    // No provider ready → explained, nothing queued.
+    await db.update(s.providers).set({ enabled: false }).where(eq(s.providers.id, "mock"));
+    expect(await measurementBlocker(demo!.id)).toMatch(/No AI provider is ready/);
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "mock"));
+
+    // No active prompts → explained; the first prompt design failing marks the domain instead of leaving it "Ready".
+    await db.update(s.prompts).set({ status: "CANDIDATE" }).where(eq(s.prompts.domainId, demo!.id));
+    await db.update(s.domains).set({ status: "READY", lastError: null }).where(eq(s.domains.id, demo!.id));
+    expect(await measurementBlocker(demo!.id)).toMatch(/no active prompts/);
+    setLlmOverride(async () => {
+      throw new Error("LLM unavailable");
+    });
+    try {
+      await expect(generatePortfolio(demo!.id, "INITIAL")).rejects.toThrow("LLM unavailable");
+    } finally {
+      setLlmOverride(null);
+    }
+    const [failed] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
+    expect(failed!.status).toBe("ERROR");
+    expect(failed!.lastError).toMatch(/Prompt design failed: LLM unavailable/);
+  });
+
   it("recovers a domain whose first prompt design was stopped", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

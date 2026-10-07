@@ -13,7 +13,7 @@ import {
   providers,
   runs,
 } from "@/db/schema";
-import { getProvider, listProviders } from "@/core/measurement/providers";
+import { getProvider, listProviders, missingEnv } from "@/core/measurement/providers";
 import type { ProviderConfigurationSeed } from "@/core/measurement/provider";
 import type { PromptRole } from "@/core/prompt";
 import { type CellState, initialCellState } from "@/core/sampling/cell-state";
@@ -51,8 +51,9 @@ export function measurementId(parts: string[]) {
 type ConfigRow = typeof providerConfigurations.$inferSelect;
 
 export async function enabledConfigurations(): Promise<Array<ConfigRow & { reach: number }>> {
-  // Only configurations still defined in code (a removed one may linger in the table until the next sync).
-  const known = new Set(listProviders().flatMap((p) => p.configurations.map((c) => c.id)));
+  // Only configurations still defined in code (a removed one may linger in the table until the next sync),
+  // of providers whose credentials are set (otherwise every measurement would just fail).
+  const known = new Set(listProviders().filter((p) => missingEnv(p).length === 0).flatMap((p) => p.configurations.map((c) => c.id)));
   const rows = await getDb()
     .select({ c: providerConfigurations, reach: providers.reach })
     .from(providerConfigurations)
@@ -91,6 +92,19 @@ async function observedCostByConfiguration(): Promise<Map<string, { avg: number;
 
 /** A RUNNING run older than this is treated as stuck and no longer blocks new runs. */
 const IN_FLIGHT_MAX_MS = 24 * 3600_000;
+
+/** Why a measurement run would measure nothing for this domain, or null when it can run. */
+export async function measurementBlocker(domainId: string): Promise<string | null> {
+  const [active] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(prompts)
+    .where(and(eq(prompts.domainId, domainId), eq(prompts.status, "ACTIVE")));
+  if (Number(active?.n ?? 0) === 0) return "This domain has no active prompts yet — use Design prompts first.";
+  if (!(await enabledConfigurations()).some((c) => c.role === "STANDARD")) {
+    return "No AI provider is ready to measure — enable one with its credentials set on the AI providers page.";
+  }
+  return null;
+}
 
 export async function planMeasurements(domainId: string, trigger: "CRON" | "MANUAL" | "SYSTEM") {
   const db = getDb();
@@ -232,7 +246,9 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
       plannedCount: total,
       estimatedCostUsd: plan.totalCostUsd + calibration.cost,
       plan: { ...(run!.plan as object), calibrationMeasurements: calibration.count },
-      ...(total === 0 ? { status: "SUCCEEDED", finishedAt: now } : {}),
+      ...(total === 0
+        ? { status: "SUCCEEDED", finishedAt: now, error: budget <= 0 ? "Monthly budget used up — nothing was measured." : "Nothing was due for measurement." }
+        : {}),
     })
     .where(eq(runs.id, runId));
   if (total > 0) await dispatchRun(runId);

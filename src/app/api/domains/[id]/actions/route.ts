@@ -6,6 +6,7 @@ import { enqueue } from "@/jobs/queue";
 import { runMeasurementNow, setDomainPaused, startDiscovery } from "@/services/domains";
 import { decideProposals } from "@/services/portfolio";
 import { recomputeHistory } from "@/services/scores";
+import { measurementBlocker } from "@/services/planning";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -31,9 +32,12 @@ export const POST = adminRoute<{ id: string }>(async (req, { params, actor }) =>
   const blocked = await actionBlockedReason(id, a.action);
   if (blocked) throw new HttpError(409, blocked);
   switch (a.action) {
-    case "run-now":
+    case "run-now": {
+      const blocker = await measurementBlocker(id);
+      if (blocker) throw new HttpError(422, blocker);
       await runMeasurementNow(id);
       break;
+    }
     case "pause":
       await setDomainPaused(id, true);
       return { ok: true };
