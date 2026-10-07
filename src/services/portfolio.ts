@@ -44,8 +44,11 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
   if (!domain || !latest) throw new Error("Domain has no profile yet — run discovery first");
   const { profile, sizing } = latest;
   let clusters = await loadClusters(domainId);
+  // A domain without an active portfolio — its first prompt design was stopped or interrupted — is
+  // set up like the first time whatever the trigger: prompts are activated and monitoring starts.
+  const initial = mode === "INITIAL" || (mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0);
 
-  if (mode === "REDISCOVERY") {
+  if (mode === "REDISCOVERY" && !initial) {
     // Expansion: only clusters that have no prompts yet (new categories/services).
     const covered = await db
       .selectDistinct({ key: prompts.clusterKey })
@@ -59,11 +62,11 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
   const exploratory = mode === "EXPLORATION";
   const target = exploratory
     ? Math.max(4, sizing.explorationPromptCount * 2)
-    : Math.min(MAX_NEW_CANDIDATES, mode === "INITIAL" ? sizing.candidatePoolTarget : Math.ceil(sizing.candidatePoolTarget / 2));
+    : Math.min(MAX_NEW_CANDIDATES, initial ? sizing.candidatePoolTarget : Math.ceil(sizing.candidatePoolTarget / 2));
   const allocation = allocatePrompts(clusters, target);
   for (const [k, v] of allocation) allocation.set(k, Math.min(MAX_PROMPTS_PER_CLUSTER, Math.max(2, v)));
 
-  const status = mode === "INITIAL" || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
+  const status = initial || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
   let created = 0;
   const chunks: TopicCluster[][] = [];
   for (let i = 0; i < clusters.length; i += CLUSTERS_PER_LLM_CALL) {
@@ -135,9 +138,9 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
     }
   }
 
-  if (mode === "INITIAL") {
+  if (initial) {
     await optimizePortfolio(domainId, { applyDirectly: true });
-    await db.update(domains).set({ status: "ACTIVE", nextPlanAt: new Date() }).where(eq(domains.id, domainId));
+    await db.update(domains).set({ status: "ACTIVE", lastError: null, nextPlanAt: new Date() }).where(eq(domains.id, domainId));
     await enqueue("measurement.plan", { domainId, trigger: "SYSTEM" }, { dedupeKey: `plan:${domainId}` });
   }
   return { created };

@@ -142,6 +142,22 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
       }}
     />
   );
+  // Discovered but nothing to measure yet (prompt design stopped, interrupted or still queued).
+  const needsPrompts = discovered && detail.portfolio.active === 0 && d.status !== "DISCOVERING" && d.status !== "PAUSED";
+  const designPrompts = (
+    <ActionButton
+      {...common}
+      action="regenerate-prompts"
+      label="Design prompts"
+      primary
+      busy={busyReason("regenerate-prompts", busy)}
+      confirm={{
+        title: `Design prompts for ${d.hostname}?`,
+        confirmLabel: "Design prompts",
+        body: <p>Designs the prompt portfolio from the domain profile with AI (about $0.1–0.3), activates it and starts monitoring.</p>,
+      }}
+    />
+  );
   const discovery = (label: string, primary = false) => (
     <ActionButton
       {...common}
@@ -163,7 +179,7 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
   );
   return (
     <div className="btn-row">
-      {d.status === "NEW" ? discovery("Start discovery", true) : d.status !== "PAUSED" && runNow}
+      {d.status === "NEW" ? discovery("Start discovery", true) : needsPrompts ? designPrompts : d.status !== "PAUSED" && runNow}
       {d.status === "PAUSED" ? (
         <ActionButton domainId={d.id} action="resume" label="Resume monitoring" returnTo={returnTo} />
       ) : (

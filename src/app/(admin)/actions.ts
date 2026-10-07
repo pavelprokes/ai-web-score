@@ -66,7 +66,7 @@ const MESSAGES: Record<DomainActionName, string> = {
   pause: "Monitoring paused.",
   resume: "Monitoring resumed.",
   rediscover: "Domain discovery queued.",
-  "regenerate-prompts": "Generating new candidate prompts.",
+  "regenerate-prompts": "Designing prompts (1–3 minutes).",
   "explore-prompts": "Generating exploration prompt proposals.",
   "optimize-portfolio": "Portfolio optimisation queued.",
   "recalculate-scores": "Scores recalculated for the last 12 weeks.",

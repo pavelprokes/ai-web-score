@@ -297,6 +297,26 @@ function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<Activ
 /** Run-now with a cost confirmation; disabled while a measurement for the domain is in progress. */
 function RunNowButton({ d, busy }: { d: DomainRow; busy: Set<ActivityKind> | undefined }) {
   const left = Math.max(0, d.cost.monthlyBudgetUsd - d.cost.monthUsd);
+  // Nothing to measure yet (prompt design stopped or interrupted): offer the step that fixes it.
+  if (d.prompts.active === 0 && d.status !== "DISCOVERING") {
+    return (
+      <ActionButton
+        domainId={d.id}
+        action="regenerate-prompts"
+        label="Design prompts"
+        pendingLabel="Queuing…"
+        small
+        returnTo="/"
+        accessibleLabel={`for ${d.hostname}`}
+        busy={busyReason("regenerate-prompts", busy)}
+        confirm={{
+          title: `Design prompts for ${d.hostname}?`,
+          confirmLabel: "Design prompts",
+          body: <p>Designs the prompt portfolio from the domain profile with AI (about $0.1–0.3), activates it and starts monitoring.</p>,
+        }}
+      />
+    );
+  }
   return (
     <ActionButton
       domainId={d.id}

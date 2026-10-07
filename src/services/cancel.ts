@@ -116,6 +116,6 @@ async function resetDomainAfterStop(domainId: string) {
       ? { status: "NEW", lastError: null }
       : Number(active?.n ?? 0) > 0
         ? { status: "ACTIVE", lastError: null }
-        : { status: "ERROR", lastError: "Prompt design was stopped — use Regenerate prompts to continue." };
+        : { status: "ERROR", lastError: "Prompt design was stopped — use Design prompts to continue." };
   await db.update(domains).set(update).where(eq(domains.id, domainId));
 }
