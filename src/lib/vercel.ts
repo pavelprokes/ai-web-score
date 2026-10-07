@@ -5,7 +5,11 @@
  */
 type RequestContext = { waitUntil?: (p: Promise<unknown>) => void };
 
-export function waitUntil(promise: Promise<unknown>): void {
+/** Returns false when no request context offered `waitUntil` (the promise then does not extend anything). */
+export function waitUntil(promise: Promise<unknown>): boolean {
   const store = (globalThis as Record<symbol, { get?: () => RequestContext } | undefined>)[Symbol.for("@vercel/request-context")];
-  store?.get?.()?.waitUntil?.(promise);
+  const extend = store?.get?.()?.waitUntil;
+  if (!extend) return false;
+  extend(promise);
+  return true;
 }

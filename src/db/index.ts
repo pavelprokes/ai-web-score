@@ -3,6 +3,7 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { waitUntil } from "@/lib/vercel";
 import { allSocketsClosed, stallingSocketFactory, usesTls } from "./socket";
+import { withReadRetry } from "./retry";
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -54,7 +55,7 @@ function pool(kind: "web" | "jobs"): Pool {
       // …and keep the instance awake until the pool has closed them (like attachDatabasePool in @vercel/functions).
       ...(process.env.VERCEL ? { debug: keepAwakeUntilIdle } : {}),
     });
-    p = { sql, db: drizzle(sql, { schema }) };
+    p = { sql, db: drizzle(withReadRetry(sql), { schema }) };
     pools[kind] = p;
   }
   return p;
@@ -82,13 +83,20 @@ function keepAwakeUntilIdle() {
     releaseFallback?.();
     const done = new Promise<void>((resolve) => (releaseFallback = resolve));
     fallbackTimer = setTimeout(() => releaseFallback?.(), IDLE_TIMEOUT_S * 1000 + 1000);
-    waitUntil(done);
+    extendInvocation(done);
     return;
   }
   keepAwake ??= Promise.race([allSocketsClosed(), new Promise<void>((r) => setTimeout(r, KEEP_AWAKE_CAP_MS).unref())]).finally(() => {
     keepAwake = null;
   });
-  waitUntil(keepAwake);
+  extendInvocation(keepAwake);
+}
+
+let warnedNoWaitUntil = false;
+function extendInvocation(promise: Promise<void>) {
+  if (waitUntil(promise) || warnedNoWaitUntil) return;
+  warnedNoWaitUntil = true;
+  console.warn("[db] No Vercel request context offers waitUntil here — idle connections may stay open across a suspension.");
 }
 
 /** Lazily created so `next build` never needs a database connection. */
