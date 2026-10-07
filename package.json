@@ -19,7 +19,8 @@
     "db:up": "docker compose up -d db",
     "test:e2e": "vitest run src/e2e",
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke-providers.ts",
-    "a11y": "node scripts/a11y-audit.mjs"
+    "a11y": "node scripts/a11y-audit.mjs",
+    "db:probe": "tsx --env-file-if-exists=.env.local scripts/db-probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
