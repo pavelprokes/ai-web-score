@@ -15,7 +15,7 @@
     "vercel-build": "pnpm db:deploy && next build",
     "db:seed": "tsx --env-file-if-exists=.env.local src/db/seed.ts",
     "cli": "tsx --env-file-if-exists=.env.local scripts/cli.ts",
-    "test:int": "vitest run src/services/pipeline.int.test.ts src/db/socket.int.test.ts src/e2e",
+    "test:int": "vitest run src/services/pipeline.int.test.ts src/db/socket.int.test.ts src/db/retry.int.test.ts src/e2e",
     "db:up": "docker compose up -d db",
     "test:e2e": "vitest run src/e2e",
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke-providers.ts",
