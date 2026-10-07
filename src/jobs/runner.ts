@@ -11,6 +11,7 @@ import { computeScores } from "@/services/scores";
 import { recoverInterruptedRuns } from "@/services/recovery";
 import { sendMeasurementToUmami } from "@/services/umami";
 import { runOptimizer } from "@/services/optimizer";
+import { generateRecommendations } from "@/services/recommendations";
 import { syncProviderRegistry } from "@/services/registry";
 import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
 
@@ -31,6 +32,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "scores.compute": (p) => computeScores(s(p.domainId)),
   "umami.send": (p) => sendMeasurementToUmami(s(p.measurementId)),
   "optimizer.run": () => runOptimizer(),
+  "recommendations.generate": (p) => generateRecommendations(s(p.domainId)),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
@@ -51,6 +53,7 @@ const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
   "measurement.collect": 120, // up to 200 results, fetched in parallel
   "analysis.submit": 90,
   "analysis.collect": 120,
+  "recommendations.generate": 120, // site files + one short LLM call
 };
 const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
 const DEFAULT_MAX_JOB_SECONDS = 60;

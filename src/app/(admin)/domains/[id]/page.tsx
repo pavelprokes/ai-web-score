@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
+import { latestRecommendations } from "@/services/recommendations";
+import { recommendationAction } from "@/app/(admin)/actions";
 import type { ActivityKind } from "@/services/activity";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
 import { Flash } from "@/components/Flash";
+import { SubmitButton } from "@/components/SubmitButton";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
 import { num, pct, usd } from "@/components/format";
@@ -39,11 +42,12 @@ export default async function DomainPage({
 }) {
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
     busyKindsByDomain(),
+    latestRecommendations(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -79,6 +83,8 @@ export default async function DomainPage({
       <Flash message={done ?? addedMessage} error={error} />
 
       <ScoreTiles detail={detail} />
+
+      <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {history && history.domain.length > 0 && (
         <Section title="Score over time" id="trend-heading">
@@ -233,6 +239,138 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
     </div>
   );
 }
+
+type Recs = Awaited<ReturnType<typeof latestRecommendations>>;
+
+const REC_CATEGORY: Record<string, string> = {
+  TECHNICAL: "Technical",
+  CONTENT: "Content",
+  AUTHORITY: "Authority",
+  ACCURACY: "Accuracy",
+  REPUTATION: "Reputation",
+  PROVIDER: "Provider",
+  COMPETITION: "Competition",
+};
+const EFFORT_LABEL: Record<string, string> = { LOW: "Low effort", MEDIUM: "Medium effort", HIGH: "High effort" };
+
+function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail; recs: Recs; returnTo: string; busy: Set<ActivityKind> | undefined; now: Date }) {
+  const d = detail.domain;
+  const generate = (
+    <ActionButton
+      domainId={d.id}
+      action="generate-recommendations"
+      label={recs ? "Refresh" : "Generate recommendations"}
+      pendingLabel="Queuing…"
+      small={!!recs}
+      returnTo={returnTo}
+      busy={busyReason("generate-recommendations", busy)}
+      confirm={{
+        title: `Generate recommendations for ${d.hostname}?`,
+        confirmLabel: "Generate",
+        body: (
+          <p>
+            Checks the website (robots.txt, llms.txt, structured data) and the last 30 days of AI answers, then writes a short prioritised plan with AI
+            (about $0.01–0.05).
+          </p>
+        ),
+      }}
+    />
+  );
+  if (!detail.profile) return null;
+  if (!recs) {
+    return (
+      <Section title="Recommendations" id="recommendations-heading" actions={generate}>
+        <p className="muted">What to change on the website and around it to raise the scores. Works best after the first measurement.</p>
+      </Section>
+    );
+  }
+  const open = recs.items.filter((i) => i.status === "OPEN");
+  const closed = recs.items.filter((i) => i.status !== "OPEN");
+  return (
+    <Section title="Recommendations" id="recommendations-heading" actions={generate}>
+      <p>{recs.set.summary}</p>
+      <p className="muted">
+        Based on {num(recs.set.answersAnalysed)} answers · generated <TimeAgo date={recs.set.createdAt} now={now} /> ·{" "}
+        {recs.set.generatedBy === "llm" ? "written by AI" : "rule-based"}
+      </p>
+      {open.length === 0 ? (
+        <p className="muted">{recs.items.length ? "All recommendations are done or dismissed. Refresh after the next measurements." : "Nothing to improve right now."}</p>
+      ) : (
+        <ol className="recs">
+          {open.map((r) => (
+            <li key={r.id}>
+              <div className="recs__head">
+                <strong>{r.title}</strong>
+                <span className="recs__meta">
+                  <Badge tone="info">{REC_CATEGORY[r.category] ?? r.category}</Badge>
+                  <Badge tone="neutral">{EFFORT_LABEL[r.effort] ?? r.effort}</Badge>
+                  {r.impactMetric && (
+                    <span className="cell-sub">
+                      Improves {metricLabel(r.impactMetric)} <MetricInfo id={r.impactMetric} />
+                    </span>
+                  )}
+                </span>
+              </div>
+              <p className="cell-sub">{r.rationale}</p>
+              {(r.steps as string[]).length > 0 && (
+                <ol className="recs__steps">
+                  {(r.steps as string[]).map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              )}
+              <div className="btn-row">
+                <RecommendationStatus id={r.id} status="DONE" label="Done" title={r.title} />
+                <RecommendationStatus id={r.id} status="DISMISSED" label="Dismiss" title={r.title} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {closed.length > 0 && (
+        <details>
+          <summary>Done or dismissed ({closed.length})</summary>
+          <ul className="proposals">
+            {closed.map((r) => (
+              <li key={r.id}>
+                <span>
+                  <Badge tone={r.status === "DONE" ? "good" : "neutral"}>{r.status === "DONE" ? "Done" : "Dismissed"}</Badge> {r.title}
+                </span>
+                <RecommendationStatus id={r.id} status="OPEN" label="Reopen" title={r.title} />
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </Section>
+  );
+}
+
+function RecommendationStatus({ id, status, label, title }: { id: string; status: "OPEN" | "DONE" | "DISMISSED"; label: string; title: string }) {
+  return (
+    <form action={recommendationAction} className="inline">
+      <input type="hidden" name="recommendationId" value={id} />
+      <input type="hidden" name="status" value={status} />
+      <SubmitButton className="btn btn--small" pendingLabel="Saving…">
+        {label}
+        <span className="sr-only"> {title}</span>
+      </SubmitButton>
+    </form>
+  );
+}
+
+const METRIC_LABEL: Record<string, string> = {
+  "overall-score": "overall score",
+  "mention-rate": "mentions",
+  "citation-rate": "citations",
+  "recommendation-rate": "recommendations",
+  "average-position": "position",
+  "share-of-voice": "share of voice",
+  "citation-share": "citation share",
+  sentiment: "sentiment",
+  accuracy: "accuracy",
+};
+const metricLabel = (id: string) => METRIC_LABEL[id] ?? id;
 
 function ScoreTiles({ detail }: { detail: Detail }) {
   const s = detail.scores.domain;

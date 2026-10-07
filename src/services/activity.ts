@@ -9,7 +9,7 @@ import { domains, jobs, measurementSignals, measurements, runs } from "@/db/sche
  * answer analysis and score computation. Read-only and cheap (a few indexed queries).
  */
 
-export type ActivityKind = "DISCOVERY" | "PROMPTS" | "OPTIMIZE" | "PLANNING" | "MEASUREMENT" | "ANALYSIS" | "SCORING";
+export type ActivityKind = "DISCOVERY" | "PROMPTS" | "OPTIMIZE" | "PLANNING" | "MEASUREMENT" | "ANALYSIS" | "SCORING" | "RECOMMENDATIONS";
 
 export interface ActivityItem {
   /** Stable while the work is in progress (used to detect completion on the client). */
@@ -34,6 +34,7 @@ const LABELS: Record<ActivityKind, string> = {
   MEASUREMENT: "Measuring AI answers",
   ANALYSIS: "Analysing answers",
   SCORING: "Computing scores",
+  RECOMMENDATIONS: "Writing recommendations",
 };
 
 const JOB_KINDS: Record<string, ActivityKind> = {
@@ -42,6 +43,7 @@ const JOB_KINDS: Record<string, ActivityKind> = {
   "portfolio.optimize": "OPTIMIZE",
   "measurement.plan": "PLANNING",
   "scores.compute": "SCORING",
+  "recommendations.generate": "RECOMMENDATIONS",
 };
 
 /** Work older than this is treated as stale (crashed worker) and not shown as in progress. */

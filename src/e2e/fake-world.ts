@@ -153,10 +153,28 @@ export function fakeJudgement(user: string) {
   };
 }
 
+/** One plan item per finding (first 5), grounded in the findings' keys like the real model is asked to be. */
+export function fakeRecommendations(user: string) {
+  const findings = JSON.parse(user.split("Findings: ")[1] ?? "[]") as { key: string; category: string; title: string; detail: string; metric: string }[];
+  return {
+    summary: `Fix ${findings.length} issues, starting with the top one.`,
+    items: findings.slice(0, 5).map((f) => ({
+      title: `Fix: ${f.title}`,
+      why: f.detail,
+      steps: ["Do the first step.", "Then the second."],
+      category: f.category,
+      impactMetric: f.metric,
+      effort: "LOW",
+      findingKeys: [f.key],
+    })),
+  };
+}
+
 export function fakeLlm({ purpose, user }: { purpose: string; user: string }) {
   if (purpose === "discovery") return fakeDiscoveryProfile();
   if (purpose.startsWith("portfolio.")) return fakePromptSet(user);
   if (purpose === "analysis") return fakeJudgement(user);
+  if (purpose === "recommendations") return fakeRecommendations(user);
   throw new Error(`fake LLM: unexpected purpose ${purpose}`);
 }
 

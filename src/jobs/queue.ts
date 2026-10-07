@@ -21,7 +21,8 @@ export type JobType =
   | "analysis.collect"
   | "scores.compute"
   | "umami.send"
-  | "optimizer.run";
+  | "optimizer.run"
+  | "recommendations.generate";
 
 export interface Job {
   id: string;

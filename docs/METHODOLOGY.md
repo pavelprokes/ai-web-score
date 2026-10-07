@@ -146,6 +146,24 @@ signals and cost (no raw text). Use a dedicated Umami website per domain: server
 sessions and would inflate the traffic site's visitor counts. Async results carry the measurement
 timestamp.
 
+## 9. Recommendations
+
+On demand per domain (domain page → Recommendations, or `POST /api/domains/{id}/actions` with
+`generate-recommendations`; read back via `GET /api/domains/{id}/recommendations`).
+
+1. **Diagnostics (deterministic, free).** Inputs: the crawl digest, live `robots.txt` and `/llms.txt`, and
+   the last 30 days of STANDARD answers with their raw signals. Checks: AI crawlers blocked in robots.txt
+   (search agents weigh far more than training agents), missing Organization / Product JSON-LD, topic
+   clusters where competitors appear but the brand does not, third-party sites assistants cite instead,
+   mentioned-but-not-cited, weak list position, low accuracy, negative sentiment, a provider far below the
+   best one, untracked competitors, missing hreflang. Each finding has evidence, the metric it moves and a
+   default fix; thresholds need ≥ 4 answers.
+2. **Plan (one short LLM call).** Sonnet 5.5, effort low, ≤ 3 000 output tokens, English, a fixed item
+   shape (title, why, 1–3 steps, category, metric, effort). Items must cite finding keys; items citing
+   unknown keys are dropped. Without an LLM key the findings' default fixes are stored instead.
+
+Each run stores a new set (findings + items); items can be marked Done or Dismissed.
+
 ## Known limitations
 
 - Consumer capture is logged-out and memory-free (a neutral new user). Personalisation is not modelled.

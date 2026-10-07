@@ -392,6 +392,59 @@ export const llmUsage = pgTable(
   (t) => [index("llm_usage_domain").on(t.domainId, t.createdAt)],
 ).enableRLS();
 
+// ─── Recommendations ────────────────────────────────────────────────────────
+
+/** One generation of recommendations for a domain: the diagnostics it was based on and its summary. */
+export const recommendationSets = pgTable(
+  "recommendation_sets",
+  {
+    id: id(),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    /** Deterministic findings (evidence) the recommendations were written from. */
+    diagnostics: jsonb("diagnostics").notNull(),
+    summary: text("summary"),
+    /** "llm" (Claude synthesis) or "rules" (deterministic templates when no LLM is available). */
+    generatedBy: text("generated_by").notNull(),
+    model: text("model"),
+    /** Answers the diagnostics were computed from (0 = website only). */
+    answersAnalysed: integer("answers_analysed").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recommendation_sets_domain").on(t.domainId, t.createdAt)],
+).enableRLS();
+
+export const recommendations = pgTable(
+  "recommendations",
+  {
+    id: id(),
+    setId: text("set_id")
+      .notNull()
+      .references(() => recommendationSets.id, { onDelete: "cascade" }),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    priority: integer("priority").notNull(),
+    /** TECHNICAL | CONTENT | AUTHORITY | ACCURACY | REPUTATION | PROVIDER */
+    category: text("category").notNull(),
+    title: text("title").notNull(),
+    /** Why it matters, with the evidence from the measurements. */
+    rationale: text("rationale").notNull(),
+    steps: jsonb("steps").notNull(),
+    /** Metric id from the catalog that this should move (e.g. "mention-rate"). */
+    impactMetric: text("impact_metric"),
+    /** LOW | MEDIUM | HIGH */
+    effort: text("effort").notNull(),
+    findingKeys: jsonb("finding_keys").notNull().default([]),
+    /** OPEN | DONE | DISMISSED */
+    status: text("status").notNull().default("OPEN"),
+    statusChangedAt: ts("status_changed_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recommendations_set").on(t.setId), index("recommendations_domain").on(t.domainId, t.status)],
+).enableRLS();
+
 /** Anthropic Message Batches used by the answer analyzer (50 % cheaper than sync). */
 export const llmBatches = pgTable("llm_batches", {
   id: text("id").primaryKey(),

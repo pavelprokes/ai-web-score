@@ -383,4 +383,60 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(portfolioRun!.status).toBe("SUCCEEDED");
     expect(portfolioRun!.completedCount).toBeGreaterThan(0);
   });
+
+  it("writes recommendations from the diagnostics, grounded in real findings", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { enqueue } = await import("@/jobs/queue");
+    const { processJobs } = await import("@/jobs/runner");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const { generateRecommendations, latestRecommendations, setRecommendationStatus } = await import("@/services/recommendations");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const href = String(input instanceof Request ? input.url : input);
+      return href.endsWith("/robots.txt") ? new Response("User-agent: *\nDisallow: /\n") : new Response("", { status: 404 });
+    }) as typeof fetch;
+    try {
+      // No LLM: the findings' own actions, through the job queue.
+      await enqueue("recommendations.generate", { domainId: demo!.id });
+      await processJobs({ deadlineMs: 600_000, types: ["recommendations.generate"] });
+      const rules = await latestRecommendations(demo!.id);
+      expect(rules!.set.generatedBy).toBe("rules");
+      expect(rules!.items.length).toBeGreaterThan(0);
+      expect(rules!.items.length).toBeLessThanOrEqual(8);
+      expect(rules!.items[0]!.findingKeys).toEqual(["robots:Bingbot"]);
+      expect(rules!.items.map((i) => i.priority)).toEqual(rules!.items.map((_, i) => i + 1));
+
+      // With an LLM: items citing unknown findings are dropped.
+      let calls = 0;
+      setLlmOverride(({ purpose }) => {
+        calls++;
+        expect(purpose).toBe("recommendations");
+        return {
+          summary: "Unblock the crawlers first.",
+          items: [
+            { title: "Allow AI crawlers", why: "All bots are blocked.", steps: ["Edit robots.txt"], category: "TECHNICAL", impactMetric: "citation-rate", effort: "LOW", findingKeys: ["robots:Googlebot", "robots:Bingbot"] },
+            { title: "Invented", why: "No evidence.", steps: ["x"], category: "CONTENT", impactMetric: "mention-rate", effort: "LOW", findingKeys: ["made-up"] },
+          ],
+        };
+      });
+      try {
+        await generateRecommendations(demo!.id);
+      } finally {
+        setLlmOverride(null);
+      }
+      expect(calls).toBe(1);
+      const llm = await latestRecommendations(demo!.id);
+      expect(llm!.set.generatedBy).toBe("llm");
+      expect(llm!.set.summary).toBe("Unblock the crawlers first.");
+      expect(llm!.items.map((i) => i.title)).toEqual(["Allow AI crawlers"]);
+
+      expect(await setRecommendationStatus(llm!.items[0]!.id, "DONE")).toBe(demo!.id);
+      expect((await latestRecommendations(demo!.id))!.items[0]!.status).toBe("DONE");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 });
