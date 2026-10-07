@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { llmUsage } from "@/db/schema";
 import { deadlineFetch } from "@/lib/deadline";
+import { CACHE_WRITE_FACTOR } from "@/core/pricing/cost";
 
 /**
  * Internal LLM calls (discovery, prompt generation, answer analysis) — separate
@@ -25,7 +26,6 @@ const INTERNAL_PRICES: Record<string, { input: number; output: number; cacheRead
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
 };
-const CACHE_WRITE_FACTOR = 1.25;
 
 /**
  * Thinking setting for classification-style calls: reasoning tokens add cost without
@@ -52,7 +52,7 @@ export function setAnthropicClient(c: Anthropic | null) {
  * reads and writes come separately. Batch discount (50 %) stacks with the cache multipliers.
  */
 export function llmCost(model: string, inputTokens: number, outputTokens: number, batched = false, cacheReadTokens = 0, cacheWriteTokens = 0) {
-  const p = INTERNAL_PRICES[model] ?? { input: 4, output: 20, cacheRead: 0.4 };
+  const p = INTERNAL_PRICES[model] ?? INTERNAL_PRICES["claude-opus-5-5"]!;
   const input = inputTokens * p.input + cacheReadTokens * p.cacheRead + cacheWriteTokens * p.input * CACHE_WRITE_FACTOR;
   return ((input + outputTokens * p.output) / 1e6) * (batched ? 0.5 : 1);
 }

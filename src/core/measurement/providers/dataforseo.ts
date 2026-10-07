@@ -1,6 +1,7 @@
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
 import { EMPTY_USAGE } from "../types";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { deadlineRemainingMs } from "@/lib/deadline";
 import {
   type CollectOutcome,
   httpJson,
@@ -273,6 +274,8 @@ function createAdapter(args: {
       // task_get is free and keyed by id; fetch pending tasks directly (avoids tasks_ready paging).
       // A few in parallel: one by one, a full batch would take minutes.
       return mapWithConcurrency(pending, COLLECT_CONCURRENCY, async (p): Promise<CollectOutcome> => {
+        // Close to the job's deadline, stop asking: what was fetched gets saved, the rest waits for the next run.
+        if (deadlineRemainingMs() < COLLECT_TIMEOUT_MS + 10_000) return { measurementId: p.measurementId, status: "PENDING" };
         try {
           const env = await dfs<unknown>(`${path}/task_get/advanced/${p.externalTaskId}`, undefined, COLLECT_TIMEOUT_MS);
           const task = env.tasks[0];

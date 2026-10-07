@@ -23,16 +23,25 @@ interface SocketOptions {
 
 /** Open database sockets of this process, so an invocation can wait until all are closed. */
 let openSockets = 0;
-let onAllClosed: Array<() => void> = [];
+/** One shared waiter (not one per caller), so callers that stop waiting leave nothing behind. */
+let allClosed: { promise: Promise<void>; resolve: () => void } | null = null;
 
 /** Resolves once no database socket is open (immediately if none is). */
 export function allSocketsClosed(): Promise<void> {
-  return openSockets === 0 ? Promise.resolve() : new Promise((resolve) => onAllClosed.push(resolve));
+  if (openSockets === 0) return Promise.resolve();
+  if (!allClosed) {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    allClosed = { promise, resolve };
+  }
+  return allClosed.promise;
 }
 
+/** Whether postgres.js will negotiate TLS for this URL (it does for `sslmode`, `ssl` and `sslrootcert=system`). */
 export function usesTls(url: string): boolean {
   try {
     const u = new URL(url);
+    if (u.searchParams.get("sslrootcert") === "system") return true;
     const mode = (u.searchParams.get("sslmode") ?? u.searchParams.get("ssl") ?? "disable").toLowerCase();
     return mode !== "disable" && mode !== "false";
   } catch {
@@ -58,9 +67,8 @@ export function stallingSocketFactory(stallMs: number) {
     openSockets++;
     socket.once("close", () => {
       if (--openSockets > 0) return;
-      const waiting = onAllClosed;
-      onAllClosed = [];
-      for (const resolve of waiting) resolve();
+      allClosed?.resolve();
+      allClosed = null;
     });
     socket.setTimeout(stallMs, () => {
       const answered = socket.bytesRead > 0;

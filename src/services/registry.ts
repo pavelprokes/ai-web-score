@@ -23,12 +23,17 @@ export async function syncProviderRegistry() {
       await db
         .insert(providerConfigurations)
         .values({ id: c.id, providerId: p.id, model: c.model, params: c.params, role: c.role })
-        .onConflictDoNothing();
+        // Back in code after being retired: enabled again (an admin's own disable is kept).
+        .onConflictDoUpdate({
+          target: providerConfigurations.id,
+          set: { enabled: true, retiredAt: null },
+          setWhere: sql`${providerConfigurations.retiredAt} is not null`,
+        });
     }
     // Configurations removed from code are retired (kept for history, never planned again).
     await db
       .update(providerConfigurations)
-      .set({ enabled: false })
+      .set({ enabled: false, retiredAt: new Date() })
       .where(
         and(
           eq(providerConfigurations.providerId, p.id),

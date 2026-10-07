@@ -142,8 +142,10 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
       }}
     />
   );
-  // Discovered but nothing to measure yet (prompt design stopped, interrupted or still queued).
-  const needsPrompts = discovered && detail.portfolio.active === 0 && d.status !== "DISCOVERING" && d.status !== "PAUSED";
+  // Discovery never finished (first run failed or was stopped): no profile to design prompts from.
+  const needsDiscovery = d.status !== "NEW" && d.status !== "DISCOVERING" && !detail.profile;
+  // Profiled but nothing to measure yet (prompt design stopped, interrupted or still queued).
+  const needsPrompts = !!detail.profile && detail.portfolio.active === 0 && d.status !== "DISCOVERING" && d.status !== "PAUSED";
   const designPrompts = (
     <ActionButton
       {...common}
@@ -179,7 +181,13 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
   );
   return (
     <div className="btn-row">
-      {d.status === "NEW" ? discovery("Start discovery", true) : needsPrompts ? designPrompts : d.status !== "PAUSED" && runNow}
+      {d.status === "NEW"
+        ? discovery("Start discovery", true)
+        : needsDiscovery
+          ? discovery("Run discovery again", true)
+          : needsPrompts
+            ? designPrompts
+            : d.status !== "PAUSED" && runNow}
       {d.status === "PAUSED" ? (
         <ActionButton domainId={d.id} action="resume" label="Resume monitoring" returnTo={returnTo} />
       ) : (

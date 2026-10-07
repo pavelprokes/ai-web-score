@@ -82,6 +82,15 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(retired?.enabled).toBe(false);
     const { enabledConfigurations } = await import("@/services/planning");
     expect((await enabledConfigurations()).map((c) => c.id)).not.toContain("perplexity-api:sonar-pro");
+    // Retired by the sync and back in code → enabled again; an admin's own disable stays.
+    await db.execute(sql`update provider_configurations set enabled = false, retired_at = now() where id = 'mock:default'`);
+    await db.execute(sql`update provider_configurations set enabled = false where id = 'chatgpt-ui:standard'`);
+    await syncProviderRegistry();
+    const states = await db.execute(sql`select id, enabled, retired_at from provider_configurations where id in ('mock:default', 'chatgpt-ui:standard')`);
+    const byId = Object.fromEntries(states.map((r) => [r.id as string, r]));
+    expect(byId["mock:default"]).toMatchObject({ enabled: true, retired_at: null });
+    expect(byId["chatgpt-ui:standard"]!.enabled).toBe(false);
+    await db.execute(sql`update provider_configurations set enabled = true where id = 'chatgpt-ui:standard'`);
     const before = await count();
     await Promise.all([syncProviderRegistry(), syncProviderRegistry()]); // cron and a click at once
     await syncProviderRegistry();
