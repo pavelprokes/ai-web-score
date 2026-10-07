@@ -17,6 +17,7 @@ equivalence to the more expensive reference.
 | Answer analysis | Sonnet 5.5, Batches, thinking off | ≈ 0.0025 per call | brand mentions only + 10 % sample; judgement carry-over; outcome grouping → ≈ 0.0005–0.001 per measured answer; the domain context (brand, competitors, fact sheet) is a cached system block — hits cost 0.1× (stacks with the batch discount), requests are grouped by domain |
 
 Discovery + prompt design (one-off per domain, Opus 5.5): ≈ $0.2–0.7.
+Recommendations (on demand, Sonnet 5.5, effort low, compact input ≤ 20 findings): ≈ $0.01–0.05 per run; the diagnostics are free.
 
 ## Batch / queue discounts (and what they do not discount)
 

@@ -23,6 +23,7 @@ const Action = z.discriminatedUnion("action", [
   z.object({ action: z.literal("recalculate-scores"), scoringVersion: z.string().optional(), weeks: z.number().int().min(0).max(104).default(12) }),
   z.object({ action: z.literal("approve-proposals"), ids: z.array(z.string()).optional() }),
   z.object({ action: z.literal("reject-proposals"), ids: z.array(z.string()).optional() }),
+  z.object({ action: z.literal("generate-recommendations") }),
 ]);
 
 /** Operational actions on a domain (§16). Long work is queued and processed right after the response. */
@@ -73,6 +74,9 @@ export const POST = adminRoute<{ id: string }>(async (req, { params, actor }) =>
       const n = await decideProposals(id, a.ids ?? "ALL", a.action === "approve-proposals", actor);
       return { decided: n };
     }
+    case "generate-recommendations":
+      await enqueue("recommendations.generate", { domainId: id }, { dedupeKey: `recommendations:${id}`, maxAttempts: 2 });
+      break;
   }
   kickJobs();
   return { queued: a.action };

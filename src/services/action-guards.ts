@@ -8,6 +8,7 @@ export const ACTION_BLOCKERS: Partial<Record<string, ActivityKind[]>> = {
   "run-now": ["MEASUREMENT", "PLANNING"],
   rediscover: ["DISCOVERY", "PROMPTS"],
   "regenerate-prompts": ["PROMPTS", "DISCOVERY"],
+  "generate-recommendations": ["RECOMMENDATIONS", "DISCOVERY"],
   "explore-prompts": ["PROMPTS", "DISCOVERY"],
   "optimize-portfolio": ["OPTIMIZE", "PROMPTS"],
 };
@@ -20,6 +21,7 @@ const KIND_REASON: Record<ActivityKind, string> = {
   MEASUREMENT: "Measurement in progress",
   ANALYSIS: "Analysing answers…",
   SCORING: "Computing scores…",
+  RECOMMENDATIONS: "Writing recommendations…",
 };
 
 /** Kinds of background work in progress, per domain. */

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { domains } from "@/db/schema";
+import { domainProfiles, domains } from "@/db/schema";
 import { requireAdminAction } from "@/lib/auth-guard";
 import { kickJobs } from "@/lib/kick";
 import { measurementBlocker } from "@/services/planning";
@@ -15,6 +15,7 @@ import { recomputeHistory } from "@/services/scores";
 import { actionBlockedReason } from "@/services/action-guards";
 import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/services/registry";
 import { promoteConfiguration } from "@/services/optimizer";
+import { RecommendationNotFound, setRecommendationStatus } from "@/services/recommendations";
 
 export interface AddDomainState {
   error?: string;
@@ -60,7 +61,8 @@ export type DomainActionName =
   | "optimize-portfolio"
   | "recalculate-scores"
   | "approve-proposals"
-  | "reject-proposals";
+  | "reject-proposals"
+  | "generate-recommendations";
 
 const MESSAGES: Record<DomainActionName, string> = {
   "run-now": "Measurement run queued.",
@@ -73,6 +75,7 @@ const MESSAGES: Record<DomainActionName, string> = {
   "recalculate-scores": "Scores recalculated for the last 12 weeks.",
   "approve-proposals": "Approved.",
   "reject-proposals": "Rejected.",
+  "generate-recommendations": "Writing recommendations (about a minute).",
 };
 
 export async function domainAction(formData: FormData) {
@@ -125,6 +128,13 @@ export async function domainAction(formData: FormData) {
       await decideProposals(id, proposalId ? [String(proposalId)] : "ALL", action === "approve-proposals", actor);
       break;
     }
+    case "generate-recommendations": {
+      const [profile] = await getDb().select({ id: domainProfiles.id }).from(domainProfiles).where(eq(domainProfiles.domainId, id)).limit(1);
+      if (!profile) redirect(`${back}?error=${encodeURIComponent("Run the discovery first — recommendations need the domain profile.")}`);
+      await enqueue("recommendations.generate", { domainId: id }, { dedupeKey: `recommendations:${id}`, maxAttempts: 2 });
+      kickJobs();
+      break;
+    }
     default:
       throw new Error(`Unknown action ${action}`);
   }
@@ -158,4 +168,21 @@ export async function providerAction(formData: FormData) {
   }
   revalidatePath("/providers");
   redirect(`/providers?${failed ? "error" : "done"}=${encodeURIComponent(message)}`);
+}
+
+/** Marks one recommendation done / dismissed (or reopens it). */
+export async function recommendationAction(formData: FormData) {
+  await requireAdminAction();
+  const id = String(formData.get("recommendationId"));
+  const status = String(formData.get("status"));
+  if (status !== "OPEN" && status !== "DONE" && status !== "DISMISSED") throw new Error(`Unknown status ${status}`);
+  let domainId: string;
+  try {
+    domainId = await setRecommendationStatus(id, status);
+  } catch (e) {
+    if (!(e instanceof RecommendationNotFound)) throw e;
+    redirect(`/?error=${encodeURIComponent(e.message)}`);
+  }
+  revalidatePath(`/domains/${domainId}`);
+  redirect(`/domains/${domainId}#recommendations-heading`);
 }

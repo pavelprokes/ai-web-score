@@ -291,4 +291,30 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     );
     expect(bad.status).toBe(400);
   }, T);
+
+  it("4) writes recommendations from the measured answers", async () => {
+    const auth = { headers: { authorization: `Bearer ${TOKEN}` } };
+    const ctx = <P,>(params: P) => ({ params: Promise.resolve(params) });
+    const actionsRoute = await import("@/app/api/domains/[id]/actions/route");
+    const recsRoute = await import("@/app/api/domains/[id]/recommendations/route");
+
+    const empty = await (await recsRoute.GET(new Request(`http://t/api/domains/${domainId}/recommendations`, auth), ctx({ id: domainId }))).json();
+    expect(empty.set).toBeNull();
+    const res = await actionsRoute.POST(
+      new Request(`http://t/api/domains/${domainId}/actions`, { ...auth, method: "POST", body: JSON.stringify({ action: "generate-recommendations" }) }),
+      ctx({ id: domainId }),
+    );
+    expect(res.status).toBe(200);
+    await drain();
+
+    const recs = await (await recsRoute.GET(new Request(`http://t/api/domains/${domainId}/recommendations`, auth), ctx({ id: domainId }))).json();
+    expect(recs.set.answersAnalysed).toBeGreaterThan(0);
+    expect(recs.items.length).toBeLessThanOrEqual(8);
+    const known = new Set((recs.set.diagnostics as { key: string }[]).map((f) => f.key));
+    for (const item of recs.items) {
+      expect(item.findingKeys.length).toBeGreaterThan(0);
+      expect(item.findingKeys.every((k: string) => known.has(k))).toBe(true);
+      expect(item.steps.length).toBeGreaterThan(0);
+    }
+  }, T);
 });
