@@ -19,15 +19,17 @@ export async function recoverInterruptedRuns(now = new Date()) {
     .select({ id: runs.id, kind: runs.kind, domainId: runs.domainId, planned: runs.plannedCount })
     .from(runs)
     .where(and(eq(runs.status, "RUNNING"), lt(runs.startedAt, staleBefore)));
-  if (stale.length === 0) return { discovery: 0, measurement: 0 };
+  if (stale.length === 0) return { discovery: 0, prompts: 0, measurement: 0 };
 
   const activeJobs = await db
     .select({ type: jobs.type, domainId: sql<string | null>`${jobs.payload}->>'domainId'` })
     .from(jobs)
     .where(inArray(jobs.status, ["QUEUED", "RUNNING"]));
   const discoveryQueued = new Set(activeJobs.filter((j) => j.type === "discovery.run").map((j) => j.domainId));
+  const promptsQueued = new Set(activeJobs.filter((j) => j.type === "portfolio.generate").map((j) => j.domainId));
 
   let discovery = 0;
+  let prompts = 0;
   let measurement = 0;
   for (const run of stale) {
     if (run.kind === "DISCOVERY") {
@@ -43,11 +45,30 @@ export async function recoverInterruptedRuns(now = new Date()) {
           .where(and(eq(domains.id, run.domainId), eq(domains.status, "DISCOVERING")));
       }
       discovery++;
+    } else if (run.kind === "PORTFOLIO") {
+      await db
+        .update(runs)
+        .set({ status: "FAILED", finishedAt: now, error: "Interrupted (deploy, timeout or crash)" })
+        .where(eq(runs.id, run.id));
+      if (!promptsQueued.has(run.domainId)) {
+        // Only a domain still waiting for its first portfolio needs the hint; monitoring continues otherwise.
+        await db
+          .update(domains)
+          .set({ status: "ERROR", lastError: "Prompt design was interrupted — use Design prompts to try again." })
+          .where(
+            and(
+              eq(domains.id, run.domainId),
+              eq(domains.status, "READY"),
+              sql`not exists (select 1 from prompts where domain_id = ${run.domainId} and status = 'ACTIVE')`,
+            ),
+          );
+      }
+      prompts++;
     } else if (run.kind === "MEASUREMENT") {
       if (await recoverMeasurementRun(run.id, now)) measurement++;
     }
   }
-  return { discovery, measurement };
+  return { discovery, prompts, measurement };
 }
 
 /** Re-dispatches measurements left without a job and closes runs whose measurements all finished. */

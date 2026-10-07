@@ -241,7 +241,7 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     expect(d.scores.mentionRateCi[1]).toBeGreaterThanOrEqual(d.scores.mentionRate);
     expect(d.lastDiscoveryAt).toBeTruthy();
     expect(d.lastMeasuredAt).toBeTruthy();
-    expect(d.lastRuns.map((r: any) => r.kind).sort()).toEqual(["DISCOVERY", "MEASUREMENT"]);
+    expect(d.lastRuns.map((r: any) => r.kind).sort()).toEqual(["DISCOVERY", "MEASUREMENT", "PORTFOLIO"]);
     expect(d.cost.monthUsd).toBeGreaterThan(0);
 
     const detail = await (await domainRoute.GET(new Request(`http://t/api/domains/${domainId}`, auth), ctx({ id: domainId }))).json();

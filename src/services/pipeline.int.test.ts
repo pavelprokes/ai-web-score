@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -237,7 +237,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     // Fresh run: must be left alone.
     const [fresh] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "DISCOVERY", trigger: "MANUAL" }).returning();
 
-    expect(await recoverInterruptedRuns()).toEqual({ discovery: 1, measurement: 1 });
+    expect(await recoverInterruptedRuns()).toEqual({ discovery: 1, prompts: 0, measurement: 1 });
     const status = async (id: string) => (await db.select().from(s.runs).where(eq(s.runs.id, id)))[0]!.status;
     expect(await status(disc!.id)).toBe("FAILED");
     expect(await status(fresh!.id)).toBe("RUNNING");
@@ -328,6 +328,21 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const [failed] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
     expect(failed!.status).toBe("ERROR");
     expect(failed!.lastError).toMatch(/Prompt design failed: LLM unavailable/);
+    // …and the attempt shows in the run history with its error.
+    const [portfolioRun] = await db.select().from(s.runs).where(eq(s.runs.kind, "PORTFOLIO")).orderBy(desc(s.runs.startedAt)).limit(1);
+    expect(portfolioRun).toMatchObject({ status: "FAILED", trigger: "INITIAL", error: "LLM unavailable" });
+
+    // An interrupted attempt (deploy, timeout) is closed by recovery and tells the admin what to do.
+    const { recoverInterruptedRuns } = await import("@/services/recovery");
+    await db.execute(sql`delete from jobs where type = 'portfolio.generate'`);
+    await db.update(s.domains).set({ status: "READY", lastError: null }).where(eq(s.domains.id, demo!.id));
+    const [stale] = await db
+      .insert(s.runs)
+      .values({ domainId: demo!.id, kind: "PORTFOLIO", trigger: "REGENERATE", startedAt: new Date(Date.now() - 20 * 60_000) })
+      .returning();
+    expect((await recoverInterruptedRuns()).prompts).toBe(1);
+    expect((await db.select().from(s.runs).where(eq(s.runs.id, stale!.id)))[0]!.status).toBe("FAILED");
+    expect((await db.select().from(s.domains).where(eq(s.domains.id, demo!.id)))[0]!.lastError).toMatch(/interrupted/);
   });
 
   it("recovers a domain whose first prompt design was stopped", async () => {
@@ -364,5 +379,8 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect((await promptCounts(demo!.id)).active).toBeGreaterThan(0);
     const [plan] = await db.select().from(s.jobs).where(eq(s.jobs.type, "measurement.plan"));
     expect(plan).toBeTruthy();
+    const [portfolioRun] = await db.select().from(s.runs).where(eq(s.runs.kind, "PORTFOLIO")).orderBy(desc(s.runs.startedAt)).limit(1);
+    expect(portfolioRun!.status).toBe("SUCCEEDED");
+    expect(portfolioRun!.completedCount).toBeGreaterThan(0);
   });
 });

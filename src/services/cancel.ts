@@ -28,11 +28,12 @@ async function cancelRun(runId: string, reason: string): Promise<string> {
   if (!run) throw new CancelError("Run not found");
   if (run.status !== "RUNNING") return "Already finished.";
 
-  if (run.kind === "DISCOVERY") {
+  if (run.kind === "DISCOVERY" || run.kind === "PORTFOLIO") {
+    const jobType = run.kind === "DISCOVERY" ? "discovery.run" : "portfolio.generate";
     await db.update(runs).set({ status: "CANCELLED", finishedAt: new Date(), error: reason }).where(eq(runs.id, runId));
-    await cancelJobs(sql`type = 'discovery.run' and payload->>'domainId' = ${run.domainId}`);
+    await cancelJobs(sql`type = ${jobType} and payload->>'domainId' = ${run.domainId}`);
     await resetDomainAfterStop(run.domainId);
-    return "Discovery stopped.";
+    return run.kind === "DISCOVERY" ? "Discovery stopped." : "Prompt design stopped.";
   }
 
   // Measurement run: drop what has not been answered yet; answers already collected keep counting.
@@ -68,11 +69,12 @@ async function cancelJob(jobId: string, reason: string): Promise<string> {
   if (!ACTIVE.includes(job.status)) return "Already finished.";
   await cancelJobs(sql`id = ${jobId}`, reason);
   const domainId = (job.payload as { domainId?: string } | null)?.domainId;
-  if (job.type === "discovery.run" && domainId) {
+  const runKind = job.type === "discovery.run" ? "DISCOVERY" : job.type === "portfolio.generate" ? "PORTFOLIO" : null;
+  if (runKind && domainId) {
     await db
       .update(runs)
       .set({ status: "CANCELLED", finishedAt: new Date(), error: reason })
-      .where(and(eq(runs.domainId, domainId), eq(runs.kind, "DISCOVERY"), eq(runs.status, "RUNNING")));
+      .where(and(eq(runs.domainId, domainId), eq(runs.kind, runKind), eq(runs.status, "RUNNING")));
   }
   if ((job.type === "discovery.run" || job.type === "portfolio.generate") && domainId) await resetDomainAfterStop(domainId);
   return "Stopped.";
