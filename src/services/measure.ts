@@ -142,10 +142,44 @@ async function recordFailure(m: MeasurementRow, error: unknown, attempts: number
     .update(measurements)
     .set({ errors, attempts, ...(final ? { status: "FAILED", finishedAt: new Date() } : {}) })
     .where(sql`${measurements.id} = ${m.id} and ${measurements.status} <> 'CANCELLED'`);
+  console.warn(`[measure] ${m.providerId} ${final ? "failed" : `attempt ${attempts} failed`}: ${message.slice(0, 300)}`);
   if (final) {
     await db.update(runs).set({ failedCount: sql`${runs.failedCount} + 1` }).where(eq(runs.id, m.runId));
+    if (!retryable) await stopRejectedProvider(m, message);
     await maybeFinishRun(m.runId);
   }
+}
+
+/** Identical rejections (4xx, bad configuration) after which a provider's remaining answers in a run are skipped. */
+export const REJECTIONS_TO_STOP = 3;
+
+/**
+ * Runtime check: a provider that rejects every request the same way (bad request, auth, quota) would
+ * otherwise fail each remaining prompt one by one. After REJECTIONS_TO_STOP identical rejections and no
+ * success in the run, its still-scheduled measurements are marked failed with an explanation.
+ */
+async function stopRejectedProvider(m: MeasurementRow, message: string) {
+  const db = getDb();
+  const key = message.slice(0, 120);
+  const [row] = await db.execute(sql`
+    select count(*) filter (where status = 'FAILED' and left(errors->-1->>'message', 120) = ${key})::int as same,
+           count(*) filter (where status = 'SUCCEEDED')::int as ok
+    from measurements where run_id = ${m.runId} and provider_id = ${m.providerId}`);
+  const same = Number(row?.same ?? 0);
+  if (same < REJECTIONS_TO_STOP || Number(row?.ok ?? 0) > 0) return;
+  const note = `Skipped: ${m.providerId} rejected ${same} requests in this run with the same error (${message.slice(0, 300)})`;
+  const skipped = await db
+    .update(measurements)
+    .set({
+      status: "FAILED",
+      finishedAt: new Date(),
+      errors: sql`coalesce(${measurements.errors}, '[]'::jsonb) || ${JSON.stringify([{ at: new Date().toISOString(), message: note }])}::jsonb`,
+    })
+    .where(and(eq(measurements.runId, m.runId), eq(measurements.providerId, m.providerId), eq(measurements.status, "SCHEDULED")))
+    .returning({ id: measurements.id });
+  if (skipped.length === 0) return;
+  await db.update(runs).set({ failedCount: sql`${runs.failedCount} + ${skipped.length}` }).where(eq(runs.id, m.runId));
+  console.error(`[measure] ${note}; skipped ${skipped.length} remaining answers.`);
 }
 
 async function maybeFinishRun(runId: string) {

@@ -1288,6 +1288,10 @@ code {
   color: var(--text-2);
   font-size: 0.85rem;
 }
+.activity__error {
+  color: var(--critical);
+  overflow-wrap: anywhere;
+}
 @media (max-width: 600px) {
   .activity {
     order: 3;

@@ -1,5 +1,5 @@
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
-import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, requireEnv } from "../provider";
+import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, ProviderError, requireEnv } from "../provider";
 
 /**
  * Perplexity Agent API (POST /v1/agent). The Sonar chat-completions API was retired on
@@ -7,9 +7,11 @@ import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, require
  * system prompt ("You are Perplexity…"), Fast Search and numbered inline citations `[n]`.
  *
  * Cost: the `fast` preset runs on the `priority` tier (2× token prices). Monitoring needs no
- * low latency, so `service_tier: "flex"` (0.5× token prices, best-effort capacity) is set;
- * an unsupported tier is ignored by the API, never rejected. Web search stays $1 per 1k
- * Fast Search calls. Docs: docs.perplexity.ai/docs/agent-api (presets, models, web-search).
+ * low latency, so `service_tier: "flex"` (0.5× token prices, best-effort capacity) is requested.
+ * The field is not in the official SDK's request schema and production answered every request
+ * with `400 invalid request` (2026-10-07), so a 400 is retried once without it and the tier is not
+ * sent again in this process (≈ +$0.0006 per answer). Web search stays $1 per 1k Fast Search calls.
+ * Docs: docs.perplexity.ai/docs/agent-api (presets, models, web-search).
  */
 
 const BASE = process.env.PERPLEXITY_BASE_URL ?? "https://api.perplexity.ai";
@@ -27,8 +29,12 @@ interface PerplexityParams {
   maxResults?: number;
 }
 
-export function buildPerplexityBody(req: MeasurementRequest, config: ProviderConfigurationSeed) {
+/** Set after the API rejected a request carrying `service_tier`; later requests leave it out. */
+let serviceTierRejected = false;
+
+export function buildPerplexityBody(req: MeasurementRequest, config: ProviderConfigurationSeed, opts: { serviceTier?: boolean } = {}) {
   const p = config.params as PerplexityParams;
+  const tier = opts.serviceTier !== false && p.serviceTier;
   // "provider/model" ids select a model directly (one search step, explicit citation instructions);
   // anything else is a preset name.
   const direct = config.model.includes("/");
@@ -44,7 +50,7 @@ export function buildPerplexityBody(req: MeasurementRequest, config: ProviderCon
         user_location: { country: req.country.toUpperCase(), ...(req.location ? { city: req.location } : {}) },
       },
     ],
-    ...(p.serviceTier ? { service_tier: p.serviceTier } : {}),
+    ...(tier ? { service_tier: tier } : {}),
     language_preference: req.language,
     store: false,
   };
@@ -157,12 +163,24 @@ export const perplexityApi: ProviderAdapter = {
     },
   ],
   async execute(req, config) {
-    const json = await httpJson<PplxResponse>(`${BASE}/v1/agent`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
-      body: JSON.stringify(buildPerplexityBody(req, config)),
-      timeoutMs: 120_000,
-    });
+    const post = (serviceTier: boolean) =>
+      httpJson<PplxResponse>(`${BASE}/v1/agent`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
+        body: JSON.stringify(buildPerplexityBody(req, config, { serviceTier })),
+        timeoutMs: 120_000,
+      });
+    const withTier = Boolean((config.params as PerplexityParams).serviceTier) && !serviceTierRejected;
+    let json: PplxResponse;
+    try {
+      json = await post(withTier);
+    } catch (e) {
+      // A rejected request is not billed; retry once without the tier.
+      if (!withTier || !(e instanceof ProviderError) || e.status !== 400) throw e;
+      json = await post(false);
+      serviceTierRejected = true;
+      console.warn("[perplexity] service_tier rejected with HTTP 400 — sending requests without it.");
+    }
     return { answer: parsePerplexityResponse(json), raw: json, reportedCostUsd: json.usage?.cost?.total_cost ?? undefined };
   },
 };

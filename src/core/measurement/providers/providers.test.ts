@@ -26,6 +26,21 @@ describe("provider request builders", () => {
     expect((direct.tools as Array<Record<string, unknown>>)[0]!.search_type).toBe("fast");
   });
 
+  it("Perplexity retries a 400 once without service_tier and then stops sending it", async () => {
+    process.env.PERPLEXITY_API_KEY ??= "test";
+    const standard = perplexityApi.configurations.find((c) => c.role === "STANDARD")!;
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      bodies.push(body);
+      if (body.service_tier) return new Response('{"error":{"message":"invalid request","code":400}}', { status: 400 });
+      return new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
+    });
+    expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
+    expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
+    expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null, null]);
+    vi.unstubAllGlobals();
+  });
 
   it("OpenAI always sends a user_location (default would be US) and never forces search", () => {
     const body = buildOpenAiBody(req, { id: "x", model: "gpt-6-luna", params: {}, role: "STANDARD" });

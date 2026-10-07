@@ -12,7 +12,7 @@ equivalence to the more expensive reference.
 | Google AI Mode | DataForSEO, standard queue | 0.0012 | same |
 | Gemini | DataForSEO consumer-UI capture | 0.0012 | same (Gemini API grounding would be ≈0.05 with ~10 billed queries) |
 | Claude | API + web search, Message Batches | 0.03–0.05 | Batches (−50 % tokens); automatic prompt caching between search turns (later turns read the prefix at 0.1×); candidate `sonnet-5-5-lean` (≤2 searches, effort low) ≈ 0.015–0.025 if calibration promotes it |
-| Perplexity | Agent API `/v1/agent`, `fast` preset on the `flex` tier | ≈ 0.0013 | `fast` is Perplexity's documented replacement for Sonar / Sonar Pro; the preset runs on `priority` (2× tokens), `service_tier: "flex"` gives 0.5× tokens; Fast Search $1/1k calls. Was ≈ 0.01 with the retired `sonar-pro` name |
+| Perplexity | Agent API `/v1/agent`, `fast` preset (`flex` tier requested; dropped automatically if the API rejects it, then ≈ 0.0019) | ≈ 0.0013 | `fast` is Perplexity's documented replacement for Sonar / Sonar Pro; the preset runs on `priority` (2× tokens), `service_tier: "flex"` gives 0.5× tokens; Fast Search $1/1k calls. Was ≈ 0.01 with the retired `sonar-pro` name |
 | OpenAI API | web search, calibration only | ≈ 0.011 | never used as a ChatGPT substitute unless calibration proves equivalence (it did not in simulation) |
 | Answer analysis | Sonnet 5.5, Batches, thinking off | ≈ 0.0025 per call | brand mentions only + 10 % sample; judgement carry-over; outcome grouping → ≈ 0.0005–0.001 per measured answer; the domain context (brand, competitors, fact sheet) is a cached system block — hits cost 0.1× (stacks with the batch discount), requests are grouped by domain |
 
