@@ -10,7 +10,7 @@ import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
 import { latestProfile } from "./discovery";
-import { enqueue, throwIfJobCancelled } from "@/jobs/queue";
+import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
 /**
  * PORTFOLIO DESIGN — "Which prompts provide a representative picture of the domain?"
@@ -38,6 +38,23 @@ async function loadClusters(domainId: string): Promise<TopicCluster[]> {
 }
 
 export async function generatePortfolio(domainId: string, mode: GenerationMode) {
+  try {
+    return await designPortfolio(domainId, mode);
+  } catch (e) {
+    // The first portfolio failed: say so instead of leaving the domain "Ready" with nothing to measure.
+    // A retry that succeeds sets the domain ACTIVE and clears the error.
+    if (!(e instanceof JobCancelledError) && mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0) {
+      const message = e instanceof Error ? e.message : String(e);
+      await getDb()
+        .update(domains)
+        .set({ status: "ERROR", lastError: `Prompt design failed: ${message.slice(0, 300)} — use Design prompts to try again.` })
+        .where(and(eq(domains.id, domainId), inArray(domains.status, ["READY", "ERROR"])));
+    }
+    throw e;
+  }
+}
+
+async function designPortfolio(domainId: string, mode: GenerationMode) {
   const db = getDb();
   const [domain] = await db.select().from(domains).where(eq(domains.id, domainId));
   const latest = await latestProfile(domainId);
