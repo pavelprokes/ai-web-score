@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { cellStates, domains, portfolioProposals, prompts, promptVersions, topicClusters } from "@/db/schema";
+import { cellStates, domains, portfolioProposals, prompts, promptVersions, runs, topicClusters } from "@/db/schema";
 import type { TopicCluster } from "@/core/portfolio/clusters";
 import { allocatePrompts } from "@/core/portfolio/clusters";
 import { LlmPromptSet, PROMPT_SYSTEM, promptGenerationUser } from "@/core/portfolio/generate-llm";
@@ -9,6 +9,7 @@ import { type PoolPrompt, selectActivePortfolio } from "@/core/portfolio/selecti
 import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
+import { deadlinePassed } from "@/lib/deadline";
 import { latestProfile } from "./discovery";
 import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
@@ -18,7 +19,9 @@ import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
  * is immutable per version; history is never rewritten.
  */
 
-const CLUSTERS_PER_LLM_CALL = 10;
+// Small chunks, generated in parallel: an answer for 10 clusters (~80 prompts with metadata) is long
+// enough to take over three minutes, beyond the job's time budget; 3 clusters take about one.
+const CLUSTERS_PER_LLM_CALL = 3;
 const MAX_PROMPTS_PER_CLUSTER = 12;
 const MAX_NEW_CANDIDATES = Number(process.env.MAX_CANDIDATE_PROMPTS ?? 600);
 
@@ -37,15 +40,37 @@ async function loadClusters(domainId: string): Promise<TopicCluster[]> {
   return rows.map((r) => r.data as TopicCluster).sort((a, b) => b.weight - a.weight);
 }
 
+/** Prompt design, recorded as a PORTFOLIO run so its outcome (and any error) shows in the run history. */
 export async function generatePortfolio(domainId: string, mode: GenerationMode) {
+  const db = getDb();
+  const setup = mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0;
+  const [run] = await db.insert(runs).values({ domainId, kind: "PORTFOLIO", trigger: mode }).returning({ id: runs.id });
+  // A new attempt at the first portfolio: the previous attempt's error no longer describes the domain.
+  if (setup) {
+    await db
+      .update(domains)
+      .set({ status: "READY", lastError: null })
+      .where(and(eq(domains.id, domainId), inArray(domains.status, ["READY", "ERROR"])));
+  }
   try {
-    return await designPortfolio(domainId, mode);
+    const result = await designPortfolio(domainId, mode);
+    await db
+      .update(runs)
+      .set({ status: "SUCCEEDED", finishedAt: new Date(), completedCount: result.created, plan: { mode, created: result.created } })
+      .where(and(eq(runs.id, run!.id), eq(runs.status, "RUNNING")));
+    return result;
   } catch (e) {
+    // Past the job's deadline the LLM calls were aborted; name the real cause, not "request aborted".
+    const message = deadlinePassed() ? "Did not finish within the job's time limit" : e instanceof Error ? e.message : String(e);
+    const cancelled = e instanceof JobCancelledError;
+    await db
+      .update(runs)
+      .set({ status: cancelled ? "CANCELLED" : "FAILED", finishedAt: new Date(), error: message.slice(0, 1000) })
+      .where(and(eq(runs.id, run!.id), eq(runs.status, "RUNNING")));
     // The first portfolio failed: say so instead of leaving the domain "Ready" with nothing to measure.
     // A retry that succeeds sets the domain ACTIVE and clears the error.
-    if (!(e instanceof JobCancelledError) && mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0) {
-      const message = e instanceof Error ? e.message : String(e);
-      await getDb()
+    if (!cancelled && setup && (await promptCounts(domainId)).active === 0) {
+      await db
         .update(domains)
         .set({ status: "ERROR", lastError: `Prompt design failed: ${message.slice(0, 300)} — use Design prompts to try again.` })
         .where(and(eq(domains.id, domainId), inArray(domains.status, ["READY", "ERROR"])));

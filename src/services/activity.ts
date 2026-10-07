@@ -100,7 +100,7 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
 
   const items: ActivityItem[] = [];
   for (const r of runRows) {
-    const kind: ActivityKind = r.kind === "DISCOVERY" ? "DISCOVERY" : r.kind === "MEASUREMENT" ? "MEASUREMENT" : "SCORING";
+    const kind: ActivityKind = r.kind === "DISCOVERY" ? "DISCOVERY" : r.kind === "MEASUREMENT" ? "MEASUREMENT" : r.kind === "PORTFOLIO" ? "PROMPTS" : "SCORING";
     const atProvider = Number(r.atProvider);
     items.push({
       id: `run:${r.id}`,
@@ -116,10 +116,12 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
   }
 
   const runningDiscovery = new Set(runRows.filter((r) => r.kind === "DISCOVERY").map((r) => r.domainId));
+  const runningPrompts = new Set(runRows.filter((r) => r.kind === "PORTFOLIO").map((r) => r.domainId));
   for (const j of jobRows) {
     const kind = JOB_KINDS[j.type]!;
     // The discovery job creates a DISCOVERY run once it starts; show only one of them.
     if (kind === "DISCOVERY" && j.domainId && runningDiscovery.has(j.domainId)) continue;
+    if (kind === "PROMPTS" && j.status === "RUNNING" && j.domainId && runningPrompts.has(j.domainId)) continue;
     items.push({
       id: `job:${j.id}`,
       kind,
