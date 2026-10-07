@@ -177,6 +177,8 @@ export const providerConfigurations = pgTable(
     /** STANDARD (high-frequency) | REFERENCE (calibration control) | CANDIDATE (shadow) */
     role: text("role").notNull().default("STANDARD"),
     enabled: boolean("enabled").notNull().default(true),
+    /** Set when the registry sync disabled it because it was removed from code; cleared when it is back. */
+    retiredAt: ts("retired_at"),
     createdAt: createdAt(),
   },
   (t) => [index("provider_configurations_provider").on(t.providerId)],

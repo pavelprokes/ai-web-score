@@ -39,7 +39,7 @@ export function selectPrice(entries: PriceEntry[], providerId: string, model: st
 }
 
 /** Anthropic 5-minute prompt-cache writes cost 1.25× the input rate. */
-const CACHE_WRITE_FACTOR = 1.25;
+export const CACHE_WRITE_FACTOR = 1.25;
 
 export function computeCost(args: {
   answer: Pick<NormalizedAnswer, "usage" | "search">;

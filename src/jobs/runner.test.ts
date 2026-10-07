@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { typesThatFit } from "./runner";
-import { JobTimeoutError, runAsJob } from "./queue";
-import { deadlineFetch, deadlineSignal } from "@/lib/deadline";
+import { JobTimeoutError, runAsJob, throwIfJobCancelled } from "./queue";
+import { deadlineFetch, deadlineRemainingMs, deadlineSignal, runWithDeadline } from "@/lib/deadline";
+import { chatgptUi } from "@/core/measurement/providers/dataforseo";
 import { mapWithConcurrency } from "@/lib/concurrency";
 
 describe("typesThatFit", () => {
@@ -49,6 +50,42 @@ describe("job time budget", () => {
     }
     expect(seen[0]).toBeUndefined(); // outside a job nothing is added
     expect(seen[1]).toBeInstanceOf(AbortSignal);
+  });
+
+  it("stops a handler that outlived its budget at its next checkpoint", async () => {
+    let stray: unknown = null;
+    const run = runAsJob(
+      "job-4",
+      async () => {
+        await new Promise((r) => setTimeout(r, 150));
+        expect(deadlineRemainingMs()).toBeLessThan(0);
+        try {
+          await throwIfJobCancelled(); // the retry is already queued: no more writes from this attempt
+        } catch (e) {
+          stray = e;
+        }
+      },
+      50,
+    );
+    await expect(run).rejects.toBeInstanceOf(JobTimeoutError);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(stray).toBeInstanceOf(JobTimeoutError);
+  });
+
+  it("collects DataForSEO results only while there is time left, so what was fetched gets saved", async () => {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => (calls++, new Response("{}"))) as typeof fetch;
+    process.env.DATAFORSEO_LOGIN ??= "x";
+    process.env.DATAFORSEO_PASSWORD ??= "x";
+    try {
+      const pending = [{ measurementId: "m1", externalTaskId: "t1", configuration: chatgptUi.configurations[0]!, submittedAt: new Date().toISOString() }];
+      const out = await runWithDeadline(new AbortController().signal, Date.now() + 5_000, () => chatgptUi.collect!(pending));
+      expect(out).toEqual([{ measurementId: "m1", status: "PENDING" }]);
+      expect(calls).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   it("keeps the result of a job that finishes in time", async () => {

@@ -52,8 +52,11 @@ function groupByOutcome(items: Item[]): Map<Item, Item[]> {
   return new Map([...groups.values()].map((g) => [g[0]!, g.slice(1)]));
 }
 
-async function buildRequest(item: Item, cacheContext: boolean) {
-  const latest = await latestProfile(item.m.domainId);
+type Profile = Awaited<ReturnType<typeof latestProfile>>;
+
+async function buildRequest(item: Item, cacheContext: boolean, profiles: Map<string, Profile>) {
+  if (!profiles.has(item.m.domainId)) profiles.set(item.m.domainId, await latestProfile(item.m.domainId));
+  const latest = profiles.get(item.m.domainId);
   if (!latest) return null;
   const answer = { promptText: item.v.text, answerText: item.m.answerText ?? "" };
   return {
@@ -162,8 +165,9 @@ export async function submitAnalysis() {
   const reps = [...groups].sort(([a], [b]) => a.m.domainId.localeCompare(b.m.domainId));
   const perDomain = new Map<string, number>();
   for (const [rep] of reps) perDomain.set(rep.m.domainId, (perDomain.get(rep.m.domainId) ?? 0) + 1);
+  const profiles = new Map<string, Profile>(); // one profile query per domain, not per request
   for (const [rep, fs] of reps) {
-    const params = await buildRequest(rep, (perDomain.get(rep.m.domainId) ?? 0) > 1);
+    const params = await buildRequest(rep, (perDomain.get(rep.m.domainId) ?? 0) > 1, profiles);
     if (!params) continue;
     requests.push({ custom_id: rep.s.measurementId, params });
     followers[rep.s.measurementId] = fs.map((f) => f.s.measurementId);

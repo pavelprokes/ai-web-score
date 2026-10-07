@@ -119,7 +119,12 @@ async function drainQueue(opts: { deadlineMs: number; concurrency?: number; type
  * Scheduler tick (Vercel Cron): plan due domains and make sure pollers exist for
  * outstanding async work. Everything is idempotent via dedupe keys.
  */
-export async function schedulerTick() {
+export function schedulerTick() {
+  // Background work: the jobs pool, whose stall timeout allows for longer maintenance statements.
+  return runInJobScope(tick);
+}
+
+async function tick() {
   const db = getDb();
   await syncProviderRegistry();
   // Close or resume runs a deploy/timeout interrupted before planning new work (which they would block).
@@ -158,8 +163,14 @@ export async function schedulerTick() {
     // Optional raw-evidence retention (Supabase free tier = 500 MB). Answers and signals are kept.
     const days = Number(process.env.RAW_RESPONSE_RETENTION_DAYS || 0);
     if (days > 0) {
-      await db.execute(sql`update measurements set raw_response = null
-        where raw_response is not null and finished_at < now() - make_interval(days => ${days})`);
+      // In batches: one statement over a large table could run longer than the stall timeout.
+      for (let i = 0; i < 50; i++) {
+        const cleared = await db.execute(sql`update measurements set raw_response = null
+          where id in (select id from measurements
+                       where raw_response is not null and finished_at < now() - make_interval(days => ${days}) limit 500)
+          returning id`);
+        if (cleared.length < 500) break;
+      }
     }
   }
   return { duePlans: due.length };

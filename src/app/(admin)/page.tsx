@@ -298,7 +298,7 @@ function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<Activ
 function RunNowButton({ d, busy }: { d: DomainRow; busy: Set<ActivityKind> | undefined }) {
   const left = Math.max(0, d.cost.monthlyBudgetUsd - d.cost.monthUsd);
   // Nothing to measure yet (prompt design stopped or interrupted): offer the step that fixes it.
-  if (d.prompts.active === 0 && d.status !== "DISCOVERING") {
+  if (d.prompts.active === 0 && d.lastDiscoveryAt && d.status !== "DISCOVERING") {
     return (
       <ActionButton
         domainId={d.id}

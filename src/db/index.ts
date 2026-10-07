@@ -30,6 +30,9 @@ function pool(kind: "web" | "jobs"): Pool {
     const max = kind === "web" ? Number(process.env.DB_POOL_MAX ?? 5) : Number(process.env.JOB_DB_POOL_MAX ?? 4);
     // A query whose connection went silent fails after this instead of hanging the request (see ./socket).
     const stallMs = 1000 * Number(kind === "web" ? (process.env.DB_STALL_TIMEOUT_S ?? 20) : (process.env.JOB_DB_STALL_TIMEOUT_S ?? 60));
+    // Our sockets (stall watchdog + open-socket tracking) work on plain TCP only; see ./socket.
+    const tracked = !usesTls(url);
+    socketsTracked &&= tracked;
     const sql = postgres(url, {
       max,
       // prepare:false keeps us compatible with transaction-mode poolers (Neon, Supabase, PgBouncer).
@@ -43,7 +46,7 @@ function pool(kind: "web" | "jobs"): Pool {
       max_lifetime: 10 * 60,
       connect_timeout: 10,
       // (`socket` is documented — "Custom socket" in the postgres.js README — but missing from its types.)
-      ...(usesTls(url) ? {} : ({ socket: stallingSocketFactory(stallMs) } as object)),
+      ...(tracked ? ({ socket: stallingSocketFactory(stallMs) } as object) : {}),
       // …and keep the instance awake until the pool has closed them (like attachDatabasePool in @vercel/functions).
       ...(process.env.VERCEL ? { debug: keepAwakeUntilIdle } : {}),
     });
@@ -63,8 +66,21 @@ const IDLE_TIMEOUT_S = Number(process.env.DB_IDLE_TIMEOUT_S ?? 5);
  * requests keep connections in use) never holds this invocation near its time limit.
  */
 const KEEP_AWAKE_CAP_MS = (IDLE_TIMEOUT_S + 15) * 1000;
+/** False once a pool uses postgres.js's own (TLS) sockets, which we cannot observe. */
+let socketsTracked = true;
 let keepAwake: Promise<void> | null = null;
+let releaseFallback: (() => void) | null = null;
+let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 function keepAwakeUntilIdle() {
+  if (!socketsTracked) {
+    // Untracked sockets: hold one idle timeout (plus margin) after the latest query.
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    releaseFallback?.();
+    const done = new Promise<void>((resolve) => (releaseFallback = resolve));
+    fallbackTimer = setTimeout(() => releaseFallback?.(), IDLE_TIMEOUT_S * 1000 + 1000);
+    waitUntil(done);
+    return;
+  }
   keepAwake ??= Promise.race([allSocketsClosed(), new Promise<void>((r) => setTimeout(r, KEEP_AWAKE_CAP_MS).unref())]).finally(() => {
     keepAwake = null;
   });

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { runWithDeadline } from "@/lib/deadline";
+import { deadlinePassed, runWithDeadline } from "@/lib/deadline";
 
 /**
  * Minimal durable job queue on Postgres — no Redis, no long-running worker.
@@ -43,8 +43,8 @@ export class JobCancelledError extends Error {
 
 /** The job ran past its time budget (see `runAsJob`). Retryable: a slow provider may be quick next time. */
 export class JobTimeoutError extends Error {
-  constructor(seconds: number) {
-    super(`Job did not finish within ${seconds} s`);
+  constructor(seconds?: number) {
+    super(seconds ? `Job did not finish within ${seconds} s` : "Job ran past its time budget");
   }
 }
 
@@ -63,15 +63,20 @@ export function runAsJob<T>(id: string, fn: () => Promise<T>, timeoutMs = Infini
   const timer = Number.isFinite(timeoutMs) ? setTimeout(() => controller.abort(timeout), timeoutMs) : null;
   const expired = new Promise<never>((_, reject) => controller.signal.addEventListener("abort", () => reject(timeout), { once: true }));
   expired.catch(() => {}); // only observed through the race below
-  return Promise.race([currentJob.run({ id }, () => runWithDeadline(controller.signal, fn)), expired]).finally(() => {
+  return Promise.race([currentJob.run({ id }, () => runWithDeadline(controller.signal, Date.now() + timeoutMs, fn)), expired]).finally(() => {
     if (timer) clearTimeout(timer);
   });
 }
 
-/** Call between expensive steps of a job handler; a no-op outside the job runner. */
+/**
+ * Call between expensive steps of a job handler; a no-op outside the job runner. Also stops a handler
+ * that outlived its time budget: the runner has already re-queued the job, so this attempt must not
+ * write anything more (the retry would duplicate it).
+ */
 export async function throwIfJobCancelled() {
   const job = currentJob.getStore();
   if (!job) return;
+  if (deadlinePassed()) throw new JobTimeoutError();
   const [row] = await getDb().execute(sql`select status from jobs where id = ${job.id}`);
   if (row?.status === "CANCELLED") throw new JobCancelledError();
 }

@@ -16,6 +16,7 @@ describe("usesTls", () => {
     expect(usesTls("postgres://u:p@h:5432/db")).toBe(false);
     expect(usesTls("postgres://u:p@h:5432/db?sslmode=disable")).toBe(false);
     expect(usesTls("postgres://u:p@h:5432/db?sslmode=require")).toBe(true);
+    expect(usesTls("postgres://u:p@h:5432/db?sslrootcert=system")).toBe(true);
   });
 });
 

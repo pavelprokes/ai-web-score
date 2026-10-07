@@ -1,0 +1,1 @@
+ALTER TABLE "provider_configurations" ADD COLUMN "retired_at" timestamp with time zone;
