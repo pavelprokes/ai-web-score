@@ -501,4 +501,80 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(item?.error).toMatch(/^Last error · Perplexity \(Agent API\): /);
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
+
+  it("never leaves errored Claude batch results SUBMITTED, and resubmits a rejected location without it", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { enqueue } = await import("@/jobs/queue");
+    const { processJobs } = await import("@/jobs/runner");
+    const { setAnthropicClient } = await import("@/lib/llm");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.id, "claude-api:sonnet-5-5"));
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 2 }).returning();
+    await db.insert(s.measurements).values(
+      ["batch-country", "batch-invalid"].map((id, i) => ({
+        id,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "claude-api",
+        model: config!.model,
+        sampleIndex: 100 + i,
+        status: "SUBMITTED",
+        externalTaskId: "msgbatch_old",
+        attempts: 1,
+        startedAt: new Date(),
+        configuration: { id: config!.id, model: config!.model, params: { maxUses: 5 }, role: "STANDARD" },
+      })),
+    );
+    const savedKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    const submitted: Array<{ custom_id: string; params: { tools: Array<Record<string, unknown>> } }> = [];
+    const errored = (message: string) => ({ type: "errored", error: { type: "error", error: { type: "invalid_request_error", message } } });
+    const message = { id: "msg", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "text", text: "Kódování pro děti is great." }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } };
+    const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (u.endsWith("/v1/messages/batches") && init?.method === "POST") {
+        submitted.push(...JSON.parse(String(init.body)).requests);
+        return json({ id: "msgbatch_new", type: "message_batch", processing_status: "in_progress" });
+      }
+      const id = /batches\/(msgbatch_\w+)/.exec(u)![1]!;
+      if (u.endsWith("/results")) {
+        const lines =
+          id === "msgbatch_old"
+            ? [
+                { custom_id: "batch-country", result: errored("tools.0.web_search_20260209: Country code CZ is not supported.") },
+                { custom_id: "batch-invalid", result: errored("max_tokens: too large") },
+              ]
+            : submitted.map((r) => ({ custom_id: r.custom_id, result: { type: "succeeded", message } }));
+        return new Response(lines.map((l) => JSON.stringify(l)).join("\n"));
+      }
+      return json({ id, type: "message_batch", processing_status: "ended", results_url: `https://api.anthropic.com/v1/messages/batches/${id}/results` });
+    }) as typeof fetch;
+    setAnthropicClient(null);
+    try {
+      await enqueue("measurement.collect", { providerId: "claude-api" }, { dedupeKey: "collect:claude-api" });
+      for (let i = 0; i < 3; i++) {
+        await processJobs({ deadlineMs: 600_000, types: ["measurement.collect", "measurement.submit"] });
+        await db.execute(sql`update jobs set run_at = now() where status = 'QUEUED' and type in ('measurement.collect', 'measurement.submit')`);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+      if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = savedKey;
+    }
+    const rows = Object.fromEntries((await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id))).map((r) => [r.id, r]));
+    // A plain invalid request is final, with Anthropic's message kept.
+    expect(rows["batch-invalid"]!.status).toBe("FAILED");
+    expect(JSON.stringify(rows["batch-invalid"]!.errors)).toContain("max_tokens: too large");
+    // The rejected country was resubmitted without a location and succeeded.
+    expect(submitted.map((r) => r.custom_id)).toEqual(["batch-country"]);
+    expect(submitted[0]!.params.tools[0]!.user_location).toBeUndefined();
+    expect(rows["batch-country"]!.status).toBe("SUCCEEDED");
+  });
 });

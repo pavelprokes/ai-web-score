@@ -13,6 +13,22 @@ import type { CollectOutcome, PendingTask, ProviderAdapter, ProviderConfiguratio
  * search calls/results as top-level blocks (dynamic filtering would nest them).
  */
 
+/**
+ * Countries the web search tool rejects in `user_location` ("Country code CZ is not supported",
+ * seen in production 2026-10-08). Requests for these markets go without a location; the prompt's
+ * language still steers the search. Countries rejected at runtime are added for this process.
+ */
+const UNSUPPORTED_SEARCH_COUNTRIES = new Set(["CZ"]);
+const UNSUPPORTED_COUNTRY = /country code (\w{2}) is not supported/i;
+
+/** Remembers a country the API rejected; returns true when the error was such a rejection. */
+export function noteUnsupportedCountry(message: string): boolean {
+  const m = UNSUPPORTED_COUNTRY.exec(message);
+  if (!m) return false;
+  UNSUPPORTED_SEARCH_COUNTRIES.add(m[1]!.toUpperCase());
+  return true;
+}
+
 let client: Anthropic | null = null;
 function anthropic() {
   // A web-search answer takes up to a minute or two; requests also stop at the job's deadline.
@@ -38,11 +54,15 @@ export function buildClaudeParams(req: MeasurementRequest, config: ProviderConfi
         name: "web_search" as const,
         max_uses: p.maxUses ?? 5,
         allowed_callers: ["direct" as const],
-        user_location: {
-          type: "approximate" as const,
-          country: req.country.toUpperCase(),
-          ...(req.location ? { city: req.location } : {}),
-        },
+        ...(UNSUPPORTED_SEARCH_COUNTRIES.has(req.country.toUpperCase())
+          ? {}
+          : {
+              user_location: {
+                type: "approximate" as const,
+                country: req.country.toUpperCase(),
+                ...(req.location ? { city: req.location } : {}),
+              },
+            }),
       },
     ],
     messages: [{ role: "user" as const, content: req.promptText }],
@@ -173,9 +193,16 @@ export const claudeApi: ProviderAdapter = {
   ],
   /** Synchronous call (full token price): smoke tests and urgent single checks. Scheduled runs use Batches. */
   async execute(req, config) {
-    const params = buildClaudeParams(req, config);
+    let params = buildClaudeParams(req, config);
     const messages: Anthropic.MessageParam[] = [...params.messages];
-    let message = await anthropic().messages.create({ ...params, messages });
+    let message: Anthropic.Message;
+    try {
+      message = await anthropic().messages.create({ ...params, messages });
+    } catch (e) {
+      if (!(e instanceof Anthropic.BadRequestError) || !noteUnsupportedCountry(e.message)) throw e;
+      params = buildClaudeParams(req, config);
+      message = await anthropic().messages.create({ ...params, messages });
+    }
     // Long server-tool turns may pause; resume by sending the partial turn back (bounded).
     for (let i = 0; i < 3 && message.stop_reason === "pause_turn"; i++) {
       messages.push({ role: "assistant", content: message.content });
@@ -210,13 +237,13 @@ export const claudeApi: ProviderAdapter = {
             status: "SUCCEEDED",
             result: { answer: parseClaudeMessage(message as never), raw: message, batched: true },
           });
+        } else if (r.result.type === "errored") {
+          const err = r.result.error.error;
+          // A rejected location is fixed for the resubmission; overloads and server errors are retried.
+          const retryable = noteUnsupportedCountry(err.message) || err.type !== "invalid_request_error";
+          outcomes.push({ measurementId: r.custom_id, status: "FAILED", error: `batch result errored: ${err.type}: ${err.message}`, retryable });
         } else {
-          outcomes.push({
-            measurementId: r.custom_id,
-            status: "FAILED",
-            error: `batch result ${r.result.type}`,
-            retryable: r.result.type !== "errored",
-          });
+          outcomes.push({ measurementId: r.custom_id, status: "FAILED", error: `batch result ${r.result.type}`, retryable: true });
         }
       }
       for (const id of wanted) outcomes.push({ measurementId: id, status: "FAILED", error: "missing in batch results", retryable: true });
