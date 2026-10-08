@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatgptUi, parseAiMode, parseLlmScraper } from "./dataforseo";
-import { buildClaudeParams, parseClaudeMessage } from "./anthropic";
+import { buildClaudeParams, noteUnsupportedCountry, parseClaudeMessage } from "./anthropic";
 import { buildOpenAiBody, parseOpenAiResponse } from "./openai";
 import { buildPerplexityBody, parsePerplexityResponse, perplexityApi } from "./perplexity";
 import { parseGeminiResponse } from "./gemini";
@@ -47,11 +47,17 @@ describe("provider request builders", () => {
     expect(body.tools[0]!.user_location).toMatchObject({ type: "approximate", country: "CZ", city: "Brno" });
     expect(body.tool_choice).toBe("auto");
   });
-  it("Claude keeps web search observable and localised", () => {
-    const p = buildClaudeParams(req, { id: "x", model: "claude-sonnet-5-5", params: {}, role: "STANDARD" });
-    expect(p.tools[0]!.allowed_callers).toEqual(["direct"]);
-    expect(p.tools[0]!.user_location).toMatchObject({ country: "CZ", city: "Brno" });
-    expect(p.cache_control).toEqual({ type: "ephemeral" }); // caches the prefix between search turns
+  it("Claude keeps web search observable and localised, except where the location is rejected", () => {
+    const config = { id: "x", model: "claude-sonnet-5-5", params: {}, role: "STANDARD" } as const;
+    const sk = buildClaudeParams({ ...req, country: "sk", location: "Bratislava" }, config);
+    expect(sk.tools[0]!.allowed_callers).toEqual(["direct"]);
+    expect(sk.tools[0]!.user_location).toMatchObject({ country: "SK", city: "Bratislava" });
+    expect(sk.cache_control).toEqual({ type: "ephemeral" }); // caches the prefix between search turns
+    // The web search tool rejects CZ ("Country code CZ is not supported").
+    expect(buildClaudeParams(req, config).tools[0]!.user_location).toBeUndefined();
+    expect(noteUnsupportedCountry("tools.0.web_search_20260209: Country code PL is not supported.")).toBe(true);
+    expect(buildClaudeParams({ ...req, country: "pl" }, config).tools[0]!.user_location).toBeUndefined();
+    expect(noteUnsupportedCountry("max_tokens: too large")).toBe(false);
   });
 });
 

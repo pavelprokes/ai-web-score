@@ -168,6 +168,8 @@ Each run stores a new set (findings + items); items can be marked Done or Dismis
 
 - Consumer capture is logged-out and memory-free (a neutral new user). Personalisation is not modelled.
 - Multi-turn follow-ups ("persistent visibility") are not measured yet (roadmap).
+- Claude's web search rejects some countries in `user_location` (CZ as of 2026-10). Those markets are
+  measured without a location; the prompt language still steers the search.
 - Ads in ChatGPT answers are a separate surface. DataForSEO returns them as `chat_gpt_ad` items, which are
   never used as citations; whether ad text also appears in the answer `markdown` must be verified on live
   data (roadmap).

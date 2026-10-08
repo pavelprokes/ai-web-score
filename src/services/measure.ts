@@ -121,7 +121,10 @@ export async function collectAsync(providerId: string) {
       if (o.retryable && m.attempts < MAX_ATTEMPTS) {
         await db.update(measurements).set({ status: "SCHEDULED", externalTaskId: null }).where(eq(measurements.id, m.id));
         await enqueue("measurement.submit", { runId: m.runId, configurationId: m.configurationId }, { dedupeKey: `submit:${m.runId}:${m.configurationId}` });
-      } else await recordFailure(m, new Error(o.error), m.attempts);
+      } else {
+        // Final: a plain Error would count as retryable and leave the answer SUBMITTED forever.
+        await recordFailure(m, new ProviderError(o.error, false), m.attempts);
+      }
     } else {
       stillPending++;
       // Give up on tasks older than 48 h (provider lost them).
