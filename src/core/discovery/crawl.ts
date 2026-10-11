@@ -66,7 +66,12 @@ async function fetchOnce(url: string, ua: string): Promise<{ status: number; tex
 }
 
 function clean(s: string, max = 300) {
-  return s.replace(/\s+/g, " ").trim().slice(0, max);
+  // Postgres jsonb rejects \u0000 and lone surrogates; slicing can split an emoji's surrogate pair.
+  return s
+    .replace(/[\s\0]+/g, " ")
+    .trim()
+    .slice(0, max)
+    .replace(/[\ud800-\udbff]$/, "");
 }
 
 export function parsePage(url: string, html: string): PageDigest & { links: Array<{ text: string; href: string }>; jsonLd: unknown[] } {

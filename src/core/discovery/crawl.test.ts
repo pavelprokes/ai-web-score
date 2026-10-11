@@ -20,4 +20,10 @@ describe("crawler page parser", () => {
     expect(p.jsonLdTypes).toEqual(["EducationalOrganization", "Course"]);
     expect(p.text).toContain("Učíme děti programovat");
   });
+
+  it("never cuts an emoji in half when truncating text (jsonb rejects lone surrogates)", () => {
+    const p = parsePage("https://x.example/", `<main>${"a".repeat(1499)}🌊 tail</main>`);
+    expect(p.text).toBe("a".repeat(1499));
+    expect(() => encodeURIComponent(p.text)).not.toThrow();
+  });
 });
