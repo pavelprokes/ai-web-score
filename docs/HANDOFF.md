@@ -5,9 +5,11 @@ Read this first in a new session. Last updated 2026-10-12.
 ## How to continue in a new session
 
 Start a new Claude Code session on this repository (claude.ai/code → New session, same repo and
-environment) and send:
+environment). `CLAUDE.md` imports this file, so the session already has it; send for example:
 
-> Read `docs/HANDOFF.md` and continue with "Next task". Reply in Czech.
+> Pokračuj úkolem „Next task“ z docs/HANDOFF.md.
+
+Keep this file current: update it at the end of each piece of work (state, merged PRs, next task).
 
 ## Working agreement
 
