@@ -48,19 +48,33 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #26 | /providers → Accounts & balance: spend per account, DataForSEO live balance (`/v3/appendix/user_data`), estimated balance for Anthropic/Perplexity from an entered amount |
 | — | Dev team of role agents + `/team` skill; `pnpm prod:sql` (read-only production queries) |
 | #29 | Prompts of topic clusters dropped by re-discovery are paused (179 were still measured, 39–92 % of answers); ChatGPT answers stored at $0 re-priced; signal joins filter the extractor version |
+| #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 | #31 | Measurements of a provider disabled after planning are cancelled instead of sent |
 | #32 | Internal LLM default Sonnet 5.5 for discovery/prompt generation (was Opus); Haiku 5.5 pricing and thinking-off support |
 | #33 | Internal model per task selectable in the UI (/providers); answer analysis back on Sonnet 5.5 after the Haiku check |
 | #34 | Score history backfill from one load; missing days of a version's history are filled on the next compute |
 | #35 | Domain page "Where AI looks": sites cited for unbranded questions, share, assistants, how often the brand is named alongside |
 | #36 | Re-discovery no longer drops a monitored domain to READY (3 domains were unscheduled since 2026-10-11; migration 0009 restores them); portfolio optimisation runs daily per ACTIVE domain and right after new prompts are approved |
-| #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
+| #37 | Portfolio optimisation writes in batches (the daily run hit the 60 s job limit) |
 
 ## Next task
 
 Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`.
 
-### 1. After #29/#30 deploy (verify on production)
+### 0. Morning check for the owner (after the night of 2026-10-12)
+
+- /domains/<id> → Prompt portfolio: approve the ACTIVATE proposals from the daily optimisation — waiting at 21:45
+  UTC: photos.svatebni-fotograf-cechy.cz 49 (has 4 active of a recommended 62), svatebni-fotograf-cechy.cz 113
+  (33 of 184), vzdelanibudoucnosti.cz 46 + 1 DEACTIVATE (69 of 135). Domains do not auto-approve, so nothing rotates
+  in until approved.
+- boatiquesydneyboathire.com.au is PAUSED (not set by these changes — resume it if that was not intended).
+- /providers → Internal AI models: defaults are Sonnet 5.5 for all three tasks; the choice there overrides env vars.
+
+### 1. After #29/#30 deploy (verified 2026-10-12 21:18 UTC)
+
+- Verified: no ACTIVE prompt in an inactive cluster; ChatGPT answers priced; all domains on geo-v2 with 6 days of
+  history (boatique 1); the three READY domains back to ACTIVE and measuring again.
+
 
 - `pnpm prod:sql`: no ACTIVE prompt in an inactive cluster; chatgpt-ui answers cost > 0; every domain has
   `scoring_version = 'geo-v2'` and geo-v2 DOMAIN/PROVIDER/BRAND snapshots exist (the scheduler tick enqueues `scores.compute` for any domain without a snapshot of its version, which backfills 5 weeks).
@@ -91,5 +105,9 @@ answer viewer, `answer_text` retention (~13 months).
 ### Open follow-ups
 
 - Supabase pooler closes connections occasionally (mitigated by read retry); root cause unknown.
+- Job timeouts ("Job did not finish within N s") hit ~4 % of jobs, only in bursts of hundreds of jobs (2026-10-12
+  12–14 h and 21 h UTC); retries finish most. Suspect contention: `JOB_CONCURRENCY=8` jobs share a job DB pool of
+  `JOB_DB_POOL_MAX=4` through the transaction pooler. Try `JOB_CONCURRENCY=4` (or a pool of 8) and compare the
+  hourly timeout count with `pnpm prod:sql`.
 - Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
 - Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.
