@@ -13,27 +13,35 @@ import { CACHE_WRITE_FACTOR } from "@/core/pricing/cost";
  * Model choice: discovery/prompt design run rarely and decide the quality of the
  * whole portfolio → strongest model. Answer analysis is high-volume classification
  * → configurable cheaper model, and it runs through the Batches API (50 % off).
+ * Defaults: discovery and prompt generation on Sonnet 5.5 (Opus cost 2× for no visible gain in the
+ * generated prompts), answer analysis on Haiku 5.5 (a classification task, 20× cheaper than Sonnet).
  */
 
-export const INTERNAL_MODEL = process.env.INTERNAL_LLM_MODEL ?? "claude-opus-5-5";
-export const ANALYZER_MODEL = process.env.ANALYZER_LLM_MODEL ?? "claude-sonnet-5-5";
+export const INTERNAL_MODEL = process.env.INTERNAL_LLM_MODEL ?? "claude-sonnet-5-5";
+export const ANALYZER_MODEL = process.env.ANALYZER_LLM_MODEL ?? "claude-haiku-5-5";
 
-/** USD per 1M tokens for internal models (keep in sync with the provider price book). */
-/** $ per MTok. `cacheRead`: prompt-cache hits; writes cost 1.25× input (5-minute cache). */
+/**
+ * $ per MTok. `cacheRead`: prompt-cache hits; writes cost 1.25× input (5-minute cache).
+ * Haiku 5.5: rate for prompts up to 100K tokens ($0.50 / $2.50 beyond) — internal prompts stay far below.
+ */
 const INTERNAL_PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
 };
 
 /**
  * Thinking setting for classification-style calls: reasoning tokens add cost without
  * improving a sentiment/accuracy label. Sonnet 5.5 turns thinking off with `between_tools`;
- * Haiku 4.5 has it off by default; Opus 5.5 cannot disable it (lower effort instead).
+ * Haiku 5.5 with `disabled` (effort high or below); Haiku 4.5 has it off by default; Opus 5.5 cannot
+ * disable it (lower effort instead).
  */
-export function noThinking(model: string): { thinking?: { type: "between_tools" } } {
-  return model.startsWith("claude-sonnet-5-5") ? { thinking: { type: "between_tools" } } : {};
+export function noThinking(model: string): { thinking?: { type: "between_tools" } | { type: "disabled" } } {
+  if (model.startsWith("claude-sonnet-5-5")) return { thinking: { type: "between_tools" } };
+  if (model.startsWith("claude-haiku-5-5")) return { thinking: { type: "disabled" } };
+  return {};
 }
 
 let client: Anthropic | null = null;
@@ -52,6 +60,7 @@ export function setAnthropicClient(c: Anthropic | null) {
  * reads and writes come separately. Batch discount (50 %) stacks with the cache multipliers.
  */
 export function llmCost(model: string, inputTokens: number, outputTokens: number, batched = false, cacheReadTokens = 0, cacheWriteTokens = 0) {
+  // Unknown model: price as the most expensive current one so spend is never under-reported.
   const p = INTERNAL_PRICES[model] ?? INTERNAL_PRICES["claude-opus-5-5"]!;
   const input = inputTokens * p.input + cacheReadTokens * p.cacheRead + cacheWriteTokens * p.input * CACHE_WRITE_FACTOR;
   return ((input + outputTokens * p.output) / 1e6) * (batched ? 0.5 : 1);

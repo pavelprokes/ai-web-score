@@ -48,6 +48,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #26 | /providers → Accounts & balance: spend per account, DataForSEO live balance (`/v3/appendix/user_data`), estimated balance for Anthropic/Perplexity from an entered amount |
 | — | Dev team of role agents + `/team` skill; `pnpm prod:sql` (read-only production queries) |
 | #29 | Prompts of topic clusters dropped by re-discovery are paused (179 were still measured, 39–92 % of answers); ChatGPT answers stored at $0 re-priced; signal joins filter the extractor version |
+| #31 | Measurements of a provider disabled after planning are cancelled instead of sent |
+| #32 | Internal LLM defaults: Sonnet 5.5 for discovery/prompt generation, Haiku 5.5 ($0.10/$0.50) for answer analysis |
 | #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 
 ## Next task
@@ -60,8 +62,12 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
   `scoring_version = 'geo-v2'` and geo-v2 DOMAIN/PROVIDER/BRAND snapshots exist (the scheduler tick enqueues `scores.compute` for any domain without a snapshot of its version, which backfills 5 weeks).
 - Expected geo-v2 levels (computed read-only before deploy): photographer ChatGPT ≈ 10 %, photographer
   overall ≈ 31 (was 48), photos.svatebni-fotograf-cechy.cz ≈ 0 on 41 answers (its active topics never name it).
-- Owner actions: Anthropic credit topped up; `claude-api` provider disabled in /providers (monthly calibration
-  only); Vercel env `INTERNAL_LLM_MODEL=claude-sonnet-5-5` (prompt generation was $13.37 of $13.78 internal spend).
+- Done by the owner: `claude-api` provider disabled; Vercel env `INTERNAL_LLM_MODEL=claude-sonnet-5-5`.
+- Pending: Anthropic credit top-up. Right after it, validate Haiku 5.5 as the answer analyzer (the code default since
+  #32): re-grade ~40 Sonnet-judged answers and compare sentiment / description accuracy / recommended
+  (one-off script: copy the compare-analyzer script from the session notes into `scripts/`, ~$0.02). If agreement is
+  poor, set Vercel `ANALYZER_LLM_MODEL=claude-sonnet-5-5`. Check that Vercel has no `ANALYZER_LLM_MODEL` overriding
+  the new default.
 
 ### 2. PR 3 (P1)
 
