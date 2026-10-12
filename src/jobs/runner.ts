@@ -139,6 +139,14 @@ async function tick() {
     .where(and(eq(domains.status, "ACTIVE"), or(isNull(domains.nextPlanAt), lte(domains.nextPlanAt, now))));
   for (const d of due) await enqueue("measurement.plan", { domainId: d.id, trigger: "CRON" }, { dedupeKey: `plan:${d.id}` });
 
+  // Domains with answers but no snapshot of their scoring version (e.g. right after a version switch) get scored
+  // now — scoring otherwise follows new measurements, which READY or PAUSED domains do not get.
+  const unscored = await db.execute<{ id: string }>(sql`
+    select d.id from domains d
+    where exists (select 1 from measurements m where m.domain_id = d.id and m.status = 'SUCCEEDED')
+      and not exists (select 1 from score_snapshots s where s.domain_id = d.id and s.scoring_version = d.scoring_version)`);
+  for (const d of unscored) await enqueue("scores.compute", { domainId: d.id }, { dedupeKey: `scores:${d.id}` });
+
   const asyncProviders = await db
     .selectDistinct({ providerId: measurements.providerId })
     .from(measurements)

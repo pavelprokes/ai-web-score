@@ -48,7 +48,8 @@ const longDateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "l
 /** Value on a 0–100 scale (scores as is, rates as percent) with optional CI. */
 function read(p: TrendPoint | undefined, metric: Metric): { v: number | null; lo: number | null; hi: number | null } {
   if (!p) return { v: null, lo: null, hi: null };
-  if (metric === "overall") return { v: p.overall, lo: null, hi: null };
+  // Days with too few answers have no readable overall level (the tile says "Not enough data"): a gap, not a point.
+  if (metric === "overall") return { v: p.insufficient ? null : p.overall, lo: null, hi: null };
   if (metric === "shareOfVoice") return { v: p.shareOfVoice === null ? null : p.shareOfVoice * 100, lo: null, hi: null };
   const [v, lo, hi] = p[metric];
   const s = (x: number | null) => (x === null ? null : x * 100);

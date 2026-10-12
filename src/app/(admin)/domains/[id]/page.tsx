@@ -425,7 +425,7 @@ function ScoreTiles({ detail }: { detail: Detail }) {
       </dl>
       {brand && (
         <>
-          <h3 className="tiles__heading">When AI is asked about you by name</h3>
+          <h2 className="tiles__heading">When AI is asked about you by name</h2>
           <dl className="tiles tiles--4" aria-label="Answers to questions that name the brand, last 28 days">
             <StatTile
               label={<>Knows you <MetricInfo id="brand-check" /></>}

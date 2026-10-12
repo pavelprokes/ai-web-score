@@ -57,7 +57,7 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
 ### 1. After #29/#30 deploy (verify on production)
 
 - `pnpm prod:sql`: no ACTIVE prompt in an inactive cluster; chatgpt-ui answers cost > 0; every domain has
-  `scoring_version = 'geo-v2'` and geo-v2 DOMAIN/PROVIDER/BRAND snapshots exist after the next `scores.compute`.
+  `scoring_version = 'geo-v2'` and geo-v2 DOMAIN/PROVIDER/BRAND snapshots exist (the scheduler tick enqueues `scores.compute` for any domain without a snapshot of its version, which backfills 5 weeks).
 - Expected geo-v2 levels (computed read-only before deploy): photographer ChatGPT ≈ 10 %, photographer
   overall ≈ 31 (was 48), photos.svatebni-fotograf-cechy.cz ≈ 0 on 41 answers (its active topics never name it).
 - Owner actions: Anthropic credit topped up; `claude-api` provider disabled in /providers (monthly calibration

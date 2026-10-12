@@ -2,6 +2,7 @@ import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { domains, measurementSignals, measurements, prompts, promptVersions, providers, scoreSnapshots, topicClusters } from "@/db/schema";
+import { throwIfJobCancelled } from "@/jobs/queue";
 import { computeMetrics, getScoringVersion, type ScoringObservation } from "@/core/scoring/scoring";
 import type { RawSignals } from "@/core/signals/extract";
 
@@ -59,10 +60,11 @@ export async function loadObservations(domainId: string, start: Date, end: Date,
 
   // Provider weights in the aggregate follow real-world reach, normalised over providers present. A provider
   // that just joined phases in over its first days, so the aggregate does not jump when the mix changes.
-  const days = new Map<string, Set<string>>();
-  for (const r of rows) (days.get(r.providerId) ?? days.set(r.providerId, new Set()).get(r.providerId)!).add(r.day);
+  const firstDay = new Map<string, string>();
+  for (const r of rows) if (!firstDay.has(r.providerId) || r.day < firstDay.get(r.providerId)!) firstDay.set(r.providerId, r.day);
+  const daysIn = (p: string) => (end.getTime() - Date.parse(firstDay.get(p)!)) / 86_400_000;
   const effReach = (p: string) =>
-    (reach.get(p) ?? 0.05) * (rules ? Math.min(1, (days.get(p)?.size ?? 0) / rules.providerPhaseInDays) : 1);
+    (reach.get(p) ?? 0.05) * (rules ? Math.min(1, Math.max(1, daysIn(p)) / rules.providerPhaseInDays) : 1);
   const present = [...new Set(rows.map((r) => r.providerId))];
   const totalReach = present.reduce((a, p) => a + effReach(p), 0) || 1;
   // Each provider's weight is spread over its own sample count so heavily sampled
@@ -98,7 +100,8 @@ export async function computeScores(domainId: string, opts: { scoringVersion?: s
       .from(scoreSnapshots)
       .where(and(eq(scoreSnapshots.domainId, domainId), eq(scoreSnapshots.scoringVersion, version)))
       .limit(1);
-    if (!any) return recomputeHistory(domainId, version);
+    // ponytail: 5 weeks covers the 28-day window plus a week of trend; longer history via the recalculate action.
+    if (!any) return recomputeHistory(domainId, version, 5);
   }
   const obs = await loadObservations(domainId, start, end, version);
   if (obs.length === 0) return;
@@ -121,10 +124,12 @@ export async function computeScores(domainId: string, opts: { scoringVersion?: s
   for (const c of new Set(obs.map((o) => o.clusterKey))) push("CLUSTER", c, obs.filter((o) => o.clusterKey === c));
 
   // One snapshot per scope/day/version: replace today's snapshots for this window end.
-  await db.execute(sql`
-    delete from score_snapshots where domain_id = ${domainId} and scoring_version = ${version}
-      and window_end::date = ${end.toISOString()}::date`);
-  await db.insert(scoreSnapshots).values(snapshots);
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      delete from score_snapshots where domain_id = ${domainId} and scoring_version = ${version}
+        and window_end::date = ${end.toISOString()}::date`);
+    await tx.insert(scoreSnapshots).values(snapshots);
+  });
 }
 
 /** Recompute daily snapshots for the past `weeks` (from the first measurement on) from stored raw signals. */
@@ -137,7 +142,10 @@ export async function recomputeHistory(domainId: string, scoringVersion: string,
     .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "SUCCEEDED")));
   const firstAt = first?.at ? new Date(first.at).getTime() : now;
   const from = Math.max(now - weeks * 7 * 86_400_000, firstAt);
-  for (let d = Math.ceil((now - from) / 86_400_000); d >= 0; d--) {
+  // ponytail: loads a full window per day — fine for weeks of history; slice one load in memory if it grows.
+  // Newest first: a run cut short by the job deadline leaves the recent trend complete, not a gap before today.
+  for (let d = 0; d <= Math.ceil((now - from) / 86_400_000); d++) {
+    await throwIfJobCancelled();
     await computeScores(domainId, { scoringVersion, windowEnd: new Date(now - d * 86_400_000) });
   }
 }

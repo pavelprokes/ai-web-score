@@ -807,6 +807,11 @@ td .meter {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+@media (max-width: 480px) {
+  .tiles--4 {
+    grid-template-columns: 1fr;
+  }
+}
 .tile__value .rate__ci {
   font-size: 0.875rem;
   font-weight: 500;
