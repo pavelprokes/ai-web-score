@@ -19,6 +19,10 @@ describe("provider request builders", () => {
     const tool = (body.tools as Array<Record<string, unknown>>)[0]!;
     expect(tool).toEqual({ type: "web_search", user_location: { country: "CZ", city: "Brno" } });
     expect(JSON.stringify(body)).not.toMatch(/search_context_size|sonar-pro/);
+    expect(body.language_preference).toBe("cs");
+    // Only ISO 639-1 is accepted: region subtags are dropped, unknown values are left out.
+    expect((buildPerplexityBody({ ...req, language: "en-AU" }, standard) as Record<string, unknown>).language_preference).toBe("en");
+    expect(buildPerplexityBody({ ...req, language: "xx" }, standard)).not.toHaveProperty("language_preference");
     // A direct model gets one search step, an output cap and citation instructions.
     const direct = buildPerplexityBody(req, { id: "x", model: "perplexity/sonar", params: { searchType: "fast" }, role: "CANDIDATE" }) as Record<string, unknown>;
     expect(direct).toMatchObject({ model: "perplexity/sonar", max_steps: 1, max_output_tokens: 4096 });

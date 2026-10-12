@@ -1,4 +1,5 @@
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
+import { isoLanguage } from "../../language";
 import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, ProviderError, requireEnv } from "../provider";
 
 /**
@@ -38,6 +39,8 @@ export function buildPerplexityBody(req: MeasurementRequest, config: ProviderCon
   // "provider/model" ids select a model directly (one search step, explicit citation instructions);
   // anything else is a preset name.
   const direct = config.model.includes("/");
+  // Only ISO 639-1 is accepted ("en-AU" → HTTP 400); without a code the answer follows the prompt.
+  const language = isoLanguage(req.language);
   return {
     ...(direct ? { model: config.model, max_steps: 1, max_output_tokens: 4096, instructions: CITATION_INSTRUCTIONS } : { preset: config.model }),
     input: req.promptText,
@@ -51,7 +54,7 @@ export function buildPerplexityBody(req: MeasurementRequest, config: ProviderCon
       },
     ],
     ...(tier ? { service_tier: tier } : {}),
-    language_preference: req.language,
+    ...(language ? { language_preference: language } : {}),
     store: false,
   };
 }
