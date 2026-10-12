@@ -255,6 +255,24 @@ describe("DataForSEO live path (smoke tests)", () => {
     expect(r.answer.citations).toHaveLength(1);
   });
 
+  it("falls back to the price book when task_get reports a zero cost (charged at task_post)", async () => {
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({
+          status_code: 20000,
+          status_message: "Ok.",
+          tasks: [{ id: "t1", status_code: 20000, status_message: "Ok.", cost: 0, result: [{ model: "gpt-x", markdown: "Answer text long enough", sources: [] }] }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const [out] = await chatgptUi.collect!([
+      { measurementId: "m1", externalTaskId: "t1", configuration: chatgptUi.configurations[0]!, submittedAt: new Date().toISOString() },
+    ]);
+    expect(out!.status).toBe("SUCCEEDED");
+    expect(out!.status === "SUCCEEDED" && out!.result.reportedCostUsd).toBeUndefined();
+  });
+
   it("surfaces task-level errors (e.g. unsupported location) instead of empty answers", async () => {
     vi.stubGlobal("fetch", async () =>
       new Response(JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ id: "t", status_code: 40501, status_message: "Invalid Field: 'location_code'.", result: null }] }), { status: 200 }),

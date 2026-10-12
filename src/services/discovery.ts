@@ -1,6 +1,6 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { domainProfiles, domains, runs, topicClusters } from "@/db/schema";
+import { domainProfiles, domains, prompts, runs, topicClusters } from "@/db/schema";
 import type { DomainProfile } from "@/core/domain-profile";
 import { DomainProfile as DomainProfileSchema } from "@/core/domain-profile";
 import { crawlDomain } from "@/core/discovery/crawl";
@@ -68,6 +68,14 @@ export async function runDiscovery(domainId: string, trigger: string) {
       .update(topicClusters)
       .set({ active: false })
       .where(sql`${topicClusters.domainId} = ${domainId} and ${topicClusters.profileVersion} < ${version}`);
+    // A dropped cluster takes its prompts out of measurement (kept PAUSED for history); otherwise they keep
+    // being sampled and scored under a topic the profile no longer has.
+    await db
+      .update(prompts)
+      .set({ status: "PAUSED", lastActiveAt: new Date() })
+      .where(
+        sql`${prompts.domainId} = ${domainId} and ${prompts.status} = 'ACTIVE' and ${prompts.clusterKey} in (select ${topicClusters.key} from ${topicClusters} where ${topicClusters.domainId} = ${domainId} and ${topicClusters.active} = false)`,
+      );
 
     await db
       .update(domains)

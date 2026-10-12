@@ -6,7 +6,7 @@ description: Convene the ai-web-score dev team — nine roles analyse a task ind
 # Dev team meeting
 
 Roles (project subagents in `.claude/agents/`): `owner`, `principal-engineer`, `product-manager`,
-`seo-geo`, `lawyer`, `marketing-ppc`, `ux-ui-designer`, `copywriter`, `qa`.
+`seo-geo-specialist`, `lawyer`, `marketing-ppc`, `ux-ui-designer`, `copywriter`, `qa`.
 Pavel is the real owner: the `owner` agent only argues the business view, Pavel decides disputed points.
 
 ## 1. Brief (once, shared)

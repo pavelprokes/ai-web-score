@@ -43,6 +43,13 @@
       "when": 1791807372026,
       "tag": "0005_provider_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791835853504,
+      "tag": "0006_pause_prompts_of_inactive_clusters",
+      "breakpoints": true
     }
   ]
 }

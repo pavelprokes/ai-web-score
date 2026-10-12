@@ -1,5 +1,6 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { calibrationResults, domains, measurementSignals, measurements, providerConfigurations, providers } from "@/db/schema";
 import { reachFromReferrals } from "@/core/optimization/provider-value";
 import { type CalibrationPair, evaluateCalibration } from "@/core/optimization/calibration";
@@ -36,7 +37,7 @@ export async function evaluateCalibrations() {
         signals: measurementSignals.signals,
       })
       .from(measurements)
-      .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+      .innerJoin(measurementSignals, currentSignals)
       .where(and(eq(measurements.calibrationPair, calibrationPairKey(pair)), eq(measurements.status, "SUCCEEDED")))
       .orderBy(desc(measurements.scheduledAt))
       .limit(MAX_CALIBRATION_ROWS);

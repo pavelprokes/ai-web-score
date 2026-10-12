@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { getProvider } from "@/core/measurement/providers";
 import { domains, jobs, measurementSignals, measurements, runs } from "@/db/schema";
 
@@ -94,7 +95,7 @@ export async function currentActivity(now = new Date()): Promise<ActivityItem[]>
         since: sql<Date>`min(${measurementSignals.createdAt})`,
       })
       .from(measurementSignals)
-      .innerJoin(measurements, eq(measurements.id, measurementSignals.measurementId))
+      .innerJoin(measurements, currentSignals)
       .where(and(inArray(measurementSignals.analysisStatus, ["PENDING", "SUBMITTED"]), gte(measurementSignals.createdAt, since)))
       .groupBy(measurements.domainId),
   ]);

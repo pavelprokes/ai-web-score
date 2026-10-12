@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { cellStates, llmUsage, measurementSignals, measurements } from "@/db/schema";
 import { analyzeProviderValue, type ProviderPromptRates } from "@/core/optimization/provider-value";
 
@@ -100,7 +101,7 @@ export async function providerValueReport(reachById: Record<string, number>) {
       n: sql<number>`count(*)::int`,
     })
     .from(measurements)
-    .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+    .innerJoin(measurementSignals, currentSignals)
     .where(and(eq(measurements.status, "SUCCEEDED"), gte(measurements.finishedAt, since), sql`${measurements.configuration}->>'role' = 'STANDARD'`))
     .groupBy(measurements.providerId, measurements.domainId, measurements.promptVersionId);
   const by = new Map<string, ProviderPromptRates>();

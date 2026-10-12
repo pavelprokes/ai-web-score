@@ -130,5 +130,13 @@ describe("cluster allocation & selection", () => {
       measurementConfidence: 0.5,
     });
     expect(q.topicCoverage).toBeGreaterThan(0.8);
+
+    // Re-discovery dropped a cluster: its prompts leave the active set, sticky CORE ones included.
+    const dropped = clusters[0]!.key;
+    const third = selectActivePortfolio({ pool: activePool, clusters: clusters.filter((c) => c.key !== dropped), sizing, now: new Date() });
+    const droppedIds = new Set(activePool.filter((pp) => pp.clusterKey === dropped).map((pp) => pp.promptId));
+    expect(activePool.some((pp) => droppedIds.has(pp.promptId) && pp.active && pp.role === "CORE")).toBe(true);
+    expect(third.active.some((a) => droppedIds.has(a.promptId))).toBe(false);
+    expect(third.deactivated.filter((id) => droppedIds.has(id)).length).toBe(activePool.filter((pp) => droppedIds.has(pp.promptId) && pp.active).length);
   });
 });

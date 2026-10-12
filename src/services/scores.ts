@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { domains, measurementSignals, measurements, prompts, promptVersions, providers, scoreSnapshots } from "@/db/schema";
 import { computeMetrics, type ScoringObservation } from "@/core/scoring/scoring";
 import type { RawSignals } from "@/core/signals/extract";
@@ -35,7 +36,7 @@ async function loadObservations(domainId: string, start: Date, end: Date): Promi
       clusterKey: prompts.clusterKey,
     })
     .from(measurements)
-    .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+    .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
     .where(
