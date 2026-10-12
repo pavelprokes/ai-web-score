@@ -207,3 +207,29 @@ describe("scoring geo-v2", () => {
     expect(computeMetrics(few, "geo-v1").insufficientData).toBeUndefined();
   });
 });
+
+describe("topSources", () => {
+  it("ranks domains cited in unbranded answers, without own domains, with the brand's share alongside", async () => {
+    const { topSources } = await import("./sources");
+    const ob = (citedDomains: string[], brandMentioned = false, branded = false, providerId = "p1") => ({
+      signals: sig({ citedDomains, brandMentioned }),
+      providerId,
+      branded,
+    });
+    const rows = topSources(
+      [
+        ob(["dir.cz", "rival.cz"]),
+        ob(["dir.cz", "www.me.cz"], true, false, "p2"),
+        ob(["dir.cz", "dir.cz"]),
+        ob(["rival.cz"], true, true), // branded question: not counted
+        ob(["blog.me.cz"]),
+      ],
+      ["me.cz"],
+    );
+    expect(rows.map((r) => r.domain)).toEqual(["dir.cz", "rival.cz"]);
+    expect(rows[0]).toMatchObject({ answers: 3, providers: ["p1", "p2"] });
+    expect(rows[0]!.share).toBeCloseTo(3 / 4);
+    expect(rows[0]!.brandMentionedWith).toBeCloseTo(1 / 3);
+    expect(rows[1]!.answers).toBe(1);
+  });
+});
