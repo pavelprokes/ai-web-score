@@ -51,6 +51,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #31 | Measurements of a provider disabled after planning are cancelled instead of sent |
 | #32 | Internal LLM default Sonnet 5.5 for discovery/prompt generation (was Opus); Haiku 5.5 pricing and thinking-off support |
 | #33 | Internal model per task selectable in the UI (/providers); answer analysis back on Sonnet 5.5 after the Haiku check |
+| #34 | Score history backfill from one load; missing days of a version's history are filled on the next compute |
+| #35 | Domain page "Where AI looks": sites cited for unbranded questions, share, assistants, how often the brand is named alongside |
 | #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 
 ## Next task
@@ -75,8 +77,7 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
 - Profile fix: the photographer profile lists se-vezmou.cz among owned domains, and generic phrases
   ("Svatební fotograf Čechy", "Vzdělání budoucnosti") among aliases. Fix, then re-extract stored answers
   under a new `EXTRACTOR_VERSION` (readers already filter by version).
-- Sources table: cited domains on unbranded answers, share and "you are listed / missing"; directories
-  labelled as places to get listed, not competitors. Display-only.
+- Sources table: done (#35).
 
 ### 3. After ≥7 days of ChatGPT / AI Mode data (~2026-10-19)
 

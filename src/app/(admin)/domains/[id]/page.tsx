@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
+import { sourcesFor } from "@/services/scores";
+import type { SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations } from "@/services/recommendations";
 import { recommendationAction } from "@/app/(admin)/actions";
@@ -44,13 +46,14 @@ export default async function DomainPage({
 }) {
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, sources] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
     busyKindsByDomain(),
     latestRecommendations(id),
     recentProviderErrors({ domainId: id }),
+    sourcesFor(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -106,6 +109,8 @@ export default async function DomainPage({
         <ProviderScores detail={detail} />
         <Costs detail={detail} />
       </div>
+
+      <Sources rows={sources} />
 
       <div className="grid-2 section-gap">
         <Profile detail={detail} now={now} />
@@ -447,6 +452,56 @@ function ScoreTiles({ detail }: { detail: Detail }) {
         )}
       </p>
     </>
+  );
+}
+
+function Sources({ rows }: { rows: SourceRow[] }) {
+  return (
+    <Section title="Where AI looks" id="sources-heading">
+      <p className="note">
+        Sites the assistants cite when answering the questions that do not name you, last 28 days. A directory or portal high on this list where
+        you are rarely named is a place to get listed; a brand site is a competitor. Your own site is the Cited metric.
+      </p>
+      {rows.length === 0 ? (
+        <p className="muted">No cited sites yet.</p>
+      ) : (
+        <TableScroll label="Where AI looks (scrollable)">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Site</th>
+                <th scope="col" className="num">
+                  Cited in
+                </th>
+                <th scope="col" className="num">
+                  Answers
+                </th>
+                <th scope="col">Assistants</th>
+                <th scope="col" className="num">
+                  You named alongside
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.domain}>
+                  <th scope="row">
+                    <a href={`https://${r.domain}`} rel="noopener noreferrer" target="_blank">
+                      {r.domain}
+                      <span className="sr-only"> (opens in a new tab)</span>
+                    </a>
+                  </th>
+                  <td className="num">{pct(r.share)}</td>
+                  <td className="num">{num(r.answers)}</td>
+                  <td>{r.providers.map(providerLabel).join(", ")}</td>
+                  <td className="num">{pct(r.brandMentionedWith)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
+    </Section>
   );
 }
 
