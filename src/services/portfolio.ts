@@ -237,7 +237,14 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
   if (!domain || !latest) throw new Error("Domain has no profile");
   const clusters = await loadClusters(domainId);
   const uniqueness = await computeUniqueness(domainId);
-  for (const [id, u] of uniqueness) await db.update(prompts).set({ uniqueness: u }).where(eq(prompts.id, id));
+  // One statement per write below: row-by-row updates over the pooler took the job past its time limit.
+  if (uniqueness.size > 0) {
+    const values = sql.join(
+      [...uniqueness].map(([id, u]) => sql`(${id}, ${u}::double precision)`),
+      sql`, `,
+    );
+    await db.execute(sql`update prompts set uniqueness = v.u from (values ${values}) as v(id, u) where prompts.id = v.id`);
+  }
 
   const rows = await db
     .select({ p: prompts, v: promptVersions })
@@ -267,37 +274,48 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
     await applySelection(domainId, result.activated, result.deactivated, roleOf);
   } else {
     // Role changes of already-active prompts are bookkeeping, not a change of the measured set.
-    for (const a of result.active) {
-      if (!result.activated.includes(a.promptId)) await db.update(prompts).set({ role: a.role }).where(eq(prompts.id, a.promptId));
-    }
+    await setRoles(result.active.filter((a) => !result.activated.includes(a.promptId)));
     await db
       .delete(portfolioProposals)
       .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
-    for (const id of result.activated) {
-      await db.insert(portfolioProposals).values({ domainId, kind: "ACTIVATE", promptId: id, reason: `Rotate in as ${roleOf.get(id)}`, payload: { role: roleOf.get(id) } });
-    }
-    for (const id of result.deactivated) {
-      const u = uniqueness.get(id);
-      await db.insert(portfolioProposals).values({
+    const proposals: Array<typeof portfolioProposals.$inferInsert> = [
+      ...result.activated.map((id) => ({
         domainId,
-        kind: "DEACTIVATE",
+        kind: "ACTIVATE",
         promptId: id,
-        reason: u !== undefined && u < 0.15 ? `Redundant (unique information ${(u * 100).toFixed(0)} %)` : "Rotation period over",
-      });
-    }
+        reason: `Rotate in as ${roleOf.get(id)}`,
+        payload: { role: roleOf.get(id) },
+      })),
+      ...result.deactivated.map((id) => {
+        const u = uniqueness.get(id);
+        return {
+          domainId,
+          kind: "DEACTIVATE",
+          promptId: id,
+          reason: u !== undefined && u < 0.15 ? `Redundant (unique information ${(u * 100).toFixed(0)} %)` : "Rotation period over",
+        };
+      }),
+    ];
+    if (proposals.length) await db.insert(portfolioProposals).values(proposals);
   }
   return { active: result.active.length, activated: result.activated.length, deactivated: result.deactivated.length, applied: apply };
+}
+
+/** Set each prompt's role, one statement per role. */
+async function setRoles(list: Array<{ promptId: string; role: string }>, extra: Partial<typeof prompts.$inferInsert> = {}) {
+  const byRole = new Map<string, string[]>();
+  for (const a of list) byRole.set(a.role, [...(byRole.get(a.role) ?? []), a.promptId]);
+  for (const [role, ids] of byRole) await getDb().update(prompts).set({ role, ...extra }).where(inArray(prompts.id, ids));
 }
 
 async function applySelection(domainId: string, activated: string[], deactivated: string[], roleOf: Map<string, string>) {
   const db = getDb();
   const now = new Date();
-  for (const id of activated) {
-    await db.update(prompts).set({ status: "ACTIVE", role: roleOf.get(id) ?? "ROTATING", activeSince: now }).where(eq(prompts.id, id));
-  }
-  for (const [id, role] of roleOf) {
-    if (!activated.includes(id)) await db.update(prompts).set({ role }).where(eq(prompts.id, id));
-  }
+  await setRoles(
+    activated.map((id) => ({ promptId: id, role: roleOf.get(id) ?? "ROTATING" })),
+    { status: "ACTIVE", activeSince: now },
+  );
+  await setRoles([...roleOf].filter(([id]) => !activated.includes(id)).map(([promptId, role]) => ({ promptId, role })));
   if (deactivated.length) {
     await db.update(prompts).set({ status: "PAUSED", lastActiveAt: now }).where(inArray(prompts.id, deactivated));
   }
