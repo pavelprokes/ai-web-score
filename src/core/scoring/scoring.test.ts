@@ -158,3 +158,52 @@ describe("provider value", () => {
     expect(res.find((r) => r.providerId === "big")!.recommendation).not.toBe("REDUCE_FREQUENCY");
   });
 });
+
+describe("scoring geo-v2", () => {
+  const ob = (signals: DeterministicSignals & { sentiment?: number }, i: number, branded = false) => ({ signals, weight: 1, providerId: "p", promptId: `q${i}`, measurementId: `m${i}`, branded });
+
+  it("scores visibility on unbranded answers only and keeps branded ones for sentiment", () => {
+    const obs = [
+      ob({ ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: 1 }, 0, true),
+      ob({ ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: 1 }, 1, true),
+      ob({ ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: 0 }, 2),
+      ob(sig(), 3),
+      ob(sig(), 4),
+      ob(sig(), 5),
+    ];
+    const v2 = computeMetrics(obs, "geo-v2");
+    expect(v2.mentionRate.value).toBeCloseTo(0.25);
+    expect(v2.sampleCount).toBe(4);
+    // Sentiment uses every mention, branded included — same set as geo-v1.
+    expect(v2.sentimentScore).toBeCloseTo(computeMetrics(obs, "geo-v1").sentimentScore!);
+    expect(computeMetrics(obs, "geo-v1").mentionRate.value).toBeCloseTo(0.5);
+  });
+
+  it("puts every answer in the recommendation denominator, so it never exceeds Mentioned", () => {
+    const obs = [
+      ob(sig({ brandMentioned: true, brandPosition: 1, recommendationPresent: true, recommendationPosition: 1 }), 0),
+      ob(sig({ brandMentioned: true, brandPosition: 2 }), 1),
+      ob(sig(), 2),
+      ob(sig(), 3),
+    ];
+    const v2 = computeMetrics(obs, "geo-v2");
+    expect(v2.recommendationRate.value).toBeCloseTo(0.25);
+    expect(v2.recommendationRate.value!).toBeLessThanOrEqual(v2.mentionRate.value!);
+    expect(computeMetrics(obs, "geo-v1").recommendationRate.value).toBe(1);
+  });
+
+  it("has no visibility level for a domain with branded answers only", () => {
+    const m = computeMetrics([ob({ ...sig({ brandMentioned: true, brandPosition: 1 }), sentiment: 1 }, 0, true)], "geo-v2");
+    expect(m.mentionRate.value).toBeNull();
+    expect(m.overallScore).toBeNull();
+    expect(m.insufficientData).toBe(false);
+  });
+
+  it("flags too few answers instead of reading the overall score as a level", () => {
+    const few = Array.from({ length: 10 }, (_, i) => ob(sig({ brandMentioned: i < 3, brandPosition: i < 3 ? 1 : null }), i));
+    const many = Array.from({ length: 400 }, (_, i) => ob(sig({ brandMentioned: i % 10 === 0, brandPosition: i % 10 === 0 ? 1 : null }), i));
+    expect(computeMetrics(few, "geo-v2").insufficientData).toBe(true);
+    expect(computeMetrics(many, "geo-v2").insufficientData).toBe(false);
+    expect(computeMetrics(few, "geo-v1").insufficientData).toBeUndefined();
+  });
+});

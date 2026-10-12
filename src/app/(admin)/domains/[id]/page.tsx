@@ -387,22 +387,56 @@ function ScoreTiles({ detail }: { detail: Detail }) {
     );
   }
   const ci = s.mentionRateCi as [number | null, number | null];
+  const brand = detail.scores.brand;
+  const mix = s.providerWeights
+    ? Object.entries(s.providerWeights)
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, w]) => `${providerLabel(id)} ${pct(w)}`)
+        .join(" · ")
+    : null;
   return (
     <>
       <dl className="tiles tiles--4" aria-label="Visibility scores, last 28 days">
-        <StatTile label={<>Overall score <MetricInfo id="overall-score" /></>} value={<Score value={s.overall} />} detail={`${num(s.samples)} answers · ${num(s.prompts)} prompts`} />
-        <StatTile label={<>Mentioned <MetricInfo id="mention-rate" /></>} value={<Rate value={s.mentionRate} ci={ci} />} detail="Brand named in the answer" />
-        <StatTile label={<>Cited <MetricInfo id="citation-rate" /></>} value={<Rate value={s.citationRate} />} detail="Domain linked as a source" />
-        <StatTile label={<>Recommended <MetricInfo id="recommendation-rate" /></>} value={<Rate value={s.recommendationRate} />} detail="Listed as a recommendation" />
+        <StatTile
+          label={<>Overall score <MetricInfo id="overall-score" /></>}
+          value={s.insufficientData ? <span className="muted">Not enough data</span> : <Score value={s.overall} />}
+          detail={
+            <>
+              {num(s.samples)} unbranded answers · {num(s.prompts)} prompts
+              {mix && <span className="tile__sub">Weighted by reach: {mix}</span>}
+            </>
+          }
+        />
+        <StatTile label={<>Mentioned <MetricInfo id="mention-rate" /></>} value={<Rate value={s.mentionRate} ci={ci} />} detail="Unbranded questions where AI names you" />
+        <StatTile label={<>Cited <MetricInfo id="citation-rate" /></>} value={<Rate value={s.citationRate} />} detail="Unbranded answers linking your site" />
+        <StatTile
+          label={<>In a recommendation list <MetricInfo id="recommendation-rate" /></>}
+          value={<Rate value={s.recommendationRate} />}
+          detail={`Of ${num(s.recommendationN ?? 0)} unbranded answers`}
+        />
         <StatTile
           label={<>Average position <MetricInfo id="average-position" /></>}
           value={s.avgRecommendationPosition == null ? <span className="muted">–</span> : s.avgRecommendationPosition.toFixed(1)}
-          detail="In recommendation lists (1 = first)"
+          detail="Among tracked names in a list (1 = first)"
         />
-        <StatTile label={<>Share of voice <MetricInfo id="share-of-voice" /></>} value={<Rate value={s.shareOfVoice} />} detail="Mentions vs. competitors" />
+        <StatTile label={<>Share among tracked rivals <MetricInfo id="share-of-voice" /></>} value={<Rate value={s.shareOfVoice} />} detail="Only competitors set in the profile" />
         <StatTile label={<>Sentiment <MetricInfo id="sentiment" /></>} value={<Score value={s.sentiment == null ? null : s.sentiment * 100} />} detail="How positively it is described" />
         <StatTile label={<>Accuracy <MetricInfo id="accuracy" /></>} value={<Score value={s.accuracy == null ? null : s.accuracy * 100} />} detail="Facts match the website" />
       </dl>
+      {brand && (
+        <>
+          <h2 className="tiles__heading">When AI is asked about you by name</h2>
+          <dl className="tiles tiles--4" aria-label="Answers to questions that name the brand, last 28 days">
+            <StatTile
+              label={<>Knows you <MetricInfo id="brand-check" /></>}
+              value={<Rate value={brand.mentionRate} ci={brand.mentionRateCi as [number | null, number | null]} />}
+              detail={`${num(brand.samples)} answers to questions that name you`}
+            />
+            <StatTile label={<>Sentiment <MetricInfo id="sentiment" /></>} value={<Score value={brand.sentiment == null ? null : brand.sentiment * 100} />} detail="How positively it is described" />
+            <StatTile label={<>Accuracy <MetricInfo id="accuracy" /></>} value={<Score value={brand.accuracy == null ? null : brand.accuracy * 100} />} detail="Facts match the website" />
+          </dl>
+        </>
+      )}
       <p className="note">
         Small numbers next to a rate are its 95 % confidence interval <MetricInfo id="confidence-interval" />.
         {detail.scores.windowEnd && (
@@ -438,7 +472,7 @@ function ProviderScores({ detail }: { detail: Detail }) {
                   Cited <MetricInfo id="citation-rate" />
                 </th>
                 <th scope="col" className="num">
-                  Recommended <MetricInfo id="recommendation-rate" />
+                  In a list <MetricInfo id="recommendation-rate" />
                 </th>
                 <th scope="col" className="num">
                   Answers <MetricInfo id="answers" />
@@ -701,7 +735,7 @@ function ClusterScores({ detail }: { detail: Detail }) {
                 Cited <MetricInfo id="citation-rate" />
               </th>
               <th scope="col" className="num">
-                Recommended <MetricInfo id="recommendation-rate" />
+                In a list <MetricInfo id="recommendation-rate" />
               </th>
               <th scope="col" className="num">
                 Answers <MetricInfo id="answers" />

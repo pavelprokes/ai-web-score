@@ -262,6 +262,14 @@ main {
   color: var(--muted);
   font-size: 0.85rem;
 }
+.tile__sub {
+  display: block;
+  margin-top: 0.15rem;
+}
+.tiles__heading {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
 
 .kv {
   display: grid;
@@ -799,6 +807,11 @@ td .meter {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+@media (max-width: 480px) {
+  .tiles--4 {
+    grid-template-columns: 1fr;
+  }
+}
 .tile__value .rate__ci {
   font-size: 0.875rem;
   font-weight: 500;
@@ -978,6 +991,15 @@ code {
   fill: var(--text);
   font-size: 13px;
   font-weight: 650;
+}
+.trend__mix {
+  stroke: var(--text-2);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+.trend__mixnotes {
+  padding-left: 0;
+  list-style: none;
 }
 .trend__crosshair {
   stroke: var(--text-2);

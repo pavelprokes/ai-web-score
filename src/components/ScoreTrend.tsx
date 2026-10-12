@@ -27,8 +27,8 @@ const METRICS: Array<{ id: Metric; label: string; rate: boolean }> = [
   { id: "overall", label: "Overall score", rate: false },
   { id: "mention", label: "Mentioned", rate: true },
   { id: "citation", label: "Cited", rate: true },
-  { id: "recommendation", label: "Recommended", rate: true },
-  { id: "shareOfVoice", label: "Share of voice", rate: true },
+  { id: "recommendation", label: "In a recommendation list", rate: true },
+  { id: "shareOfVoice", label: "Share among tracked rivals", rate: true },
 ];
 
 const RANGES = [
@@ -48,7 +48,8 @@ const longDateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "l
 /** Value on a 0–100 scale (scores as is, rates as percent) with optional CI. */
 function read(p: TrendPoint | undefined, metric: Metric): { v: number | null; lo: number | null; hi: number | null } {
   if (!p) return { v: null, lo: null, hi: null };
-  if (metric === "overall") return { v: p.overall, lo: null, hi: null };
+  // Days with too few answers have no readable overall level (the tile says "Not enough data"): a gap, not a point.
+  if (metric === "overall") return { v: p.insufficient ? null : p.overall, lo: null, hi: null };
   if (metric === "shareOfVoice") return { v: p.shareOfVoice === null ? null : p.shareOfVoice * 100, lo: null, hi: null };
   const [v, lo, hi] = p[metric];
   const s = (x: number | null) => (x === null ? null : x * 100);
@@ -95,6 +96,23 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
     if (showProviders) for (const s of providers) list.push({ id: s.id, label: s.label, slot: s.slot, map: byDay(s.points) });
     return list.map((s) => ({ ...s, values: days.map((d) => read(s.map.get(d), metric)) }));
   }, [combined, providers, showProviders, days, metric]);
+
+  // Days where the set of providers in the aggregate changed: the combined line is not comparable across them.
+  const labelOf = (id: string) => providers.find((p) => p.id === id)?.label ?? id;
+  const mixChanges = useMemo(() => {
+    const out: Array<{ day: string; added: string[]; removed: string[] }> = [];
+    let prev: string[] | undefined;
+    for (const p of combined) {
+      if (!p.providers) continue;
+      if (prev && Date.parse(p.t) >= from) {
+        const added = p.providers.filter((x) => !prev!.includes(x));
+        const removed = prev.filter((x) => !p.providers!.includes(x));
+        if (added.length || removed.length) out.push({ day: dayKey(p.t), added, removed });
+      }
+      prev = p.providers;
+    }
+    return out;
+  }, [combined, from]);
 
   const innerW = width - M.left - M.right;
   const innerH = HEIGHT - M.top - M.bottom;
@@ -251,6 +269,9 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
               {dateFmt.format(new Date(t))}
             </text>
           ))}
+          {mixChanges.map((c) => (
+            <line key={c.day} x1={x(Date.parse(c.day))} x2={x(Date.parse(c.day))} y1={M.top} y2={M.top + innerH} className="trend__mix" />
+          ))}
           {metricDef.rate && band && <path d={band} className="fill-band" />}
           {series
             .slice()
@@ -326,6 +347,19 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
         Each point summarises the previous 28 days <MetricInfo id="rolling-window" />, so the line moves smoothly and a real change shows over several days.{" "}
         <Link href="/metrics">What do the metrics mean?</Link>
       </p>
+      {mixChanges.length > 0 && (
+        <ul className="note trend__note trend__mixnotes">
+          {mixChanges.map((c) => (
+            <li key={c.day}>
+              <span aria-hidden="true">┆ </span>
+              {dateFmt.format(new Date(c.day))}: providers changed
+              {c.added.length > 0 && <> (added {c.added.map(labelOf).join(", ")})</>}
+              {c.removed.length > 0 && <> (removed {c.removed.map(labelOf).join(", ")})</>}. The combined line before and after is not
+              directly comparable; compare each provider&apos;s own line. A new provider phases in over 7 days.
+            </li>
+          ))}
+        </ul>
+      )}
 
       <details className="trend__table">
         <summary>Show data as table</summary>

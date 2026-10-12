@@ -35,7 +35,7 @@ export const domains = pgTable("domains", {
   /** NEW → DISCOVERING → READY (profile + portfolio) → ACTIVE; PAUSED; ERROR */
   status: text("status").notNull().default("NEW"),
   monthlyBudgetUsd: doublePrecision("monthly_budget_usd"),
-  scoringVersion: text("scoring_version").notNull().default("geo-v1"),
+  scoringVersion: text("scoring_version").notNull().default("geo-v2"),
   autoApprovePortfolioChanges: boolean("auto_approve_portfolio_changes").notNull().default(false),
   /** Umami website receiving AI-visibility events (dedicated, not the traffic website). */
   umamiWebsiteId: text("umami_website_id"),
