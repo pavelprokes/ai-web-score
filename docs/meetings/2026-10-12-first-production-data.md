@@ -94,3 +94,16 @@ problems in how visibility is computed and shown:
 - Alerts and the "did my change work?" loop on top of `geo-v1`.
 - Paid acquisition.
 - Re-enabling the Gemini API (its grounding terms are not reviewed).
+
+## Implementation notes (2026-10-13)
+
+- **D2 deviation.** Phase-in counts *days* with data (full weight after 7), not answers. With n_min = 100
+  answers the agreed rule would not have damped the 10-12 jump, because ChatGPT returned 421 answers on its
+  first day.
+- **`activeTopicsOnly`.** geo-v2 also scores only prompts of active topic clusters. As a result, sentiment
+  and accuracy change slightly (qa check 4 holds only for the branded part). Example: photographer sentiment
+  0.710 → 0.749.
+- **Production check before deploy** (read-only, same code path):
+  - photographer ChatGPT 10.3 % (target 10.5 ± 1);
+  - recommendation ≤ mention everywhere;
+  - photos.svatebni-fotograf-cechy.cz drops to 0 on 41 active-topic answers.

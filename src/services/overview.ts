@@ -35,6 +35,7 @@ function scoreSummary(m: VisibilityMetrics | undefined | null) {
     mentionRateCi: [m.mentionRate.low, m.mentionRate.high],
     citationRate: m.citationRate.value,
     recommendationRate: m.recommendationRate.value,
+    recommendationN: m.recommendationRate.n,
     avgRecommendationPosition: m.avgRecommendationPosition,
     shareOfVoice: m.shareOfVoice,
     citationShare: m.citationShare,
@@ -43,6 +44,8 @@ function scoreSummary(m: VisibilityMetrics | undefined | null) {
     searchRate: m.searchRate,
     samples: m.sampleCount,
     prompts: m.promptCount,
+    insufficientData: m.insufficientData ?? false,
+    providerWeights: m.providerWeights ?? null,
   };
 }
 
@@ -226,6 +229,7 @@ export async function domainDetail(domainId: string) {
     measurementConfidence: meanConfidence,
     scores: {
       domain: scoreSummary(snaps.find((s) => s.scope === "DOMAIN")?.metrics as VisibilityMetrics),
+      brand: scoreSummary(snaps.find((s) => s.scope === "BRAND")?.metrics as VisibilityMetrics),
       providers: snaps.filter((s) => s.scope === "PROVIDER").map((s) => ({ providerId: s.scopeKey, ...scoreSummary(s.metrics as VisibilityMetrics) })),
       clusters: snaps.filter((s) => s.scope === "CLUSTER").map((s) => ({ cluster: s.scopeKey, ...scoreSummary(s.metrics as VisibilityMetrics) })),
       windowEnd: snaps[0]?.windowEnd ?? null,
@@ -256,6 +260,8 @@ export interface TrendPoint {
   recommendation: [number | null, number | null, number | null];
   shareOfVoice: number | null;
   samples: number;
+  /** Providers in the aggregate (DOMAIN points of versions that record them); a change marks a mix break. */
+  providers?: string[];
 }
 
 /** Daily score history (rolling-window snapshots) for the domain and each provider. */
@@ -284,6 +290,7 @@ export async function scoreHistory(domainId: string, days = 180) {
     recommendation: rate(m.recommendationRate),
     shareOfVoice: m.shareOfVoice,
     samples: m.sampleCount,
+    ...(m.providerWeights ? { providers: Object.keys(m.providerWeights).sort() } : {}),
   });
   const providerIds = [...new Set(rows.filter((r) => r.scope === "PROVIDER").map((r) => r.scopeKey))];
   return {

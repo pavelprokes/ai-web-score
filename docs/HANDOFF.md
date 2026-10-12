@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-10-12.
+Read this first in a new session. Last updated 2026-10-13.
 
 ## How to continue in a new session
 
@@ -46,37 +46,40 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #24 | Discovery: lone UTF-16 surrogates in crawled text broke jsonb inserts |
 | #25 | Perplexity `language_preference` must be ISO 639-1 (`en-AU` → `en`) |
 | #26 | /providers → Accounts & balance: spend per account, DataForSEO live balance (`/v3/appendix/user_data`), estimated balance for Anthropic/Perplexity from an entered amount |
+| — | Dev team of role agents + `/team` skill; `pnpm prod:sql` (read-only production queries) |
+| #29 | Prompts of topic clusters dropped by re-discovery are paused (179 were still measured, 39–92 % of answers); ChatGPT answers stored at $0 re-priced; signal joins filter the extractor version |
+| #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 
-## Next task: validate the research on production data, then plan changes
+## Next task
 
-### 1. Read access to production (done 2026-10-12)
+Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`.
 
-Local route works: `PROD_DATABASE_URL` in `.env.local` uses role `claude_readonly` (`current_user` =
-`claude_readonly`, `default_transaction_read_only` = `on`). Query with `pnpm prod:sql "<select>"` — single
-SELECT/WITH only, run in a READ ONLY transaction. The role cannot read schema `drizzle` (migration history).
-The HTTPS admin API (`/api/domains`, `/api/costs`, … with `ADMIN_API_TOKEN`) remains the fallback for cloud
-sessions whose egress cannot reach the pooler.
+### 1. After #29/#30 deploy (verify on production)
 
-### 2. Validate `docs/RESEARCH.md` against our own data
+- `pnpm prod:sql`: no ACTIVE prompt in an inactive cluster; chatgpt-ui answers cost > 0; every domain has
+  `scoring_version = 'geo-v2'` and geo-v2 DOMAIN/PROVIDER/BRAND snapshots exist after the next `scores.compute`.
+- Expected geo-v2 levels (computed read-only before deploy): photographer ChatGPT ≈ 10 %, photographer
+  overall ≈ 31 (was 48), photos.svatebni-fotograf-cechy.cz ≈ 0 on 41 answers (its active topics never name it).
+- Owner actions: Anthropic credit topped up; `claude-api` provider disabled in /providers (monthly calibration
+  only); Vercel env `INTERNAL_LLM_MODEL=claude-sonnet-5-5` (prompt generation was $13.37 of $13.78 internal spend).
 
-Wait until ChatGPT / AI Mode / Gemini have ≥1 week of answers. Then check:
+### 2. PR 3 (P1)
 
-| Claim (RESEARCH.md) | Check on production data |
-|---|---|
-| §1 APIs ≠ consumer UI | Same prompt, same day: brand/domain overlap Claude & Perplexity (API) vs ChatGPT / Gemini / AI Mode (UI capture) |
-| §4 Variance | Re-run agreement per cell (Jaccard of mentioned brands), day-to-day overlap, needed samples for ±5/±10 pp at domain level; is the 28-day window enough? |
-| §5 Real prompts | Search rate per prompt intent; prompt length vs mention rate; fan-out queries (language share) |
-| §6 Reach weights | Compare with Umami AI referrals where configured |
-| §2 Costs | Actual cost per answer and per *useful data point* per provider (Claude ≈ $0.043/answer vs Perplexity ≈ $0.001 — is Claude's unique information worth it?) |
-| Scoring | Confidence intervals per domain; which domains/providers are under-sampled |
-| Recommendations | Do diagnostics fire sensibly on real domains (false positives)? |
+- Profile fix: the photographer profile lists se-vezmou.cz among owned domains, and generic phrases
+  ("Svatební fotograf Čechy", "Vzdělání budoucnosti") among aliases. Fix, then re-extract stored answers
+  under a new `EXTRACTOR_VERSION` (readers already filter by version).
+- Sources table: cited domains on unbranded answers, share and "you are listed / missing"; directories
+  labelled as places to get listed, not competitors. Display-only.
 
-Write the results as a new section in `docs/RESEARCH.md` (measured vs. literature) and propose changes
-(sampling budget, provider weights, Claude config/candidate `sonnet-5-5-lean`, prompt generation rules).
+### 3. After ≥7 days of ChatGPT / AI Mode data (~2026-10-19)
 
-### 3. Open follow-ups
+Validate `docs/RESEARCH.md` against production (APIs ≠ UI, variance, prompt length, reach, cost per useful
+data point) and write the measured section. Then decide: Perplexity repeat samples (same-day Jaccard 0.76),
+reach weights, the $171/month forecast vs. $20 budget. Later: competitors from answers with owner approval,
+answer viewer, `answer_text` retention (~13 months).
 
-- RESEARCH open items: DataForSEO CZ/`cs` support for ChatGPT/Gemini scrapers (verify on first real answers).
-- Supabase pooler closes connections occasionally (mitigated by read retry); root cause unknown —
-  Supabase Logs → Pooler around the close times.
-- Accounts: Anthropic/Perplexity balances are estimates — the owner re-enters the console balance after top-ups.
+### Open follow-ups
+
+- Supabase pooler closes connections occasionally (mitigated by read retry); root cause unknown.
+- Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
+- Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.

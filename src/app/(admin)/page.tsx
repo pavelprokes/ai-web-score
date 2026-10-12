@@ -107,10 +107,10 @@ export default async function DomainsPage({
                         Cited <MetricInfo id="citation-rate" />
                       </th>
                       <th scope="col" className="num">
-                        Recommended <MetricInfo id="recommendation-rate" />
+                        In a list <MetricInfo id="recommendation-rate" />
                       </th>
                       <th scope="col" className="num">
-                        Share of voice <MetricInfo id="share-of-voice" />
+                        Share among rivals <MetricInfo id="share-of-voice" />
                       </th>
                       <th scope="col">Last discovery <MetricInfo id="last-discovery" /></th>
                       <th scope="col">Last measurement <MetricInfo id="last-measurement" /></th>
@@ -148,7 +148,7 @@ export default async function DomainsPage({
                             )}
                           </td>
                           <td className="num">
-                            <Score value={d.scores?.overall} />
+                            {d.scores?.insufficientData ? <span className="muted">Not enough data</span> : <Score value={d.scores?.overall} />}
                           </td>
                           <td className="num">
                             <Rate
@@ -243,7 +243,7 @@ function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<Activ
       <dl className="kv">
         <dt>Overall</dt>
         <dd>
-          <Score value={d.scores?.overall} />
+          {d.scores?.insufficientData ? <span className="muted">Not enough data</span> : <Score value={d.scores?.overall} />}
         </dd>
         <dt>Mentioned</dt>
         <dd>
@@ -256,11 +256,11 @@ function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<Activ
         <dd>
           <Rate value={d.scores?.citationRate} />
         </dd>
-        <dt>Recommended</dt>
+        <dt>In a list</dt>
         <dd>
           <Rate value={d.scores?.recommendationRate} />
         </dd>
-        <dt>Share of voice</dt>
+        <dt>Share among rivals</dt>
         <dd>
           <Rate value={d.scores?.shareOfVoice} />
         </dd>

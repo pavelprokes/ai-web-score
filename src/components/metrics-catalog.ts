@@ -28,8 +28,9 @@ export const METRIC_GROUPS: Array<{ id: MetricGroup; name: string; intro: string
     id: "visibility",
     name: "Visibility scores",
     intro:
-      "How AI assistants talk about the brand. Every answer is collected for a prompt a real customer could ask (the brand is never in the prompt), " +
-      "and each metric is computed over the last 28 days of answers.",
+      "How AI assistants talk about the brand. Every answer is collected for a prompt a real customer could ask, " +
+      "and each metric is computed over the last 28 days of answers. Visibility counts only questions that do not name the brand; " +
+      "questions that do (\u201cis X a good choice?\u201d) are shown separately as what AI says when asked about you by name.",
   },
   {
     id: "reliability",
@@ -60,7 +61,10 @@ export const METRICS: MetricDefinition[] = [
       `Weights (${DEFAULT_SCORING_VERSION}): mentioned ${pctW(w.mention)}, recommended ${pctW(w.recommendation)}, cited ${pctW(w.citation)}, ` +
       `share of voice ${pctW(w.shareOfVoice)}, position ${pctW(w.position)}, sentiment ${pctW(w.sentiment)}, accuracy ${pctW(w.accuracy)}.\n` +
       `Position component = average of 1 / position (1st = 1, 2nd = 0.5, 3rd = 0.33, not recommended = 0).\n` +
-      `A missing component (e.g. no answer searched the web, so nothing could be cited) is left out and the remaining weights are re-normalised.`,
+      `A missing component (e.g. no answer searched the web, so nothing could be cited) is left out and the remaining weights are re-normalised.\n\n` +
+      `Providers are weighted by reach (how many people use each assistant). A provider that has just been added phases in over its first 7 days, ` +
+      `so the score does not jump when the mix of providers changes; the tile lists the weights used. ` +
+      `When the Mentioned interval is wider than ±10 points, the tile says \u201cNot enough data\u201d instead of a number.`,
     description:
       "The individual metrics are industry-standard (GEO tools and research use the same ones); the weighting is this project's own and versioned. " +
       "When the weights change, a new scoring version is created and the whole history is recalculated from the stored answers, so trends stay comparable.",
@@ -73,9 +77,9 @@ export const METRICS: MetricDefinition[] = [
     id: "mention-rate",
     group: "visibility",
     name: "Mentioned",
-    short: "Share of AI answers that name the brand (or its domain) at all. The most basic visibility signal.",
+    short: "Share of AI answers to questions that do not name the brand where the answer names it (or its domain). The most basic visibility signal.",
     formula:
-      "Mentioned = Σ weight of answers that mention the brand / Σ weight of all valid answers\n\n" +
+      "Mentioned = Σ weight of answers that mention the brand / Σ weight of all valid answers to unbranded questions\n\n" +
       "Weight of an answer = prompt importance (60 % business importance + 40 % commercial value) × provider reach. " +
       "The brand is matched with aliases, without diacritics and with Czech inflection (Alza, Alzy, Alze…).",
     description:
@@ -100,14 +104,14 @@ export const METRICS: MetricDefinition[] = [
   {
     id: "recommendation-rate",
     group: "visibility",
-    name: "Recommended",
-    short: "Of the answers that recommend something (a list of providers, shops, tools), the share that include the brand.",
+    name: "In a recommendation list",
+    short: "Share of answers to unbranded questions that list the brand among their recommendations.",
     formula:
-      "Recommended = Σ weight of answers with a recommendation list that includes the brand / Σ weight of answers that contain a recommendation list",
+      "In a recommendation list = Σ weight of answers whose list of recommendations includes the brand / Σ weight of all valid answers to unbranded questions",
     description:
       "Questions like “which wedding photographer in Prague?” end with a list. Being on that list is the closest thing to winning the customer. " +
-      "Answers without any recommendation are left out.",
-    example: "40 answers contain a list of recommendations, the brand is in 25 of them → 62.5 %.",
+      "Every answer counts in the denominator, so this can never be higher than Mentioned.",
+    example: "200 answers to unbranded questions, the brand is in the recommendation list of 12 → 6 %.",
   },
   {
     id: "average-position",
@@ -122,14 +126,28 @@ export const METRICS: MetricDefinition[] = [
   {
     id: "share-of-voice",
     group: "visibility",
-    name: "Share of voice",
-    short: "The brand's share of all attention the answers give to the brand and its competitors, weighted by position.",
+    name: "Share among tracked rivals",
+    short: "The brand's share of the attention answers give to the brand and the competitors set in its profile, weighted by position. Competitors not in the profile are not counted.",
     formula:
       "Each mentioned entity earns 1 / position in the answer (1st = 1, 2nd = 0.5, …).\n" +
       "Share of voice = Σ brand points / Σ points of the brand and all competitors",
     description: "Shows how the brand stands against competitors in the same answers, not just whether it appears.",
     example: "An answer lists competitor A 1st, the brand 2nd, competitor B 3rd → brand 0.5 / (1 + 0.5 + 0.33) ≈ 27 %.",
-    reading: "With five similar competitors, about 17 % is an even share; above that the brand is ahead of the average competitor.",
+    reading:
+      "With five similar competitors, about 17 % is an even share; above that the brand is ahead of the average competitor. " +
+      "A high value can also mean the tracked competitors are rarely the ones AI actually names — check which sites the answers cite.",
+  },
+  {
+    id: "brand-check",
+    group: "visibility",
+    name: "Knows you (asked by name)",
+    short: "Share of answers to questions that name the brand (“is X a good choice?”) where the answer actually talks about it.",
+    formula: "Knows you = Σ weight of answers that mention the brand / Σ weight of valid answers to questions naming the brand",
+    description:
+      "Questions that already contain the brand say little about whether AI recommends it unprompted, so they are kept out of visibility. " +
+      "They show whether AI knows the brand and what it says about it — the sentiment and accuracy next to it.",
+    example: "50 answers to “is Se vezmou worth it?”, 42 describe the service → 84 %.",
+    reading: "Low values mean AI does not know the brand even when asked directly — work on the site and listings before anything else.",
   },
   {
     id: "citation-share",
