@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { domainProfiles, domains } from "@/db/schema";
+import { LLM_TASKS, type LlmTask, setLlmModel } from "@/lib/llm";
 import { requireAdminAction } from "@/lib/auth-guard";
 import { kickJobs } from "@/lib/kick";
 import { measurementBlocker } from "@/services/planning";
@@ -204,4 +205,14 @@ export async function balanceAction(formData: FormData) {
   }
   revalidatePath("/providers");
   redirect(`/providers?${failed ? "error" : "done"}=${encodeURIComponent(message)}#accounts-heading`);
+}
+
+export async function llmModelAction(formData: FormData) {
+  const actor = await requireAdminAction();
+  for (const task of Object.keys(LLM_TASKS) as LlmTask[]) {
+    const model = formData.get(task);
+    if (typeof model === "string") await setLlmModel(task, model, actor);
+  }
+  revalidatePath("/providers");
+  redirect(`/providers?done=${encodeURIComponent("Models saved.")}#models-heading`);
 }

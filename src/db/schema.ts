@@ -462,6 +462,14 @@ export const providerBalances = pgTable(
   (t) => [index("provider_balances_account").on(t.account, t.createdAt)],
 ).enableRLS();
 
+/** Admin-editable settings (key → JSON value), e.g. the internal LLM model per task. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
+
 export const llmBatches = pgTable("llm_batches", {
   id: text("id").primaryKey(),
   purpose: text("purpose").notNull(),

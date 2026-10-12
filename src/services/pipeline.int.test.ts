@@ -112,7 +112,8 @@ describe.skipIf(!url)("pipeline (integration)", () => {
   it("batches answer analysis with the domain context in a cached system block and prices cache tokens", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
-    const { setAnthropicClient, llmCost, ANALYZER_MODEL } = await import("@/lib/llm");
+    const { setAnthropicClient, llmCost, llmModel } = await import("@/lib/llm");
+    const ANALYZER_MODEL = await llmModel("analysis");
     const { submitAnalysis, collectAnalysis } = await import("@/services/analysis");
     const db = getDb();
     await db.update(s.llmBatches).set({ status: "DONE" });

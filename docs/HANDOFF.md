@@ -49,7 +49,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | — | Dev team of role agents + `/team` skill; `pnpm prod:sql` (read-only production queries) |
 | #29 | Prompts of topic clusters dropped by re-discovery are paused (179 were still measured, 39–92 % of answers); ChatGPT answers stored at $0 re-priced; signal joins filter the extractor version |
 | #31 | Measurements of a provider disabled after planning are cancelled instead of sent |
-| #32 | Internal LLM defaults: Sonnet 5.5 for discovery/prompt generation, Haiku 5.5 ($0.10/$0.50) for answer analysis |
+| #32 | Internal LLM default Sonnet 5.5 for discovery/prompt generation (was Opus); Haiku 5.5 pricing and thinking-off support |
+| #33 | Internal model per task selectable in the UI (/providers); answer analysis back on Sonnet 5.5 after the Haiku check |
 | #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 
 ## Next task
@@ -63,11 +64,11 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
 - Expected geo-v2 levels (computed read-only before deploy): photographer ChatGPT ≈ 10 %, photographer
   overall ≈ 31 (was 48), photos.svatebni-fotograf-cechy.cz ≈ 0 on 41 answers (its active topics never name it).
 - Done by the owner: `claude-api` provider disabled; Vercel env `INTERNAL_LLM_MODEL=claude-sonnet-5-5`.
-- Pending: Anthropic credit top-up. Right after it, validate Haiku 5.5 as the answer analyzer (the code default since
-  #32): re-grade ~40 Sonnet-judged answers and compare sentiment / description accuracy / recommended
-  (one-off script: copy the compare-analyzer script from the session notes into `scripts/`, ~$0.02). If agreement is
-  poor, set Vercel `ANALYZER_LLM_MODEL=claude-sonnet-5-5`. Check that Vercel has no `ANALYZER_LLM_MODEL` overriding
-  the new default.
+- Anthropic credit topped up (2026-10-12). Haiku 5.5 was checked as the answer analyzer on 40 production answers and
+  rejected: vs. stored Sonnet judgements |Δ sentiment| 0.12 and |Δ description accuracy| 0.16, recommended 34/40, while
+  Sonnet re-grading itself gave 0.03 / 0.06 / 40/40 (Haiku with thinking at medium effort was no better). Analysis stays
+  on Sonnet 5.5 (~$2/month).
+- Internal models are chosen on /providers → Internal AI models (app_settings; overrides the env vars).
 
 ### 2. PR 3 (P1)
 

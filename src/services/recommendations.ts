@@ -18,7 +18,7 @@ import { DomainProfile } from "@/core/domain-profile";
 import type { RawSignals } from "@/core/signals/extract";
 import { type AnswerObservation, diagnose, type Finding } from "@/core/recommendations/diagnostics";
 import { LlmRecommendations, RECOMMENDATIONS_SYSTEM, recommendationsUserPrompt } from "@/core/recommendations/generate-llm";
-import { generateStructured, llmAvailable } from "@/lib/llm";
+import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { deadlineSignal } from "@/lib/deadline";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
@@ -29,8 +29,6 @@ import { throwIfJobCancelled } from "@/jobs/queue";
  * own default actions are stored instead, so the feature works either way.
  */
 
-/** Cheap model for a short structured answer; override with RECOMMENDATIONS_LLM_MODEL. */
-const MODEL = process.env.RECOMMENDATIONS_LLM_MODEL ?? "claude-sonnet-5-5";
 const MAX_ITEMS = 8;
 const WINDOW_DAYS = 30;
 
@@ -99,13 +97,14 @@ type PlanItem = LlmRecommendations["items"][number];
 async function writePlan(domainId: string, profile: DomainProfile, findings: Finding[], answersAnalysed: number) {
   const known = new Set(findings.map((f) => f.key));
   if (llmAvailable()) {
+    const model = await llmModel("recommendations");
     const out = await generateStructured({
       schema: LlmRecommendations,
       system: RECOMMENDATIONS_SYSTEM,
       user: recommendationsUserPrompt({ profile, findings, answersAnalysed }),
       purpose: "recommendations",
       domainId,
-      model: MODEL,
+      model,
       effort: "low",
       maxTokens: 3000,
     });
@@ -114,7 +113,7 @@ async function writePlan(domainId: string, profile: DomainProfile, findings: Fin
       .map((i) => ({ ...i, findingKeys: i.findingKeys.filter((k) => known.has(k)) }))
       .filter((i) => i.findingKeys.length > 0)
       .slice(0, MAX_ITEMS);
-    if (items.length > 0) return { summary: out.summary, items, model: MODEL };
+    if (items.length > 0) return { summary: out.summary, items, model };
   }
   return { summary: ruleSummary(findings), items: findings.slice(0, MAX_ITEMS).map(ruleItem), model: null };
 }

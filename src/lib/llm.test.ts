@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { generateStructured, isGrammarTooComplex, jsonSchemaInstruction, llmCost, noThinking, parseJsonAnswer, setAnthropicClient } from "./llm";
+import { generateStructured, isGrammarTooComplex, jsonSchemaInstruction, llmCost, noThinking, parseJsonAnswer, setAnthropicClient, setLlmModel } from "./llm";
 
 const Schema = z.object({ category: z.string(), score: z.number(), tags: z.array(z.string()) });
 
@@ -89,6 +89,10 @@ describe("helpers", () => {
     expect(noThinking("claude-haiku-5-5")).toEqual({ thinking: { type: "disabled" } });
     expect(noThinking("claude-sonnet-5-5")).toEqual({ thinking: { type: "between_tools" } });
     expect(noThinking("claude-opus-5-5")).toEqual({});
+  });
+  it("only accepts offered models for a known task", async () => {
+    await expect(setLlmModel("analysis", "gpt-5", "t")).rejects.toThrow(/Unknown model/);
+    await expect(setLlmModel("nope" as "analysis", "claude-sonnet-5-5", "t")).rejects.toThrow(/Unknown model/);
   });
   it("parseJsonAnswer tolerates prose and fences and reports schema issues", () => {
     expect(parseJsonAnswer('Here: {"category":"x","score":1,"tags":[]} done', Schema)).toEqual({

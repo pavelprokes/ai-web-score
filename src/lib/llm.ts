@@ -2,7 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { llmUsage } from "@/db/schema";
+import { appSettings, llmUsage } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { deadlineFetch } from "@/lib/deadline";
 import { CACHE_WRITE_FACTOR } from "@/core/pricing/cost";
 
@@ -13,12 +14,70 @@ import { CACHE_WRITE_FACTOR } from "@/core/pricing/cost";
  * Model choice: discovery/prompt design run rarely and decide the quality of the
  * whole portfolio → strongest model. Answer analysis is high-volume classification
  * → configurable cheaper model, and it runs through the Batches API (50 % off).
- * Defaults: discovery and prompt generation on Sonnet 5.5 (Opus cost 2× for no visible gain in the
- * generated prompts), answer analysis on Haiku 5.5 (a classification task, 20× cheaper than Sonnet).
+ * The model per task is chosen on /providers (app_settings), else by env, else the default below.
  */
 
-export const INTERNAL_MODEL = process.env.INTERNAL_LLM_MODEL ?? "claude-sonnet-5-5";
-export const ANALYZER_MODEL = process.env.ANALYZER_LLM_MODEL ?? "claude-haiku-5-5";
+/** Internal LLM tasks and their defaults. */
+export const LLM_TASKS = {
+  generation: {
+    label: "Discovery and prompt generation",
+    detail: "Reads the crawled site into a profile and writes the questions to measure. Runs when a domain is added or regenerated.",
+    env: "INTERNAL_LLM_MODEL",
+    // Opus costs 2× for no visible gain in the generated prompts.
+    default: "claude-sonnet-5-5",
+  },
+  analysis: {
+    label: "Answer analysis",
+    detail: "Grades every answer that names the brand: sentiment, accuracy against the site, recommended or not. Batched (50 % off).",
+    env: "ANALYZER_LLM_MODEL",
+    // Haiku 5.5 was checked on 40 production answers (2026-10-12): it disagreed with Sonnet 3–4× more than Sonnet
+    // with itself (sentiment Δ 0.12 vs 0.03, recommended 34/40 vs 40/40). Sonnet costs ~$2/month here.
+    default: "claude-sonnet-5-5",
+  },
+  recommendations: {
+    label: "Recommendations",
+    detail: "Turns the diagnostics into the action plan on the domain page. One call per refresh.",
+    env: "RECOMMENDATIONS_LLM_MODEL",
+    default: "claude-sonnet-5-5",
+  },
+} as const;
+export type LlmTask = keyof typeof LLM_TASKS;
+
+/** Current Claude models offered for internal tasks (Anthropic model overview), most capable first. */
+export const LLM_MODEL_OPTIONS = [
+  { id: "claude-fable-5-1", label: "Claude Fable 5.1", note: "most capable, slowest" },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "strong reasoning" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", note: "balanced" },
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", note: "fastest, cheapest" },
+] as const;
+
+const settingKey = (task: LlmTask) => `llm.model.${task}`;
+const isOffered = (m: unknown): m is string => LLM_MODEL_OPTIONS.some((o) => o.id === m);
+
+/** Model for a task: the admin's choice, else the env override, else the default. */
+export async function llmModel(task: LlmTask): Promise<string> {
+  try {
+    const [row] = await getDb().select({ value: appSettings.value }).from(appSettings).where(eq(appSettings.key, settingKey(task)));
+    if (isOffered(row?.value)) return row.value;
+  } catch {
+    // No DB (smoke tests) — fall through to env/default.
+  }
+  return process.env[LLM_TASKS[task].env] || LLM_TASKS[task].default;
+}
+
+export async function setLlmModel(task: LlmTask, model: string, actor: string) {
+  if (!(task in LLM_TASKS) || !isOffered(model)) throw new Error(`Unknown model ${model} for ${task}`);
+  await getDb()
+    .insert(appSettings)
+    .values({ key: settingKey(task), value: model, updatedBy: actor })
+    .onConflictDoUpdate({ target: appSettings.key, set: { value: model, updatedBy: actor, updatedAt: new Date() } });
+}
+
+/** Per-MTok price of a model for display (input, output). */
+export function llmPrice(model: string) {
+  const p = INTERNAL_PRICES[model];
+  return p ? { input: p.input, output: p.output } : null;
+}
 
 /**
  * $ per MTok. `cacheRead`: prompt-cache hits; writes cost 1.25× input (5-minute cache).
@@ -133,7 +192,7 @@ export async function generateStructured<T extends z.ZodType>(args: {
   skipUsage?: boolean;
   mode?: StructuredMode;
 }): Promise<z.infer<T>> {
-  const model = args.model ?? INTERNAL_MODEL;
+  const model = args.model ?? (await llmModel("generation"));
   if (override) {
     const result = args.schema.parse(await override({ purpose: args.purpose, system: args.system, user: args.user }));
     const approxTokens = (text: string) => Math.ceil(text.length / 4);
