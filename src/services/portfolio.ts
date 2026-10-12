@@ -6,6 +6,7 @@ import type { TopicCluster } from "@/core/portfolio/clusters";
 import { allocatePrompts } from "@/core/portfolio/clusters";
 import { LlmPromptSet, PROMPT_SYSTEM, promptGenerationUser } from "@/core/portfolio/generate-llm";
 import { type PoolPrompt, selectActivePortfolio } from "@/core/portfolio/selection";
+import { isoLanguage } from "@/core/language";
 import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
@@ -138,6 +139,7 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
       if (!validKeys.has(p.clusterKey)) continue;
       const spec = PromptVersionSpec.safeParse({
         ...p,
+        language: isoLanguage(p.language) ?? p.language,
         country: p.country.toUpperCase().slice(0, 2),
         location: p.location || undefined,
         persona: p.persona || undefined,

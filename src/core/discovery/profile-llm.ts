@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BusinessModel, DomainProfile, IntentType } from "../domain-profile";
+import { isoLanguage } from "../language";
 import type { CrawlDigest } from "./crawl";
 
 /**
@@ -99,7 +100,7 @@ export function toDomainProfile(llm: LlmProfile, digest: CrawlDigest): DomainPro
   const markets = llm.markets.length
     ? llm.markets.map((m) => ({
         country: m.country.toUpperCase().slice(0, 2),
-        language: m.language.toLowerCase(),
+        language: isoLanguage(m.language) ?? m.language.toLowerCase(),
         locations: m.locations,
         importance: c01(m.importance),
       }))
