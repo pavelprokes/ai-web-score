@@ -317,4 +317,18 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       expect(item.steps.length).toBeGreaterThan(0);
     }
   }, T);
+
+  it("5) re-discovery keeps a monitored domain monitored", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { startDiscovery } = await import("@/services/domains");
+    await startDiscovery(domainId, "MANUAL");
+    await drain();
+    const db = getDb();
+    const [domain] = await db.select().from(s.domains).where(eq(s.domains.id, domainId));
+    // Only ACTIVE domains are planned by the scheduler; READY here would silently stop the monitoring.
+    expect(domain!.status).toBe("ACTIVE");
+    const profiles = await db.select().from(s.domainProfiles).where(eq(s.domainProfiles.domainId, domainId));
+    expect(profiles.length).toBe(2);
+  }, T);
 });

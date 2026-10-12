@@ -53,6 +53,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #33 | Internal model per task selectable in the UI (/providers); answer analysis back on Sonnet 5.5 after the Haiku check |
 | #34 | Score history backfill from one load; missing days of a version's history are filled on the next compute |
 | #35 | Domain page "Where AI looks": sites cited for unbranded questions, share, assistants, how often the brand is named alongside |
+| #36 | Re-discovery no longer drops a monitored domain to READY (3 domains were unscheduled since 2026-10-11; migration 0009 restores them); portfolio optimisation runs daily per ACTIVE domain and right after new prompts are approved |
 | #30 | Scoring `geo-v2` (all domains switched; history backfills on first compute): branded prompts out of visibility, recommendation rate over all answers, active topics only, providers phase in over 7 days, "Not enough data" floor; UI renames, brand block, provider-mix marker |
 
 ## Next task
@@ -72,11 +73,12 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
   on Sonnet 5.5 (~$2/month).
 - Internal models are chosen on /providers → Internal AI models (app_settings; overrides the env vars).
 
-### 2. PR 3 (P1)
+### 2. PR 3 (P1) — done or dropped
 
-- Profile fix: the photographer profile lists se-vezmou.cz among owned domains, and generic phrases
-  ("Svatební fotograf Čechy", "Vzdělání budoucnosti") among aliases. Fix, then re-extract stored answers
-  under a new `EXTRACTOR_VERSION` (readers already filter by version).
+- Profile fix: dropped after checking production. se-vezmou.cz in the photographer's owned domains made 0 of 296
+  citations count (all also cite the photographer's own domain); of the mentions without the domain or the name,
+  1/289 (photographer) and 149/181 (vzdelanibudoucnosti.cz) were sampled — all genuine brand mentions, not the
+  generic alias phrase. Revisit only if a profile lists another monitored domain that answers cite on its own.
 - Sources table: done (#35).
 
 ### 3. After ≥7 days of ChatGPT / AI Mode data (~2026-10-19)

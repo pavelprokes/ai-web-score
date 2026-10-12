@@ -331,6 +331,10 @@ export async function decideProposals(domainId: string, ids: string[] | "ALL", a
       .set({ status: approve ? "APPROVED" : "REJECTED", decidedAt: now, decidedBy })
       .where(eq(portfolioProposals.id, p.id));
   }
+  // Approved new prompts are candidates only; let the selection rotate them in now rather than tomorrow.
+  if (approve && list.some((p) => p.status === "PROPOSED" && p.kind === "ADD_PROMPT")) {
+    await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
+  }
   return list.length;
 }
 

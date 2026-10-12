@@ -169,6 +169,10 @@ async function tick() {
   // Daily maintenance (dedupe key per day).
   const day = now.toISOString().slice(0, 10);
   await enqueue("optimizer.run", {}, { dedupeKey: `optimizer:${day}`, oncePerKey: true });
+  // Portfolio rotation (CORE kept, ROTATING slots turn over, new candidates come in) — proposals unless the domain
+  // auto-approves. Without it the active set only changed when someone pressed "Optimise".
+  const monitored = await db.select({ id: domains.id }).from(domains).where(eq(domains.status, "ACTIVE"));
+  for (const d of monitored) await enqueue("portfolio.optimize", { domainId: d.id }, { dedupeKey: `optimize:${d.id}:${day}`, oncePerKey: true });
   if (now.getUTCHours() === 3) {
     await purgeOldJobs();
     // Optional raw-evidence retention (Supabase free tier = 500 MB). Answers and signals are kept.
