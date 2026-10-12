@@ -470,6 +470,21 @@ form.inline {
   color: var(--text);
   font: inherit;
 }
+.balance-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.balance-form input {
+  width: 9rem;
+  min-height: 36px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
 .field input[aria-invalid="true"] {
   border-color: var(--critical);
   border-width: 2px;

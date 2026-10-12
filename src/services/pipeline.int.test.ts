@@ -577,4 +577,40 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(submitted[0]!.params.tools[0]!.user_location).toBeUndefined();
     expect(rows["batch-country"]!.status).toBe("SUCCEEDED");
   });
+
+  it("reports account spend and balance: live for DataForSEO, estimated from an entered amount otherwise", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { providerAccounts, setAccountBalance, InvalidBalanceError } = await import("@/services/accounts");
+    const db = getDb();
+    const saved = { login: process.env.DATAFORSEO_LOGIN, password: process.env.DATAFORSEO_PASSWORD, pplx: process.env.PERPLEXITY_API_KEY };
+    Object.assign(process.env, { DATAFORSEO_LOGIN: "l", DATAFORSEO_PASSWORD: "p", PERPLEXITY_API_KEY: "k" });
+    const realFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [{ id: "t", status_code: 20000, status_message: "Ok.", result: [{ money: { total: 50, balance: 3.5 } }] }] }));
+    }) as typeof fetch;
+    try {
+      await expect(setAccountBalance("perplexity", -1, null)).rejects.toBeInstanceOf(InvalidBalanceError);
+      await expect(setAccountBalance("dataforseo", 10, null)).rejects.toBeInstanceOf(InvalidBalanceError);
+      await setAccountBalance("perplexity", 20, "admin@example.test");
+      // Spend after the entry lowers the estimate.
+      const [m] = await db.select().from(s.measurements).where(eq(s.measurements.providerId, "perplexity-api")).limit(1);
+      await db.update(s.measurements).set({ totalCostUsd: 1.25, scheduledAt: new Date(Date.now() + 1000) }).where(eq(s.measurements.id, m!.id));
+
+      const accounts = Object.fromEntries((await providerAccounts(new Date(Date.now() + 2000))).map((a) => [a.id, a]));
+      expect(urls).toEqual(["https://api.dataforseo.com/v3/appendix/user_data"]);
+      expect(accounts.dataforseo).toMatchObject({ balanceSource: "live", balanceUsd: 3.5, depositedUsd: 50, low: true });
+      expect(accounts.perplexity).toMatchObject({ balanceSource: "estimated", enteredUsd: 20, low: false });
+      expect(accounts.perplexity!.balanceUsd).toBeCloseTo(20 - 1.25, 6);
+      expect(accounts.perplexity!.spentMonthUsd).toBeGreaterThanOrEqual(1.25);
+    } finally {
+      globalThis.fetch = realFetch;
+      for (const [k, v] of [["DATAFORSEO_LOGIN", saved.login], ["DATAFORSEO_PASSWORD", saved.password], ["PERPLEXITY_API_KEY", saved.pplx]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
 });

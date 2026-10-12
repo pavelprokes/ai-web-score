@@ -446,6 +446,22 @@ export const recommendations = pgTable(
 ).enableRLS();
 
 /** Anthropic Message Batches used by the answer analyzer (50 % cheaper than sync). */
+/**
+ * Account balances the admin copied from a provider console (Anthropic, Perplexity… have no balance API).
+ * The current balance is estimated as the latest entry minus the spend tracked since it was entered.
+ */
+export const providerBalances = pgTable(
+  "provider_balances",
+  {
+    id: id(),
+    account: text("account").notNull(),
+    amountUsd: doublePrecision("amount_usd").notNull(),
+    setBy: text("set_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("provider_balances_account").on(t.account, t.createdAt)],
+).enableRLS();
+
 export const llmBatches = pgTable("llm_batches", {
   id: text("id").primaryKey(),
   purpose: text("purpose").notNull(),

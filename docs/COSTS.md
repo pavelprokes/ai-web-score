@@ -19,6 +19,14 @@ equivalence to the more expensive reference.
 Discovery + prompt design (one-off per domain, Opus 5.5): ≈ $0.2–0.7.
 Recommendations (on demand, Sonnet 5.5, effort low, compact input ≤ 20 findings): ≈ $0.01–0.05 per run; the diagnostics are free.
 
+## Account balances (/providers → Accounts & balance)
+
+Spend per account is the sum of tracked measurement costs (provider-reported where available) plus internal
+LLM usage. DataForSEO's balance is read live from `GET /v3/appendix/user_data` (`money.balance`, free).
+Anthropic and Perplexity expose no balance API: the admin enters the balance from their billing page and the
+remainder is estimated as that amount minus the spend tracked since. Accounts under `LOW_BALANCE_USD`
+(default $5) are flagged. API: `GET/POST /api/accounts`.
+
 ## Batch / queue discounts (and what they do not discount)
 
 | Provider | Asynchronous option | Discount | Applies to search fee? | Used |
