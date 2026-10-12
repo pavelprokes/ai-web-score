@@ -57,6 +57,13 @@
       "when": 1791836230791,
       "tag": "0007_scoring_geo_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791837962649,
+      "tag": "0008_app_settings",
+      "breakpoints": true
     }
   ]
 }

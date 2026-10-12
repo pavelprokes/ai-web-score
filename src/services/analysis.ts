@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { llmBatches, measurementSignals, measurements, promptVersions } from "@/db/schema";
 import { ANALYZER_SYSTEM, analyzerContext, analyzerQuestion, analyzerUserPrompt, carryJudgement, LlmJudgement, toJudgementSignals } from "@/core/signals/analyze-llm";
 import type { DeterministicSignals, RawSignals } from "@/core/signals/extract";
-import { ANALYZER_MODEL, anthropicClient, generateStructured, llmOverrideActive, noThinking, recordLlmUsage } from "@/lib/llm";
+import { anthropicClient, generateStructured, llmModel, llmOverrideActive, noThinking, recordLlmUsage } from "@/lib/llm";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
 import { latestProfile } from "./discovery";
 
@@ -54,13 +54,13 @@ function groupByOutcome(items: Item[]): Map<Item, Item[]> {
 
 type Profile = Awaited<ReturnType<typeof latestProfile>>;
 
-async function buildRequest(item: Item, cacheContext: boolean, profiles: Map<string, Profile>) {
+async function buildRequest(item: Item, cacheContext: boolean, profiles: Map<string, Profile>, model: string) {
   if (!profiles.has(item.m.domainId)) profiles.set(item.m.domainId, await latestProfile(item.m.domainId));
   const latest = profiles.get(item.m.domainId);
   if (!latest) return null;
   const answer = { promptText: item.v.text, answerText: item.m.answerText ?? "" };
   return {
-    model: ANALYZER_MODEL,
+    model,
     max_tokens: 2000,
     ...(cacheContext
       ? {
@@ -74,7 +74,7 @@ async function buildRequest(item: Item, cacheContext: boolean, profiles: Map<str
           system: ANALYZER_SYSTEM,
           messages: [{ role: "user" as const, content: analyzerUserPrompt({ profile: latest.profile, ...answer }) }],
         }),
-    ...noThinking(ANALYZER_MODEL),
+    ...noThinking(model),
     output_config: { effort: "low" as const, format: zodOutputFormat(LlmJudgement) },
   };
 }
@@ -142,7 +142,7 @@ export async function submitAnalysis() {
           user: analyzerUserPrompt({ profile: latest.profile, promptText: rep.v.text, answerText: rep.m.answerText ?? "" }),
           purpose: "analysis",
           domainId: rep.m.domainId,
-          model: ANALYZER_MODEL,
+          model: await llmModel("analysis"),
           effort: "low",
           maxTokens: 2000,
           classification: true,
@@ -166,8 +166,9 @@ export async function submitAnalysis() {
   const perDomain = new Map<string, number>();
   for (const [rep] of reps) perDomain.set(rep.m.domainId, (perDomain.get(rep.m.domainId) ?? 0) + 1);
   const profiles = new Map<string, Profile>(); // one profile query per domain, not per request
+  const model = await llmModel("analysis");
   for (const [rep, fs] of reps) {
-    const params = await buildRequest(rep, (perDomain.get(rep.m.domainId) ?? 0) > 1, profiles);
+    const params = await buildRequest(rep, (perDomain.get(rep.m.domainId) ?? 0) > 1, profiles, model);
     if (!params) continue;
     requests.push({ custom_id: rep.s.measurementId, params });
     followers[rep.s.measurementId] = fs.map((f) => f.s.measurementId);
@@ -177,7 +178,7 @@ export async function submitAnalysis() {
   await db.insert(llmBatches).values({
     id: batch.id,
     purpose: "analysis",
-    model: ANALYZER_MODEL,
+    model,
     items: { representatives: requests.map((r) => r.custom_id), followers },
   });
   await setStatus([...requests.map((r) => r.custom_id), ...Object.values(followers).flat()], "SUBMITTED");

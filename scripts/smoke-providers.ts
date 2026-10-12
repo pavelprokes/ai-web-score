@@ -13,7 +13,10 @@ import { listProviders, missingEnv } from "@/core/measurement/providers";
 import type { ProviderAdapter } from "@/core/measurement/provider";
 import { computeCost, selectPrice, type PriceEntry } from "@/core/pricing/cost";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { anthropicClient, generateStructured, INTERNAL_MODEL, ANALYZER_MODEL } from "@/lib/llm";
+import { anthropicClient, generateStructured, llmModel } from "@/lib/llm";
+
+const INTERNAL_MODEL = await llmModel("generation");
+const ANALYZER_MODEL = await llmModel("analysis");
 import { LlmPromptSet } from "@/core/portfolio/generate-llm";
 import { LlmJudgement } from "@/core/signals/analyze-llm";
 

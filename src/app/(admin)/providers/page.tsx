@@ -6,6 +6,8 @@ import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
 import { providerAccounts } from "@/services/accounts";
 import { Accounts } from "@/components/Accounts";
+import { InternalModels } from "@/components/InternalModels";
+import { LLM_TASKS, llmModel, type LlmTask } from "@/lib/llm";
 import { MetricInfo } from "@/components/MetricInfo";
 import { SubmitButton } from "@/components/SubmitButton";
 import { num, pct, usd } from "@/components/format";
@@ -40,7 +42,13 @@ const DECISION: Record<string, { tone: Tone; label: string }> = {
 
 export default async function ProvidersPage({ searchParams }: { searchParams: Promise<{ done?: string; error?: string }> }) {
   const { done, error } = await searchParams;
-  const [data, errors, accounts] = await Promise.all([providersOverview(), recentProviderErrors(), providerAccounts()]);
+  const tasks = Object.keys(LLM_TASKS) as LlmTask[];
+  const [data, errors, accounts, models] = await Promise.all([
+    providersOverview(),
+    recentProviderErrors(),
+    providerAccounts(),
+    Promise.all(tasks.map(llmModel)),
+  ]);
   const now = new Date();
   const low = accounts.filter((a) => a.low).map((a) => `${a.label} balance is low (${usd(a.balanceUsd)}).`);
   const rows = data.providers;
@@ -114,6 +122,8 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       </Section>
 
       <Configurations rows={rows.filter((p) => p.enabled || p.configurations.some((c) => c.calibration.length > 0))} />
+
+      <InternalModels current={Object.fromEntries(tasks.map((t, i) => [t, models[i]!])) as Record<LlmTask, string>} />
 
       {data.internalLlmCostThisMonth.length > 0 && (
         <Section title="Internal analysis cost this month" id="llm-heading">
