@@ -79,7 +79,14 @@ export async function runDiscovery(domainId: string, trigger: string) {
 
     await db
       .update(domains)
-      .set({ brandName: domain.brandName ?? profile.brandName, lastDiscoveryAt: new Date(), status: "READY", lastError: null })
+      .set({
+        brandName: domain.brandName ?? profile.brandName,
+        lastDiscoveryAt: new Date(),
+        // Re-discovery of a monitored domain keeps it monitored: only the scheduler plans ACTIVE domains, and the
+        // prompt generation that follows activates only a domain without prompts.
+        status: sql`case when exists (select 1 from ${prompts} where ${prompts.domainId} = ${domainId} and ${prompts.status} = 'ACTIVE') then 'ACTIVE' else 'READY' end`,
+        lastError: null,
+      })
       .where(eq(domains.id, domainId));
     await db.update(runs).set({ status: "SUCCEEDED", finishedAt: new Date(), plan: { version, sizing } }).where(eq(runs.id, run!.id));
 

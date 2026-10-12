@@ -64,6 +64,13 @@
       "when": 1791837962649,
       "tag": "0008_app_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791838675783,
+      "tag": "0009_reactivate_rediscovered_domains",
+      "breakpoints": true
     }
   ]
 }
