@@ -80,6 +80,7 @@ async function recoverMeasurementRun(runId: string, now: Date): Promise<boolean>
       succeeded: sql<number>`count(*) filter (where ${measurements.status} = 'SUCCEEDED')::int`,
       failed: sql<number>`count(*) filter (where ${measurements.status} = 'FAILED')::int`,
       scheduled: sql<number>`count(*) filter (where ${measurements.status} = 'SCHEDULED')::int`,
+      cancelled: sql<number>`count(*) filter (where ${measurements.status} = 'CANCELLED')::int`,
     })
     .from(measurements)
     .where(eq(measurements.runId, runId));
@@ -87,14 +88,17 @@ async function recoverMeasurementRun(runId: string, now: Date): Promise<boolean>
   const succeeded = Number(counts?.succeeded ?? 0);
   const failed = Number(counts?.failed ?? 0);
   const scheduled = Number(counts?.scheduled ?? 0);
+  // e.g. measurements of a provider disabled after planning
+  const cancelled = Number(counts?.cancelled ?? 0);
 
   if (total === 0) {
     // Planning died before creating any measurement.
     await db.update(runs).set({ status: "FAILED", finishedAt: now, error: "Interrupted while planning" }).where(eq(runs.id, runId));
     return true;
   }
-  if (succeeded + failed >= total) {
-    const status = failed > 0 && succeeded === 0 ? "FAILED" : failed > 0 ? "PARTIAL" : "SUCCEEDED";
+  if (succeeded + failed + cancelled >= total) {
+    const status =
+      succeeded === 0 ? (failed > 0 ? "FAILED" : "CANCELLED") : failed + cancelled > 0 ? "PARTIAL" : "SUCCEEDED";
     await db
       .update(runs)
       .set({ status, finishedAt: now, plannedCount: total, completedCount: succeeded, failedCount: failed })
