@@ -16,6 +16,7 @@ import { actionBlockedReason } from "@/services/action-guards";
 import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/services/registry";
 import { promoteConfiguration } from "@/services/optimizer";
 import { RecommendationNotFound, setRecommendationStatus } from "@/services/recommendations";
+import { InvalidBalanceError, setAccountBalance } from "@/services/accounts";
 
 export interface AddDomainState {
   error?: string;
@@ -185,4 +186,22 @@ export async function recommendationAction(formData: FormData) {
   }
   revalidatePath(`/domains/${domainId}`);
   redirect(`/domains/${domainId}#recommendations-heading`);
+}
+
+/** Saves the balance the admin read in a provider's billing page (accounts without a balance API). */
+export async function balanceAction(formData: FormData) {
+  const actor = await requireAdminAction();
+  const account = String(formData.get("account"));
+  const amount = Number(String(formData.get("amountUsd") ?? "").replace(",", ".").replace(/[$\s]/g, ""));
+  let message = "Balance saved.";
+  let failed = false;
+  try {
+    await setAccountBalance(account, amount, actor);
+  } catch (e) {
+    if (!(e instanceof InvalidBalanceError)) throw e;
+    message = e.message;
+    failed = true;
+  }
+  revalidatePath("/providers");
+  redirect(`/providers?${failed ? "error" : "done"}=${encodeURIComponent(message)}#accounts-heading`);
 }

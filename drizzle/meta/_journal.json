@@ -36,6 +36,13 @@
       "when": 1791368472794,
       "tag": "0004_recommendations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791807372026,
+      "tag": "0005_provider_balances",
+      "breakpoints": true
     }
   ]
 }

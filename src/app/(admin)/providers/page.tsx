@@ -4,6 +4,8 @@ import { providerAction } from "@/app/(admin)/actions";
 import { Flash } from "@/components/Flash";
 import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
+import { providerAccounts } from "@/services/accounts";
+import { Accounts } from "@/components/Accounts";
 import { MetricInfo } from "@/components/MetricInfo";
 import { SubmitButton } from "@/components/SubmitButton";
 import { num, pct, usd } from "@/components/format";
@@ -38,7 +40,9 @@ const DECISION: Record<string, { tone: Tone; label: string }> = {
 
 export default async function ProvidersPage({ searchParams }: { searchParams: Promise<{ done?: string; error?: string }> }) {
   const { done, error } = await searchParams;
-  const [data, errors] = await Promise.all([providersOverview(), recentProviderErrors()]);
+  const [data, errors, accounts] = await Promise.all([providersOverview(), recentProviderErrors(), providerAccounts()]);
+  const now = new Date();
+  const low = accounts.filter((a) => a.low).map((a) => `${a.label} balance is low (${usd(a.balanceUsd)}).`);
   const rows = data.providers;
   const month = rows.reduce((a, p) => a + (p.cost.month?.cost ?? 0), 0);
   const llm = data.internalLlmCostThisMonth.reduce((a, x) => a + x.cost, 0);
@@ -55,7 +59,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
-      <Flash message={done} error={error ?? (data.warnings.length ? data.warnings.join(" ") : undefined)} />
+      <Flash message={done} error={error ?? ([...low, ...data.warnings].join(" ") || undefined)} />
 
       <dl className="tiles" aria-label="Summary">
         <StatTile
@@ -67,7 +71,9 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
         <StatTile label={<>Analysis this month <MetricInfo id="analysis-cost" /></>} value={usd(llm)} detail="Discovery, prompt design, answer analysis" />
       </dl>
 
-      <ProviderErrors errors={errors} now={new Date()} />
+      <ProviderErrors errors={errors} now={now} />
+
+      <Accounts accounts={accounts} now={now} />
 
       <Section title="Providers" id="providers-heading">
         <TableScroll label="Providers (scrollable)">

@@ -80,6 +80,13 @@ async function dfs<R>(path: string, body?: unknown, timeoutMs = 60_000): Promise
   return env;
 }
 
+/** Account money (USD) from /v3/appendix/user_data: what is left and the total ever deposited. Free call. */
+export async function dataForSeoBalance(): Promise<{ balanceUsd: number | null; depositedUsd: number | null }> {
+  const env = await dfs<{ money?: { balance?: number | null; total?: number | null } | null }>("/v3/appendix/user_data", undefined, 10_000);
+  const money = env.tasks[0]?.result?.[0]?.money;
+  return { balanceUsd: money?.balance ?? null, depositedUsd: money?.total ?? null };
+}
+
 /** `%##` sequences are URL-decoded by DataForSEO; escape a literal percent sign. */
 function keyword(text: string, max: number) {
   return text.replace(/%/g, "%25").slice(0, max);
