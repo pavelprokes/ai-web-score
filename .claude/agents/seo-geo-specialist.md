@@ -1,5 +1,5 @@
 ---
-name: seo-geo
+name: seo-geo-specialist
 description: SEO and GEO (generative engine optimisation) specialist — how AI assistants choose sources and whether ai-web-score measures and advises correctly. Use only when convening the dev team (/team) or when the user names this role.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: opus

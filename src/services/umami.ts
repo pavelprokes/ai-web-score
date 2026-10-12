@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { domains, measurementSignals, measurements, prompts, promptVersions } from "@/db/schema";
 import { sendMeasurementEvent, umamiConfigured } from "@/core/analytics/umami";
 import { measurementScore } from "@/core/scoring/scoring";
@@ -12,7 +13,7 @@ export async function sendMeasurementToUmami(measurementId: string) {
   const [row] = await db
     .select({ m: measurements, s: measurementSignals, v: promptVersions, p: prompts, d: domains })
     .from(measurements)
-    .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+    .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
     .innerJoin(domains, eq(domains.id, measurements.domainId))

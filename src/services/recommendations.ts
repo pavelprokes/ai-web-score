@@ -1,5 +1,6 @@
 import { and, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import {
   domainProfiles,
   domains,
@@ -146,7 +147,7 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
       searchQueries: measurements.searchQueries,
     })
     .from(measurements)
-    .innerJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+    .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
     .where(

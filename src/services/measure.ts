@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { cellStates, domains, measurementSignals, measurements, promptVersions, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
 import { ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
@@ -303,7 +304,7 @@ async function lastJudgement(domainId: string, promptVersionId: string, configur
   const [row] = await getDb()
     .select({ id: measurements.id, finishedAt: measurements.finishedAt, signals: measurementSignals.signals })
     .from(measurementSignals)
-    .innerJoin(measurements, eq(measurements.id, measurementSignals.measurementId))
+    .innerJoin(measurements, currentSignals)
     .where(
       and(
         eq(measurements.domainId, domainId),

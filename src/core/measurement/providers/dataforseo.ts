@@ -291,7 +291,9 @@ function createAdapter(args: {
             return {
               measurementId: p.measurementId,
               status: "SUCCEEDED",
-              result: { answer: parse(task.result[0], p.configuration.model), raw: task, reportedCostUsd: task.cost },
+              // The task is charged at task_post; task_get reports 0 for some surfaces (chat_gpt), which would
+              // record a free answer — fall back to the price book then.
+              result: { answer: parse(task.result[0], p.configuration.model), raw: task, reportedCostUsd: task.cost || undefined },
             };
           }
           if (task.status_code === 40601 || task.status_code === 40602 || task.status_code === 20100) {

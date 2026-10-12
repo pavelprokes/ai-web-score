@@ -11,6 +11,8 @@ import type { PortfolioSizing } from "./sizing";
  *   for a full rotation period and carry little unique information yield their slot
  *   to the least-recently-measured candidate of the same cluster.
  * - EXPLORATION slots go to the newest candidates (new products, seasonality, …).
+ * - Only prompts of the given (active) clusters are eligible: a cluster dropped by re-discovery takes its
+ *   prompts with it, CORE included, so they leave the measured set instead of lingering at a default weight.
  */
 
 export interface PoolPrompt {
@@ -48,17 +50,18 @@ export function selectActivePortfolio(args: {
   rotationPeriodDays?: number;
   redundancyThreshold?: number;
 }): SelectionResult {
-  const { pool, clusters, sizing, now } = args;
+  const { clusters, sizing, now } = args;
   const rotationMs = (args.rotationPeriodDays ?? 28) * DAY;
   const redundancy = args.redundancyThreshold ?? 0.15;
   const clusterWeight = new Map(clusters.map((c) => [c.key, c.weight]));
-  const score = (p: PoolPrompt) => p.weight * (clusterWeight.get(p.clusterKey) ?? 0.3);
+  const score = (p: PoolPrompt) => p.weight * clusterWeight.get(p.clusterKey)!;
   const chosen = new Map<string, PromptRole>();
+  const eligible = args.pool.filter((p) => clusterWeight.has(p.clusterKey));
 
   // 1) Core: keep existing, then top up with the strongest commercial prompts, one per cluster.
-  for (const p of pool) if (p.active && p.role === "CORE") chosen.set(p.promptId, "CORE");
-  const coreClusters = new Set(pool.filter((p) => chosen.has(p.promptId)).map((p) => p.clusterKey));
-  const coreCandidates = pool
+  for (const p of eligible) if (p.active && p.role === "CORE") chosen.set(p.promptId, "CORE");
+  const coreClusters = new Set(eligible.filter((p) => chosen.has(p.promptId)).map((p) => p.clusterKey));
+  const coreCandidates = eligible
     .filter((p) => !chosen.has(p.promptId) && !p.exploratory && CORE_CATEGORIES.includes(p.category))
     .sort((a, b) => score(b) - score(a));
   for (const p of coreCandidates) {
@@ -77,7 +80,7 @@ export function selectActivePortfolio(args: {
   const rotatingTotal = Math.max(0, sizing.recommendedPromptCount - count(chosen, "CORE") - sizing.explorationPromptCount);
   const allocation = allocatePrompts(clusters, rotatingTotal);
   for (const [clusterKey, slots] of allocation) {
-    const inCluster = pool.filter((p) => p.clusterKey === clusterKey && !chosen.has(p.promptId) && !p.exploratory);
+    const inCluster = eligible.filter((p) => p.clusterKey === clusterKey && !chosen.has(p.promptId) && !p.exploratory);
     const keep = inCluster
       .filter((p) => p.active && p.role === "ROTATING")
       .filter((p) => {
@@ -97,19 +100,19 @@ export function selectActivePortfolio(args: {
         return la - lb || score(b) - score(a);
       });
     for (const p of fill) {
-      if (count(chosen, "ROTATING", clusterKey, pool) >= slots) break;
+      if (count(chosen, "ROTATING", clusterKey, eligible) >= slots) break;
       chosen.set(p.promptId, "ROTATING");
     }
   }
 
   // 3) Exploration: newest exploratory prompts.
-  const exploration = pool
+  const exploration = eligible
     .filter((p) => p.exploratory && !chosen.has(p.promptId))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, sizing.explorationPromptCount);
   for (const p of exploration) chosen.set(p.promptId, "EXPLORATION");
 
-  const wasActive = new Set(pool.filter((p) => p.active).map((p) => p.promptId));
+  const wasActive = new Set(args.pool.filter((p) => p.active).map((p) => p.promptId));
   return {
     active: [...chosen.entries()].map(([promptId, role]) => ({ promptId, role })),
     activated: [...chosen.keys()].filter((id) => !wasActive.has(id)),

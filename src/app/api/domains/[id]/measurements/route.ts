@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
+import { currentSignals } from "@/services/signals";
 import { measurementSignals, measurements, promptVersions } from "@/db/schema";
 import { adminRoute } from "@/lib/api";
 
@@ -14,7 +15,7 @@ export const GET = adminRoute<{ id: string }>(async (req, { params }) => {
   const rows = await getDb()
     .select({ m: measurements, s: measurementSignals.signals, prompt: promptVersions.text })
     .from(measurements)
-    .leftJoin(measurementSignals, eq(measurementSignals.measurementId, measurements.id))
+    .leftJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .where(provider ? and(eq(measurements.domainId, params.id), eq(measurements.providerId, provider)) : eq(measurements.domainId, params.id))
     .orderBy(desc(measurements.scheduledAt))

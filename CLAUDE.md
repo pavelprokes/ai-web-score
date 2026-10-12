@@ -75,7 +75,7 @@ legal exposure — not for small fixes or questions. Roles analyse only; the mai
 | Owner's advocate | `owner` | Business goals, budget, ROI, priorities — recommends; Pavel decides disputes |
 | Principal software engineer | `principal-engineer` | Architecture, data model, reliability, cost per call, root cause |
 | Senior product manager | `product-manager` | Problem → outcome → metric, scope, roadmap, competition, acceptance criteria |
-| SEO & GEO specialist | `seo-geo` | How AI assistants pick sources, measurement validity, quality of recommendations |
+| SEO & GEO specialist | `seo-geo-specialist` | How AI assistants pick sources, measurement validity, quality of recommendations |
 | Lawyer (CZ/EU) | `lawyer` | GDPR, provider terms of service, marketing claims, licences |
 | Online marketing & PPC | `marketing-ppc` | Positioning, acquisition, pricing, perceived value |
 | UX/UI designer | `ux-ui-designer` | Information hierarchy, clarity of metrics, WCAG 2.2 AA |
