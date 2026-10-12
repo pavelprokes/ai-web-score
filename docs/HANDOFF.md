@@ -49,25 +49,13 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 ## Next task: validate the research on production data, then plan changes
 
-### 1. Get read access to production (blocked — waiting for the owner)
+### 1. Read access to production (done 2026-10-12)
 
-Two routes; try both in the new session:
-
-- **A. Read-only Postgres.** Role `claude_readonly` exists (SELECT only, read-only transactions, RLS select
-  policies). Needed in the session environment:
-  - `PROD_DATABASE_URL` with user **`claude_readonly.cneyobciexhfibmmlnde`** — as of 2026-10-12 it was set
-    with the admin user `postgres.…`; do **not** connect with that, ask the owner to switch it.
-  - Network access → Allowed domains: `aws-0-eu-west-1.pooler.supabase.com`.
-  - Risk: egress goes through an HTTPS proxy; a Postgres handshake through the tunnel got no reply / a reset.
-    May not work even when allowlisted.
-- **B. HTTPS admin API (more likely to work).** Allowed domains: `ai-web-score.pavelprokes.cz`; env
-  `ADMIN_API_TOKEN` = the app's value from Vercel. Read with `Authorization: Bearer …`:
-  `/api/domains`, `/api/domains/{id}`, `/api/domains/{id}/measurements`, `/api/domains/{id}/history`,
-  `/api/providers`, `/api/costs`, `/api/accounts`, `/api/domains/{id}/recommendations`. Add read-only
-  aggregate endpoints where the validation needs them.
-
-First step in the new session: check which route works (`select current_user,
-current_setting('default_transaction_read_only')` must return `claude_readonly` / `on`, a write must fail).
+Local route works: `PROD_DATABASE_URL` in `.env.local` uses role `claude_readonly` (`current_user` =
+`claude_readonly`, `default_transaction_read_only` = `on`). Query with `pnpm prod:sql "<select>"` — single
+SELECT/WITH only, run in a READ ONLY transaction. The role cannot read schema `drizzle` (migration history).
+The HTTPS admin API (`/api/domains`, `/api/costs`, … with `ADMIN_API_TOKEN`) remains the fallback for cloud
+sessions whose egress cannot reach the pooler.
 
 ### 2. Validate `docs/RESEARCH.md` against our own data
 
