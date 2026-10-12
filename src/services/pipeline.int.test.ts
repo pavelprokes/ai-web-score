@@ -445,6 +445,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const s = await import("@/db/schema");
     const { executeMeasurement, REJECTIONS_TO_STOP } = await import("@/services/measure");
     const { recentProviderErrors } = await import("@/services/errors");
+    await getDb().update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "perplexity-api"));
     const { currentActivity } = await import("@/services/activity");
     const { syncProviderRegistry } = await import("@/services/registry");
     const db = getDb();
@@ -505,6 +506,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
   it("never leaves errored Claude batch results SUBMITTED, and resubmits a rejected location without it", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
+    await getDb().update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "claude-api"));
     const { enqueue } = await import("@/jobs/queue");
     const { processJobs } = await import("@/jobs/runner");
     const { setAnthropicClient } = await import("@/lib/llm");

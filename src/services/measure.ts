@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
-import { cellStates, domains, measurementSignals, measurements, promptVersions, runs } from "@/db/schema";
+import { cellStates, domains, measurementSignals, measurements, promptVersions, providers, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
 import { ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
 import type { MeasurementRequest } from "@/core/measurement/types";
@@ -49,10 +49,26 @@ export function trackedEntities(profile: DomainProfile): { brand: TrackedEntity;
   };
 }
 
+/**
+ * Disabling a provider stops planning, but measurements planned before still sit SCHEDULED. Cancel them
+ * instead of sending them: the admin turned the provider off to stop paying for it.
+ */
+async function cancelIfProviderDisabled(providerId: string, ids: string[]): Promise<boolean> {
+  const db = getDb();
+  const [p] = await db.select({ enabled: providers.enabled }).from(providers).where(eq(providers.id, providerId));
+  if (p?.enabled !== false || ids.length === 0) return false;
+  await db
+    .update(measurements)
+    .set({ status: "CANCELLED", finishedAt: new Date() })
+    .where(and(inArray(measurements.id, ids), eq(measurements.status, "SCHEDULED")));
+  return true;
+}
+
 export async function executeMeasurement(measurementId: string) {
   const db = getDb();
   const [m] = await db.select().from(measurements).where(eq(measurements.id, measurementId));
   if (!m || m.status === "SUCCEEDED" || m.status === "FAILED" || m.status === "CANCELLED") return;
+  if (await cancelIfProviderDisabled(m.providerId, [m.id])) return;
   const adapter = getProvider(m.providerId);
   if (!adapter.execute) throw new Error(`${m.providerId} is not a sync provider`);
   const req = await loadRequest(m);
@@ -75,6 +91,7 @@ export async function submitAsync(runId: string, configurationId: string) {
     .from(measurements)
     .where(and(eq(measurements.runId, runId), eq(measurements.configurationId, configurationId), eq(measurements.status, "SCHEDULED")));
   if (rows.length === 0) return;
+  if (await cancelIfProviderDisabled(rows[0]!.providerId, rows.map((r) => r.id))) return;
   const adapter = getProvider(rows[0]!.providerId);
   const reqs = await Promise.all(rows.map(loadRequest));
   const results = await adapter.submit!(reqs, rows[0]!.configuration as ProviderConfigurationSeed);
