@@ -626,24 +626,31 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
     const before = (await latestProfile(demo!.id))!;
     // Three unbranded answers on an active topic name the same untracked brands.
+    // Three answers to different questions (distinct prompts).
     const rows = await db
-      .select({ id: s.measurementSignals.measurementId, version: s.measurementSignals.extractorVersion, signals: s.measurementSignals.signals })
+      .selectDistinctOn([s.promptVersions.promptId], {
+        id: s.measurementSignals.measurementId,
+        version: s.measurementSignals.extractorVersion,
+        signals: s.measurementSignals.signals,
+      })
       .from(s.measurementSignals)
       .innerJoin(s.measurements, eq(s.measurements.id, s.measurementSignals.measurementId))
       .innerJoin(s.promptVersions, eq(s.promptVersions.id, s.measurements.promptVersionId))
-      .where(and(eq(s.measurements.domainId, demo!.id), ne(s.promptVersions.category, "BRAND_VALIDATION")))
+      .where(and(eq(s.measurements.domainId, demo!.id), ne(s.promptVersions.category, "BRAND_VALIDATION"), eq(s.measurements.status, "SUCCEEDED")))
       .limit(3);
     expect(rows).toHaveLength(3);
     for (const r of rows)
       await db
         .update(s.measurementSignals)
-        .set({ signals: { ...(r.signals as object), untrackedEntities: ["Nova Akademie", "NovaAkademie", "Katalog.cz"] } })
+        .set({ signals: { ...(r.signals as object), untrackedEntities: ["Nova Akademie", "NovaAkademie", "Katalog.cz"], sentiment: 0.4 } })
         .where(and(eq(s.measurementSignals.measurementId, r.id), eq(s.measurementSignals.extractorVersion, r.version)));
+    // The first answer names the rival in its text.
+    await db.update(s.measurements).set({ answerText: "1. Nova Akademie – kurzy programování pro děti." }).where(eq(s.measurements.id, rows[0]!.id));
 
-    expect((await competitorSuggestions(demo!.id)).map((c) => [c.name, c.aliases, c.answers])).toEqual(
+    expect((await competitorSuggestions(demo!.id)).map((c) => [c.name, c.aliases, c.domains, c.answers, c.questions])).toEqual(
       expect.arrayContaining([
-        ["Nova Akademie", ["NovaAkademie"], 3],
-        ["Katalog.cz", [], 3],
+        ["Nova Akademie", ["NovaAkademie"], [], 3, 3],
+        ["Katalog.cz", [], ["katalog.cz"], 3, 3],
       ]),
     );
     await trackCompetitor(demo!.id, "Nova Akademie", ["NovaAkademie"]);
@@ -654,5 +661,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(after.version).toBe(before.version + 1);
     expect(after.profile.competitors.at(-1)).toMatchObject({ name: "Nova Akademie", aliases: ["NovaAkademie"], source: "OBSERVED_IN_ANSWERS" });
     expect(await competitorSuggestions(demo!.id)).toEqual([]);
+
+    // Tracking re-checks the stored answers: the rival now counts in the old answer, the LLM judgement stays.
+    const { processJobs } = await import("@/jobs/runner");
+    await processJobs({ deadlineMs: 600_000, types: ["signals.reextract"] });
+    const [sig] = await db.select().from(s.measurementSignals).where(eq(s.measurementSignals.measurementId, rows[0]!.id));
+    expect(sig!.signals).toMatchObject({ competitorsMentioned: ["Nova Akademie"], sentiment: 0.4 });
+    const pending = await db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), ne(s.jobs.status, "DONE")));
+    expect(pending).toEqual([]);
   });
 });

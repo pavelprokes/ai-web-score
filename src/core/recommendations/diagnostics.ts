@@ -1,6 +1,7 @@
 import type { CrawlDigest } from "../discovery/crawl";
 import type { DomainProfile } from "../domain-profile";
 import type { RawSignals } from "../signals/extract";
+import { suggestCompetitors } from "../competitors";
 
 /**
  * RECOMMENDATIONS — step 1: deterministic diagnostics. Pure functions over what we already know about a
@@ -69,6 +70,8 @@ export interface DiagnosticsInput {
   answers: AnswerObservation[];
   clusters: ClusterInfo[];
   providerLabels?: Record<string, string>;
+  /** Names the admin chose not to track. */
+  ignoredCompetitors?: string[];
 }
 
 // ─── robots.txt ──────────────────────────────────────────────────────────────
@@ -501,10 +504,9 @@ function providerGaps({ answers, providerLabels }: DiagnosticsInput): Finding[] 
     });
 }
 
-function untrackedCompetitors({ answers, profile }: DiagnosticsInput): Finding[] {
-  const tracked = new Set(profile.competitors.map((c) => c.name.toLowerCase()));
-  const names = answers.flatMap((a) => a.signals.untrackedEntities ?? []).filter((n) => !tracked.has(n.toLowerCase()));
-  const top = topCounts(names, 6).filter((n) => n.count >= 3);
+function untrackedCompetitors({ answers, profile, ignoredCompetitors }: DiagnosticsInput): Finding[] {
+  // Same list as "Named by AI, not tracked" on the domain page (spellings merged, ignored names left out).
+  const top = suggestCompetitors(answers, profile, ignoredCompetitors ?? [], 6).map((c) => ({ value: c.name, count: c.answers }));
   if (top.length === 0) return [];
   return [
     {
@@ -517,7 +519,10 @@ function untrackedCompetitors({ answers, profile }: DiagnosticsInput): Finding[]
       metric: "share-of-voice",
       action: {
         title: "Study and track these competitors",
-        steps: ["Add them to the tracked competitors (re-run discovery or edit the profile) so share of voice reflects them.", "Look at what they publish for the topics where they win."],
+        steps: [
+          "Track the real competitors under Domain profile → Named by AI, not tracked (ignore directories and noise), so share among tracked rivals reflects them.",
+          "Look at what they publish for the topics where they win.",
+        ],
         effort: "LOW",
       },
     },

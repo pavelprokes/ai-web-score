@@ -59,6 +59,7 @@ async function collectFindings(domainId: string) {
     answers,
     clusters,
     providerLabels: providerLabels(),
+    ignoredCompetitors: domain.ignoredCompetitors,
   });
   return { domain, profile, answers, clusters, findings };
 }

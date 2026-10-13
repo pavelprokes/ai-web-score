@@ -132,7 +132,7 @@ async function writeWindow(domainId: string, version: string, obs: ObservationRo
 
 /** Days of history a version should have: from the first answer, at most BACKFILL_WEEKS back. */
 // ponytail: 5 weeks covers the 28-day window plus a week of trend; longer history via the recalculate action.
-const BACKFILL_WEEKS = 5;
+export const BACKFILL_WEEKS = 5;
 
 export async function computeScores(domainId: string, opts: { scoringVersion?: string; windowEnd?: Date; windowDays?: number } = {}) {
   const db = getDb();

@@ -44,10 +44,11 @@ const answer = (over: Partial<RawSignals>, extra: Partial<AnswerObservation> = {
 const profile = {
   domain: "example.cz",
   brandName: "Example",
+  brand: { name: "Example", aliases: [], domains: [] },
   ownedDomains: [],
   markets: [{ country: "CZ", language: "cs" }],
   offerings: [{ name: "Yoga classes" }],
-  competitors: [{ name: "Rival", domains: ["rival.cz"] }],
+  competitors: [{ name: "Rival", aliases: [], domains: ["rival.cz"] }],
   factSheet: [],
 } as unknown as DomainProfile;
 

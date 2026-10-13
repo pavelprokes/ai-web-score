@@ -374,13 +374,14 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
   );
 }
 
-function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; action: "track-competitor" | "ignore-competitor"; label: string; returnTo: string }) {
+function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; domains?: string[]; action: "track-competitor" | "ignore-competitor"; label: string; returnTo: string }) {
   return (
     <form action={domainAction} className="inline">
       <input type="hidden" name="domainId" value={props.domainId} />
       <input type="hidden" name="action" value={props.action} />
       <input type="hidden" name="name" value={props.name} />
       {props.aliases?.length ? <input type="hidden" name="aliases" value={props.aliases.join("\n")} /> : null}
+      {props.domains?.length ? <input type="hidden" name="domains" value={props.domains.join("\n")} /> : null}
       <input type="hidden" name="returnTo" value={props.returnTo} />
       <SubmitButton className="btn btn--small" pendingLabel="Saving…">
         {props.label}
@@ -698,7 +699,7 @@ function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: 
           <h3 className="subhead">Competitors</h3>
           {p.competitors.length ? (
             <ul className="chips">
-              {p.competitors.slice(0, 12).map((c) => (
+              {p.competitors.map((c) => (
                 <li key={c.name}>
                   {c.name}
                   {c.source === "OBSERVED_IN_ANSWERS" && <span className="muted"> · from answers</span>}
@@ -712,8 +713,10 @@ function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: 
             <>
               <h3 className="subhead">Named by AI, not tracked</h3>
               <p className="muted">
-                Brands the assistants recommend for questions that do not name you, last 28 days. Track a real competitor so share among
-                tracked rivals counts it from the next answers on; ignore directories and noise.
+                Brands named in AI-analysed answers to questions that do not name you, last 28 days. The analysis reads answers that name you or a
+                tracked rival (and a sample of the rest), so brands that win where neither appears are under-counted. Tracking one re-checks the
+                stored answers and rebuilds the score history, because your position and share among tracked rivals rank against it. Ignore
+                directories and noise.
               </p>
               <ul className="proposals">
                 {suggestions.map((c) => (
@@ -721,11 +724,19 @@ function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: 
                     <span>
                       <strong>{c.name}</strong>{" "}
                       <span className="muted">
-                        in {c.answers} answers · {c.providers.map(providerLabel).join(", ")}
+                        in {c.answers} analysed answers to {c.questions} questions · {c.providers.map(providerLabel).join(", ")}
                       </span>
                     </span>
                     <span className="btn-row">
-                      <CompetitorButton domainId={detail.domain.id} name={c.name} aliases={c.aliases} action="track-competitor" label="Track" returnTo={returnTo} />
+                      <CompetitorButton
+                        domainId={detail.domain.id}
+                        name={c.name}
+                        aliases={c.aliases}
+                        domains={c.domains}
+                        action="track-competitor"
+                        label="Track"
+                        returnTo={returnTo}
+                      />
                       <CompetitorButton domainId={detail.domain.id} name={c.name} action="ignore-competitor" label="Ignore" returnTo={returnTo} />
                     </span>
                   </li>
