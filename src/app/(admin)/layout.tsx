@@ -17,7 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </a>
       <header className="topbar">
         <div className="topbar__inner">
-          <Link className="brand" href="/">
+          <Link prefetch={false} className="brand" href="/">
             AI Visibility
           </Link>
           <nav className="nav" aria-label="Main">

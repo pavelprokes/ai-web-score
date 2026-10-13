@@ -130,6 +130,7 @@ export default async function DomainsPage({
                         <tr key={d.id}>
                           <th scope="row">
                             <Link
+                              prefetch={false}
                               className="domain-link"
                               href={`/domains/${d.id}`}
                             >
@@ -230,7 +231,7 @@ function DomainCard({ d, now, busy }: { d: DomainRow; now: Date; busy: Set<Activ
       <div className="domain-card__head">
         <div>
           <h3>
-            <Link className="domain-link" href={`/domains/${d.id}`}>
+            <Link prefetch={false} className="domain-link" href={`/domains/${d.id}`}>
               {d.hostname}
             </Link>
           </h3>

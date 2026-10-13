@@ -252,7 +252,7 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
                       </span>
                     </div>
                     {i.hostname && i.domainId && (
-                      <Link href={`/domains/${i.domainId}`} onClick={() => setOpen(false)}>
+                      <Link prefetch={false} href={`/domains/${i.domainId}`} onClick={() => setOpen(false)}>
                         {i.hostname}
                       </Link>
                     )}

@@ -4,6 +4,7 @@ import postgres from "postgres";
 import { waitUntil } from "@/lib/vercel";
 import { allSocketsClosed, stallingSocketFactory, usesTls } from "./socket";
 import { withReadRetry } from "./retry";
+import { withConcurrencyLimit } from "./limit";
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -38,9 +39,9 @@ function pool(kind: "web" | "jobs"): Pool {
       max,
       // prepare:false keeps us compatible with transaction-mode poolers (Neon, Supabase, PgBouncer).
       prepare: false,
-      // No pipelining: with more parallel queries than connections, postgres.js would otherwise send
-      // several queries back-to-back on one busy connection. Through a transaction pooler (Supavisor)
-      // that is a known source of answers that never arrive; queries wait for a free connection instead.
+      // Pipelining (several queries back-to-back on one busy connection) is what a transaction pooler
+      // (Supavisor) sometimes never answers. max_pipeline 1 still lets one query queue behind the running
+      // one, and 0 breaks sql.begin, so `withConcurrencyLimit` below keeps it from happening at all.
       ...({ max_pipeline: Number(process.env.DB_MAX_PIPELINE ?? 1) } as object), // documented, missing from the types
       onnotice: () => {},
       // Serverless instances are suspended between requests (Vercel Fluid compute). A connection left open
@@ -55,7 +56,9 @@ function pool(kind: "web" | "jobs"): Pool {
       // …and keep the instance awake until the pool has closed them (like attachDatabasePool in @vercel/functions).
       ...(process.env.VERCEL ? { debug: keepAwakeUntilIdle } : {}),
     });
-    p = { sql, db: drizzle(withReadRetry(sql), { schema }) };
+    // Measured on production (2026-10-13, 9 parallel reads, pool 5): without the limit 4 of 6 runs stalled
+    // for 20 s; with it none, 140–390 ms.
+    p = { sql, db: drizzle(withReadRetry(withConcurrencyLimit(sql, max)), { schema }) };
     pools[kind] = p;
   }
   return p;

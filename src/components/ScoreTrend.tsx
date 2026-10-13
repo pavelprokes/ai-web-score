@@ -345,7 +345,7 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
       </p>
       <p className="note trend__note">
         Each point summarises the previous 28 days <MetricInfo id="rolling-window" />, so the line moves smoothly and a real change shows over several days.{" "}
-        <Link href="/metrics">What do the metrics mean?</Link>
+        <Link prefetch={false} href="/metrics">What do the metrics mean?</Link>
       </p>
       {mixChanges.length > 0 && (
         <ul className="note trend__note trend__mixnotes">
