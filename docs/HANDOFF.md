@@ -59,6 +59,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #39 | Agent brief: Markdown hand-off for a coding agent in the website's repo (role → evidence → Test & QA → merge request), `GET /api/domains/[id]/brief` + link in Recommendations; diagnostics now read unbranded answers of active topics over 28 days, like the score |
 | #41 | Answer viewer `/domains/[id]/answers` (filters: assistant, topic, question type, Named / In a recommendation list / Cited); jobs are due at the database's `now()` (an app clock ahead of the DB left kicked jobs for the next tick) |
 | #42 | Competitors from answers: "Named by AI, not tracked" in the domain profile (≥3 analysed answers to ≥2 questions, spellings merged); Track = new profile version + re-extraction of stored answers (`signals.reextract`) + score history rebuild; Ignore = `domains.ignored_competitors` (migration 0010); re-discovery keeps added competitors |
+| #44 | Pages no longer stall 20 s: postgres.js pipelined queries onto busy connections and the Supabase transaction pooler sometimes never answered (`max_pipeline: 1` still pipelines one; 0 breaks transactions) → `src/db/limit.ts` keeps queries in flight ≤ pool size; `<Link prefetch={false}>` everywhere (16 extra renders per page load). Production burst of 8 API reads: 2 of 8 at 22–24 s before, worst 2.2 s after |
 
 ## Next task
 
@@ -118,6 +119,8 @@ for the active domains, $14.6 measurement spend 2026-10-01…13, ~$1–2/day); t
 ### Open follow-ups
 
 - Supabase pooler closes connections occasionally (mitigated by read retry); root cause unknown.
+- Job timeouts: likely the same pooler stall as the 20 s pages (#44; jobs' watchdog is 60 s). Check the
+  next measurement wave (domains plan at ~12:55 and ~21:15 UTC) with the query below; expect ~0.
 - Job timeouts ("Job did not finish within N s") only in bursts of hundreds of jobs. Baseline with
   `JOB_CONCURRENCY=8`: 2026-10-12 12–14 h UTC 12 of 889 jobs (1.3 %), 20–22 h 20 of 750 (2.7 %). The owner set
   `JOB_CONCURRENCY=4` on 2026-10-13 (~08 h UTC); compare the next burst by hour:
