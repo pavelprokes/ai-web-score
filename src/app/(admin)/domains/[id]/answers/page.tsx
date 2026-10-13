@@ -7,7 +7,10 @@ import { Badge, Section, TimeAgo } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "AI answers" };
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const detail = await domainDetail((await params).id);
+  return { title: detail ? `AI answers · ${detail.domain.hostname}` : "Domain not found" };
+}
 
 type Params = {
   provider?: string;
@@ -80,7 +83,7 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
             </select>
           </label>
           <label>
-            Question
+            Question type
             <select name="question" defaultValue={filters.question ?? "unbranded"}>
               {Object.entries(ANSWER_QUESTIONS).map(([k, v]) => (
                 <option key={k} value={k}>
@@ -106,7 +109,8 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
         </form>
       </Section>
 
-      <Section title={`Answers (page ${data.page})`} id="answers-heading">
+      <Section title="Answers" id="answers-heading">
+        {data.page > 1 && <p className="muted">Page {data.page}</p>}
         {data.answers.length === 0 && <p className="muted">No answers match these filters.</p>}
         <ol className="answers" aria-labelledby="answers-heading">
           {data.answers.map((a) => (
@@ -120,9 +124,17 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
                       {a.finishedAt && <TimeAgo date={a.finishedAt} now={now} />}
                     </span>
                     <span className="btn-row">
-                      {a.signals?.brandMentioned ? <Badge tone="good">Names you</Badge> : <Badge tone="neutral">Does not name you</Badge>}
-                      {a.signals?.recommendationPosition != null && <Badge tone="good">Listed #{a.signals.recommendationPosition}</Badge>}
-                      {a.signals?.domainCited && <Badge tone="good">Cites your site</Badge>}
+                      {!a.signals ? (
+                        <Badge tone="neutral">Not analysed yet</Badge>
+                      ) : a.signals.brandMentioned ? (
+                        <Badge tone="good">Named</Badge>
+                      ) : (
+                        <Badge tone="neutral">Not named</Badge>
+                      )}
+                      {a.signals?.recommendationPosition != null && (
+                        <Badge tone="good">In a recommendation list, #{a.signals.recommendationPosition}</Badge>
+                      )}
+                      {a.signals?.domainCited && <Badge tone="good">Cited</Badge>}
                     </span>
                   </span>
                 </summary>
@@ -136,6 +148,7 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
                           <li key={i}>
                             <a href={c.url} rel="noopener noreferrer nofollow" target="_blank">
                               {c.title || c.url}
+                              <span className="sr-only"> (opens in a new tab)</span>
                             </a>
                           </li>
                         ))}
@@ -158,18 +171,21 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
             </li>
           ))}
         </ol>
-        <nav aria-label="Pages" className="btn-row">
-          {data.page > 1 && (
-            <Link className="btn" href={pageHref(data.page - 1)}>
-              Newer
-            </Link>
-          )}
-          {data.hasMore && (
-            <Link className="btn" href={pageHref(data.page + 1)}>
-              Older
-            </Link>
-          )}
-        </nav>
+        {(data.page > 1 || data.hasMore) && (
+          <nav aria-label="Pages" className="btn-row">
+            {data.page > 1 && (
+              // Past the end (no rows) jumps back to the first page rather than one page back.
+              <Link className="btn" href={pageHref(data.answers.length ? data.page - 1 : 1)}>
+                Newer answers
+              </Link>
+            )}
+            {data.hasMore && (
+              <Link className="btn" href={pageHref(data.page + 1)}>
+                Older answers
+              </Link>
+            )}
+          </nav>
+        )}
       </Section>
     </>
   );

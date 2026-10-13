@@ -415,8 +415,8 @@ export async function providersOverview() {
   };
 }
 
-export const ANSWER_RESULTS = { named: "Names you", "not-named": "Does not name you", recommended: "Lists you as a recommendation", cited: "Cites your site" } as const;
-export const ANSWER_QUESTIONS = { unbranded: "Not naming you", branded: "Naming you", all: "All questions" } as const;
+export const ANSWER_RESULTS = { named: "Named", "not-named": "Not named", recommended: "In a recommendation list", cited: "Cited" } as const;
+export const ANSWER_QUESTIONS = { unbranded: "Unbranded questions", branded: "Branded questions", all: "All questions" } as const;
 export interface AnswerFilters {
   provider?: string;
   topic?: string;
@@ -432,13 +432,14 @@ export async function listAnswers(domainId: string, f: AnswerFilters) {
   const sig = measurementSignals.signals;
   const result = {
     named: sql`${sig}->>'brandMentioned' = 'true'`,
-    "not-named": sql`${sig}->>'brandMentioned' = 'false'`,
+    // Refusals and empty answers are not counted by the metrics either.
+    "not-named": sql`${sig}->>'brandMentioned' = 'false' and ${sig}->>'noAnswer' = 'false'`,
     recommended: sql`${sig}->>'recommendationPosition' is not null`,
     cited: sql`${sig}->>'domainCited' = 'true'`,
   };
   const branded = sql`${promptVersions.category} = 'BRAND_VALIDATION'`;
   const question = f.question ?? "unbranded";
-  const page = Math.max(1, f.page ?? 1);
+  const page = Math.min(10_000, Math.max(1, Math.floor(f.page ?? 1) || 1));
   const rows = await db
     .select({
       id: measurements.id,
@@ -467,7 +468,7 @@ export async function listAnswers(domainId: string, f: AnswerFilters) {
         question === "all" ? undefined : question === "branded" ? branded : sql`not (${branded})`,
       ),
     )
-    .orderBy(desc(measurements.finishedAt))
+    .orderBy(desc(measurements.finishedAt), desc(measurements.id))
     .limit(ANSWERS_PER_PAGE + 1)
     .offset((page - 1) * ANSWERS_PER_PAGE);
   const topics = await db
