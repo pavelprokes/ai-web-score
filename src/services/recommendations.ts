@@ -230,18 +230,13 @@ export async function setRecommendationStatus(id: string, status: "OPEN" | "DONE
 /** Markdown brief for a coding agent working in the website's repository (see `renderAgentBrief`). */
 export async function agentBrief(domainId: string): Promise<{ hostname: string; markdown: string }> {
   const { domain, profile, findings, clusters } = await collectFindings(domainId);
-  const [snapshots, recs, sources, rows] = await Promise.all([
-    latestScores(domainId, domain.scoringVersion),
-    latestRecommendations(domainId),
-    sourcesFor(domainId),
-    loadExampleRows(domainId),
-  ]);
+  const [snapshots, sources, rows] = await Promise.all([latestScores(domainId, domain.scoringVersion), sourcesFor(domainId), loadExampleRows(domainId)]);
   const scope = (s: string) => snapshots.filter((x) => x.scope === s).map((x) => ({ providerId: x.scopeKey, metrics: x.metrics as VisibilityMetrics }));
-  const open = recs?.items.filter((i) => i.status === "OPEN") ?? [];
   const markdown = renderAgentBrief({
     hostname: domain.hostname,
     generatedAt: new Date(),
     windowDays: DEFAULT_WINDOW_DAYS,
+    findingsWindowDays: WINDOW_DAYS,
     profile,
     providerLabels: providerLabels(),
     clusterNames: Object.fromEntries(clusters.map((c) => [c.key, c.name])),
@@ -249,17 +244,13 @@ export async function agentBrief(domainId: string): Promise<{ hostname: string; 
     byProvider: scope("PROVIDER").sort((a, b) => b.metrics.sampleCount - a.metrics.sampleCount),
     brand: scope("BRAND")[0]?.metrics ?? null,
     findings,
-    plan: recs && open.length ? {
-            summary: recs.set.summary ?? "",
-            items: open.map((i) => ({ title: i.title, rationale: i.rationale, steps: i.steps as string[], findingKeys: i.findingKeys as string[] })),
-          } : null,
     sources,
     examples: pickExamples(rows),
   });
   return { hostname: domain.hostname, markdown };
 }
 
-/** Recent answers on active topics that recommend others but not the brand, and branded answers with a poor description. */
+/** Recent answers on active topics that recommend others but not the brand, and answers about the brand by name that describe it poorly. */
 async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
   const sig = measurementSignals.signals;
   const rows = await getDb()
@@ -284,7 +275,7 @@ async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
         gte(measurements.finishedAt, new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86_400_000)),
         sql`(
           (${promptVersions.category} <> 'BRAND_VALIDATION' and ${sig}->>'brandMentioned' = 'false' and ${sig}->>'recommendationPresent' = 'true')
-          or (${sig}->>'brandDescriptionAccuracy')::float < 0.6)`,
+          or (${promptVersions.category} = 'BRAND_VALIDATION' and (${sig}->>'brandDescriptionAccuracy')::float < 0.6))`,
       ),
     )
     .orderBy(desc(measurements.finishedAt))
@@ -292,7 +283,7 @@ async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
   return rows
     .filter((r) => r.answerText)
     .map((r) => ({
-      kind: r.branded || (r.signals as RawSignals).brandMentioned ? ("INACCURATE" as const) : ("GAP" as const),
+      kind: r.branded ? ("INACCURATE" as const) : ("GAP" as const),
       clusterKey: r.clusterKey,
       providerId: r.providerId,
       prompt: r.prompt,
