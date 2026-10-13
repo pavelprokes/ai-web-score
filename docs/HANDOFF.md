@@ -57,6 +57,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #36 | Re-discovery no longer drops a monitored domain to READY (3 domains were unscheduled since 2026-10-11; migration 0009 restores them); portfolio optimisation runs daily per ACTIVE domain and right after new prompts are approved |
 | #37 | Portfolio optimisation writes in batches (the daily run hit the 60 s job limit) |
 | #39 | Agent brief: Markdown hand-off for a coding agent in the website's repo (role → evidence → Test & QA → merge request), `GET /api/domains/[id]/brief` + link in Recommendations; diagnostics now read unbranded answers of active topics over 28 days, like the score |
+| #41 | Answer viewer `/domains/[id]/answers` (filters: assistant, topic, question type, Named / In a recommendation list / Cited); jobs are due at the database's `now()` (an app clock ahead of the DB left kicked jobs for the next tick) |
+| #42 | Competitors from answers: "Named by AI, not tracked" in the domain profile (≥3 analysed answers to ≥2 questions, spellings merged); Track = new profile version + re-extraction of stored answers (`signals.reextract`) + score history rebuild; Ignore = `domains.ignored_competitors` (migration 0010); re-discovery keeps added competitors |
 
 ## Next task
 
@@ -100,8 +102,18 @@ Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`
 
 Validate `docs/RESEARCH.md` against production (APIs ≠ UI, variance, prompt length, reach, cost per useful
 data point) and write the measured section. Then decide: Perplexity repeat samples (same-day Jaccard 0.76),
-reach weights, the $171/month forecast vs. $20 budget. Later: competitors from answers with owner approval,
-answer viewer, `answer_text` retention (~13 months).
+reach weights, the budget. Spend so far is within the per-domain budgets (planner-enforced; $58/month configured
+for the active domains, $14.6 measurement spend 2026-10-01…13, ~$1–2/day); the earlier "$75/month" was one launch day.
+
+### 4. Waiting for an owner decision
+
+- `answer_text` retention (lawyer: ~13 months). Not implemented: clearing production answer text by default is the
+  owner's call. Proposal: nightly maintenance clears `answer_text` and `raw_response` older than
+  `ANSWER_TEXT_RETENTION_DAYS` (default off, or 395); signals and scores stay.
+- Broader answer analysis for competitor suggestions: today only answers naming the brand or a tracked rival (plus a
+  10 % sample) are analysed, so brands that win where neither appears are under-counted. Analysing brand-less answers
+  that contain a list costs ≈170 extra Sonnet calls / 28 days for the photographer (seo-geo estimate).
+- Track the suggested competitors on se-vezmou.cz and vzdelanibudoucnosti.cz (domain page → Domain profile).
 
 ### Open follow-ups
 
