@@ -1435,3 +1435,69 @@ dialog.confirm h2 {
   color: var(--critical);
   font-weight: 650;
 }
+
+/* ── Answer viewer ───────────────────────────────────────────────── */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+.filters label {
+  display: grid;
+  gap: 0.25rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.9rem;
+}
+.filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.answers {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+.answers > li {
+  border-top: 1px solid var(--border);
+}
+.answers summary {
+  padding: 0.75rem 0;
+  cursor: pointer;
+}
+/* The summary keeps its disclosure marker; the content inside it is the grid. */
+.answers__head {
+  display: inline-grid;
+  gap: 0.3rem;
+  vertical-align: top;
+  max-width: calc(100% - 1.5rem);
+}
+.answers__prompt {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.answers__meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.answers__body {
+  padding: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+.answers__text {
+  white-space: pre-wrap;
+  max-width: 80ch;
+}
+.answers__body h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.4rem;
+}

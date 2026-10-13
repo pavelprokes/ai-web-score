@@ -92,6 +92,12 @@ export default async function DomainPage({
 
       <ScoreTiles detail={detail} />
 
+      {detail.domain.lastMeasuredAt && (
+        <p>
+          <Link href={`/domains/${d.id}/answers`}>Read the AI answers behind these numbers</Link>
+        </p>
+      )}
+
       <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {history && history.domain.length > 0 && (
