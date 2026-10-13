@@ -93,10 +93,13 @@ export async function enqueue(
     const existing = await db.execute(sql`select 1 from jobs where dedupe_key = ${opts.dedupeKey} limit 1`);
     if (existing.length > 0) return false;
   }
+  // Due now = the database's now(): claim() compares run_at with it, and an app clock a few ms ahead of the
+  // database's would leave a job enqueued right before a drain unclaimed until the next tick.
+  const runAt = opts.runAt ? sql`${opts.runAt.toISOString()}::timestamptz` : sql`now()`;
   const res = await db.execute(sql`
     insert into jobs (type, payload, dedupe_key, run_at, max_attempts)
     values (${type}, ${JSON.stringify(payload)}::jsonb, ${opts.dedupeKey ?? null},
-            ${(opts.runAt ?? new Date()).toISOString()}::timestamptz, ${opts.maxAttempts ?? 4})
+            ${runAt}, ${opts.maxAttempts ?? 4})
     on conflict (dedupe_key) where status in ('QUEUED','RUNNING') and dedupe_key is not null do nothing
     returning id`);
   return res.length > 0;
