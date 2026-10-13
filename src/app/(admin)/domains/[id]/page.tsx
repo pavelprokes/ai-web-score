@@ -68,7 +68,7 @@ export default async function DomainPage({
   return (
     <>
       <nav aria-label="Breadcrumb" className="breadcrumb">
-        <Link href="/">Domains</Link> <span aria-hidden="true">/</span> <span aria-current="page">{d.hostname}</span>
+        <Link prefetch={false} href="/">Domains</Link> <span aria-hidden="true">/</span> <span aria-current="page">{d.hostname}</span>
       </nav>
 
       <div className="page-head">
@@ -97,7 +97,7 @@ export default async function DomainPage({
 
       {detail.domain.lastMeasuredAt && (
         <p>
-          <Link href={`/domains/${d.id}/answers`}>Read the AI answers behind these numbers</Link>
+          <Link prefetch={false} href={`/domains/${d.id}/answers`}>Read the AI answers behind these numbers</Link>
         </p>
       )}
 

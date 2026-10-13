@@ -44,7 +44,7 @@ export function MetricInfo({ id }: { id: string }) {
 
   return (
     <span ref={ref} className="metric-info" onMouseEnter={show} onMouseLeave={() => hide()}>
-      <Link href={`/metrics#${def.id}`} className="metric-info__link" aria-describedby={tipId} onFocus={show} onBlur={() => hide(0)}>
+      <Link prefetch={false} href={`/metrics#${def.id}`} className="metric-info__link" aria-describedby={tipId} onFocus={show} onBlur={() => hide(0)}>
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
           <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
           <path d="M8 7v4.5M8 4.6v.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />

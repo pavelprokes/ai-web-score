@@ -47,7 +47,7 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
   return (
     <>
       <nav aria-label="Breadcrumb" className="breadcrumb">
-        <Link href="/">Domains</Link> <span aria-hidden="true">/</span> <Link href={`/domains/${d.id}`}>{d.hostname}</Link>{" "}
+        <Link prefetch={false} href="/">Domains</Link> <span aria-hidden="true">/</span> <Link prefetch={false} href={`/domains/${d.id}`}>{d.hostname}</Link>{" "}
         <span aria-hidden="true">/</span> <span aria-current="page">AI answers</span>
       </nav>
       <div className="page-head">
@@ -175,12 +175,12 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
           <nav aria-label="Pages" className="btn-row">
             {data.page > 1 && (
               // Past the end (no rows) jumps back to the first page rather than one page back.
-              <Link className="btn" href={pageHref(data.answers.length ? data.page - 1 : 1)}>
+              <Link prefetch={false} className="btn" href={pageHref(data.answers.length ? data.page - 1 : 1)}>
                 Newer answers
               </Link>
             )}
             {data.hasMore && (
-              <Link className="btn" href={pageHref(data.page + 1)}>
+              <Link prefetch={false} className="btn" href={pageHref(data.page + 1)}>
                 Older answers
               </Link>
             )}
