@@ -56,6 +56,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #35 | Domain page "Where AI looks": sites cited for unbranded questions, share, assistants, how often the brand is named alongside |
 | #36 | Re-discovery no longer drops a monitored domain to READY (3 domains were unscheduled since 2026-10-11; migration 0009 restores them); portfolio optimisation runs daily per ACTIVE domain and right after new prompts are approved |
 | #37 | Portfolio optimisation writes in batches (the daily run hit the 60 s job limit) |
+| #39 | Agent brief: Markdown hand-off for a coding agent in the website's repo (role → evidence → Test & QA → merge request), `GET /api/domains/[id]/brief` + link in Recommendations; diagnostics now read unbranded answers of active topics over 28 days, like the score |
 
 ## Next task
 
@@ -105,9 +106,10 @@ answer viewer, `answer_text` retention (~13 months).
 ### Open follow-ups
 
 - Supabase pooler closes connections occasionally (mitigated by read retry); root cause unknown.
-- Job timeouts ("Job did not finish within N s") hit ~4 % of jobs, only in bursts of hundreds of jobs (2026-10-12
-  12–14 h and 21 h UTC); retries finish most. Suspect contention: `JOB_CONCURRENCY=8` jobs share a job DB pool of
-  `JOB_DB_POOL_MAX=4` through the transaction pooler. Try `JOB_CONCURRENCY=4` (or a pool of 8) and compare the
-  hourly timeout count with `pnpm prod:sql`.
+- Job timeouts ("Job did not finish within N s") only in bursts of hundreds of jobs. Baseline with
+  `JOB_CONCURRENCY=8`: 2026-10-12 12–14 h UTC 12 of 889 jobs (1.3 %), 20–22 h 20 of 750 (2.7 %). The owner set
+  `JOB_CONCURRENCY=4` on 2026-10-13 (~08 h UTC); compare the next burst by hour:
+  `select date_trunc('hour', created_at), count(*), count(*) filter (where last_error like 'Job did not finish%') from jobs …`.
+  One job also FAILED every hour on 2026-10-12 01–08 h and 15–19 h — not yet looked at.
 - Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
 - Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.
