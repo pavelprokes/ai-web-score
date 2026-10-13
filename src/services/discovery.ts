@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { domainProfiles, domains, prompts, runs, topicClusters } from "@/db/schema";
 import type { DomainProfile } from "@/core/domain-profile";
 import { DomainProfile as DomainProfileSchema } from "@/core/domain-profile";
+import { isKnownCompetitorName } from "@/core/competitors";
 import { crawlDomain } from "@/core/discovery/crawl";
 import { DISCOVERY_SYSTEM, discoveryUserPrompt, LlmProfile, toDomainProfile } from "@/core/discovery/profile-llm";
 import { buildClusters, IMPORTANT_CLUSTER_WEIGHT } from "@/core/portfolio/clusters";
@@ -44,6 +45,11 @@ export async function runDiscovery(domainId: string, trigger: string) {
       totalClusterCount: clusters.length,
     });
 
+    // Competitors the admin added (by hand or from answers) survive re-discovery; the LLM only knows the crawl.
+    const previous = await latestProfile(domainId);
+    for (const c of previous?.profile.competitors ?? []) {
+      if (c.source !== "DISCOVERY" && !isKnownCompetitorName(c.name, profile, [])) profile.competitors.push(c);
+    }
     const version = await nextProfileVersion(domainId);
     await db.insert(domainProfiles).values({
       domainId,

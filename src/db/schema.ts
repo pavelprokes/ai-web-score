@@ -44,6 +44,8 @@ export const domains = pgTable("domains", {
   /** How many planning cycles per day the scheduler runs for this domain. */
   /** Per-domain provider reach weights (e.g. from Umami AI referrals); overrides provider defaults. */
   providerReach: jsonb("provider_reach"),
+  /** Names the admin chose not to track as competitors (hidden from the suggestions from answers). */
+  ignoredCompetitors: jsonb("ignored_competitors").$type<string[]>().notNull().default([]),
   cyclesPerDay: integer("cycles_per_day").notNull().default(1),
   nextPlanAt: ts("next_plan_at"),
   lastDiscoveryAt: ts("last_discovery_at"),

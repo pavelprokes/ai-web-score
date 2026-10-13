@@ -18,6 +18,7 @@ import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/serv
 import { promoteConfiguration } from "@/services/optimizer";
 import { RecommendationNotFound, setRecommendationStatus } from "@/services/recommendations";
 import { InvalidBalanceError, setAccountBalance } from "@/services/accounts";
+import { ignoreCompetitor, trackCompetitor } from "@/services/competitors";
 
 export interface AddDomainState {
   error?: string;
@@ -64,7 +65,9 @@ export type DomainActionName =
   | "recalculate-scores"
   | "approve-proposals"
   | "reject-proposals"
-  | "generate-recommendations";
+  | "generate-recommendations"
+  | "track-competitor"
+  | "ignore-competitor";
 
 const MESSAGES: Record<DomainActionName, string> = {
   "run-now": "Measurement run queued.",
@@ -78,6 +81,8 @@ const MESSAGES: Record<DomainActionName, string> = {
   "approve-proposals": "Approved.",
   "reject-proposals": "Rejected.",
   "generate-recommendations": "Writing recommendations (about a minute).",
+  "track-competitor": "Competitor added. New answers are checked for it.",
+  "ignore-competitor": "Hidden from the suggestions.",
 };
 
 export async function domainAction(formData: FormData) {
@@ -135,6 +140,18 @@ export async function domainAction(formData: FormData) {
       if (!profile) redirect(`${back}?error=${encodeURIComponent("Run the discovery first — recommendations need the domain profile.")}`);
       await enqueue("recommendations.generate", { domainId: id }, { dedupeKey: `recommendations:${id}`, maxAttempts: 2 });
       kickJobs();
+      break;
+    }
+    case "track-competitor":
+    case "ignore-competitor": {
+      const name = String(formData.get("name") ?? "").trim().slice(0, 120);
+      if (!name) redirect(`${back}?error=${encodeURIComponent("Missing competitor name.")}`);
+      const aliases = String(formData.get("aliases") ?? "")
+        .split("\n")
+        .map((a) => a.trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 10);
+      await (action === "track-competitor" ? trackCompetitor(id, name, aliases) : ignoreCompetitor(id, name));
       break;
     }
     default:

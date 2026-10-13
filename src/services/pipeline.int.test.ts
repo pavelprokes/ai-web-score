@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -615,5 +615,44 @@ describe.skipIf(!url)("pipeline (integration)", () => {
         else process.env[k] = v;
       }
     }
+  });
+
+  it("tracks or ignores brands named in answers; tracked ones get a new profile version", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { competitorSuggestions, ignoreCompetitor, trackCompetitor } = await import("@/services/competitors");
+    const { latestProfile } = await import("@/services/discovery");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const before = (await latestProfile(demo!.id))!;
+    // Three unbranded answers on an active topic name the same untracked brands.
+    const rows = await db
+      .select({ id: s.measurementSignals.measurementId, version: s.measurementSignals.extractorVersion, signals: s.measurementSignals.signals })
+      .from(s.measurementSignals)
+      .innerJoin(s.measurements, eq(s.measurements.id, s.measurementSignals.measurementId))
+      .innerJoin(s.promptVersions, eq(s.promptVersions.id, s.measurements.promptVersionId))
+      .where(and(eq(s.measurements.domainId, demo!.id), ne(s.promptVersions.category, "BRAND_VALIDATION")))
+      .limit(3);
+    expect(rows).toHaveLength(3);
+    for (const r of rows)
+      await db
+        .update(s.measurementSignals)
+        .set({ signals: { ...(r.signals as object), untrackedEntities: ["Nova Akademie", "NovaAkademie", "Katalog.cz"] } })
+        .where(and(eq(s.measurementSignals.measurementId, r.id), eq(s.measurementSignals.extractorVersion, r.version)));
+
+    expect((await competitorSuggestions(demo!.id)).map((c) => [c.name, c.aliases, c.answers])).toEqual(
+      expect.arrayContaining([
+        ["Nova Akademie", ["NovaAkademie"], 3],
+        ["Katalog.cz", [], 3],
+      ]),
+    );
+    await trackCompetitor(demo!.id, "Nova Akademie", ["NovaAkademie"]);
+    await trackCompetitor(demo!.id, "nova akademie"); // already tracked: no second version
+    await ignoreCompetitor(demo!.id, "Katalog.cz");
+
+    const after = (await latestProfile(demo!.id))!;
+    expect(after.version).toBe(before.version + 1);
+    expect(after.profile.competitors.at(-1)).toMatchObject({ name: "Nova Akademie", aliases: ["NovaAkademie"], source: "OBSERVED_IN_ANSWERS" });
+    expect(await competitorSuggestions(demo!.id)).toEqual([]);
   });
 });

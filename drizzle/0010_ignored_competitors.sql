@@ -1,0 +1,1 @@
+ALTER TABLE "domains" ADD COLUMN "ignored_competitors" jsonb DEFAULT '[]'::jsonb NOT NULL;

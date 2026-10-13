@@ -71,6 +71,13 @@
       "when": 1791838675783,
       "tag": "0009_reactivate_rediscovered_domains",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791875084947,
+      "tag": "0010_ignored_competitors",
+      "breakpoints": true
     }
   ]
 }
