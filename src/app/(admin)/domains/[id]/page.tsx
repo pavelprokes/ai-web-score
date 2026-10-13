@@ -287,9 +287,18 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
     />
   );
   if (!detail.profile) return null;
+  // A plain link: the API accepts the admin session cookie, and the response downloads as a .md file.
+  const actions = (
+    <div className="btn-row">
+      <a className="btn btn--small" href={`/api/domains/${d.id}/brief`} download>
+        Download agent brief
+      </a>
+      {generate}
+    </div>
+  );
   if (!recs) {
     return (
-      <Section title="Recommendations" id="recommendations-heading" actions={generate}>
+      <Section title="Recommendations" id="recommendations-heading" actions={actions}>
         <p className="muted">What to change on the website and around it to raise the scores. Works best after the first measurement.</p>
       </Section>
     );
@@ -297,7 +306,7 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
   const open = recs.items.filter((i) => i.status === "OPEN");
   const closed = recs.items.filter((i) => i.status !== "OPEN");
   return (
-    <Section title="Recommendations" id="recommendations-heading" actions={generate}>
+    <Section title="Recommendations" id="recommendations-heading" actions={actions}>
       <p>{recs.set.summary}</p>
       <p className="muted">
         Based on {num(recs.set.answersAnalysed)} answers · generated <TimeAgo date={recs.set.createdAt} now={now} /> ·{" "}
