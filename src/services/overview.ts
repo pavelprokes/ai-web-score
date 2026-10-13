@@ -14,6 +14,8 @@ import {
   providers,
   runs,
   scoreSnapshots,
+  topicClusters,
+  measurementSignals,
 } from "@/db/schema";
 import { listProviders, missingEnv } from "@/core/measurement/providers";
 import type { VisibilityMetrics } from "@/core/scoring/scoring";
@@ -24,6 +26,9 @@ import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, mo
 import { latestProfile } from "./discovery";
 import { promptCounts } from "./portfolio";
 import { DEFAULT_MONTHLY_BUDGET_USD } from "./planning";
+import { currentSignals } from "./signals";
+import type { Citation } from "@/core/measurement/types";
+import type { RawSignals } from "@/core/signals/extract";
 
 /** Read models for the admin API/UI (operations view — analytics live in Umami). */
 
@@ -407,5 +412,78 @@ export async function providersOverview() {
       };
     }),
     internalLlmCostThisMonth: llm,
+  };
+}
+
+export const ANSWER_RESULTS = { named: "Names you", "not-named": "Does not name you", recommended: "Lists you as a recommendation", cited: "Cites your site" } as const;
+export const ANSWER_QUESTIONS = { unbranded: "Not naming you", branded: "Naming you", all: "All questions" } as const;
+export interface AnswerFilters {
+  provider?: string;
+  topic?: string;
+  result?: keyof typeof ANSWER_RESULTS;
+  question?: keyof typeof ANSWER_QUESTIONS;
+  page?: number;
+}
+export const ANSWERS_PER_PAGE = 50;
+
+/** Measured answers of a domain, newest first, for the answer viewer. */
+export async function listAnswers(domainId: string, f: AnswerFilters) {
+  const db = getDb();
+  const sig = measurementSignals.signals;
+  const result = {
+    named: sql`${sig}->>'brandMentioned' = 'true'`,
+    "not-named": sql`${sig}->>'brandMentioned' = 'false'`,
+    recommended: sql`${sig}->>'recommendationPosition' is not null`,
+    cited: sql`${sig}->>'domainCited' = 'true'`,
+  };
+  const branded = sql`${promptVersions.category} = 'BRAND_VALIDATION'`;
+  const question = f.question ?? "unbranded";
+  const page = Math.max(1, f.page ?? 1);
+  const rows = await db
+    .select({
+      id: measurements.id,
+      finishedAt: measurements.finishedAt,
+      providerId: measurements.providerId,
+      prompt: promptVersions.text,
+      clusterKey: prompts.clusterKey,
+      branded: sql<boolean>`${branded}`,
+      answerText: measurements.answerText,
+      citations: measurements.citations,
+      searchQueries: measurements.searchQueries,
+      signals: sig,
+    })
+    .from(measurements)
+    .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
+    .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    .leftJoin(measurementSignals, currentSignals)
+    .where(
+      and(
+        eq(measurements.domainId, domainId),
+        eq(measurements.status, "SUCCEEDED"),
+        eq(measurements.purpose, "STANDARD"),
+        f.provider ? eq(measurements.providerId, f.provider) : undefined,
+        f.topic ? eq(prompts.clusterKey, f.topic) : undefined,
+        f.result ? result[f.result] : undefined,
+        question === "all" ? undefined : question === "branded" ? branded : sql`not (${branded})`,
+      ),
+    )
+    .orderBy(desc(measurements.finishedAt))
+    .limit(ANSWERS_PER_PAGE + 1)
+    .offset((page - 1) * ANSWERS_PER_PAGE);
+  const topics = await db
+    .select({ key: topicClusters.key, name: topicClusters.name, active: topicClusters.active })
+    .from(topicClusters)
+    .where(eq(topicClusters.domainId, domainId))
+    .orderBy(desc(topicClusters.active), topicClusters.name);
+  return {
+    answers: rows.slice(0, ANSWERS_PER_PAGE).map((r) => ({
+      ...r,
+      citations: (Array.isArray(r.citations) ? r.citations : []) as Citation[],
+      searchQueries: (Array.isArray(r.searchQueries) ? r.searchQueries : []) as string[],
+      signals: r.signals as RawSignals | null,
+    })),
+    hasMore: rows.length > ANSWERS_PER_PAGE,
+    page,
+    topics,
   };
 }
