@@ -22,7 +22,8 @@ export type JobType =
   | "scores.compute"
   | "umami.send"
   | "optimizer.run"
-  | "recommendations.generate";
+  | "recommendations.generate"
+  | "signals.reextract";
 
 export interface Job {
   id: string;

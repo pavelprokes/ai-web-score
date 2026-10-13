@@ -11,6 +11,8 @@ export const ACTION_BLOCKERS: Partial<Record<string, ActivityKind[]>> = {
   "generate-recommendations": ["RECOMMENDATIONS", "DISCOVERY"],
   "explore-prompts": ["PROMPTS", "DISCOVERY"],
   "optimize-portfolio": ["OPTIMIZE", "PROMPTS"],
+  // Discovery writes the next profile version; a competitor tracked meanwhile could be lost or collide with it.
+  "track-competitor": ["DISCOVERY"],
 };
 
 const KIND_REASON: Record<ActivityKind, string> = {
