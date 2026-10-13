@@ -436,6 +436,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
 
       expect(await setRecommendationStatus(llm!.items[0]!.id, "DONE")).toBe(demo!.id);
       expect((await latestRecommendations(demo!.id))!.items[0]!.status).toBe("DONE");
+
+      // The brief route answers 404/409 instead of a 500 for an unknown domain or one without a profile.
+      const { agentBrief } = await import("@/services/recommendations");
+      const { createDomain } = await import("@/services/domains");
+      const bare = await createDomain({ hostname: "no-profile.example", runDiscovery: false });
+      await expect(agentBrief("missing")).rejects.toMatchObject({ status: 404 });
+      await expect(agentBrief(bare.id)).rejects.toMatchObject({ status: 409 });
     } finally {
       globalThis.fetch = realFetch;
     }

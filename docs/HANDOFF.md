@@ -60,6 +60,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #41 | Answer viewer `/domains/[id]/answers` (filters: assistant, topic, question type, Named / In a recommendation list / Cited); jobs are due at the database's `now()` (an app clock ahead of the DB left kicked jobs for the next tick) |
 | #42 | Competitors from answers: "Named by AI, not tracked" in the domain profile (≥3 analysed answers to ≥2 questions, spellings merged); Track = new profile version + re-extraction of stored answers (`signals.reextract`) + score history rebuild; Ignore = `domains.ignored_competitors` (migration 0010); re-discovery keeps added competitors |
 | #44 | Pages no longer stall 20 s: postgres.js pipelined queries onto busy connections and the Supabase transaction pooler sometimes never answered (`max_pipeline: 1` still pipelines one; 0 breaks transactions) → `src/db/limit.ts` keeps queries in flight ≤ pool size; `<Link prefetch={false}>` everywhere (16 extra renders per page load). Production burst of 8 API reads: 2 of 8 at 22–24 s before, worst 2.2 s after |
+| #46 | "Get listed on the sources assistants cite" no longer names competitors' own sites (se-vezmou.cz got vezmemese.cz, wemarry.io, lumiwed.com; now reddit.com, svatbona.cz, svatka.cz): hosts spelling a tracked or suggested competitor (subdomains too) or a business the same answer recommends are skipped, directories (mywed.com, fotoprofici.cz) stay; agent brief API answers 404/409 instead of 500 |
 
 ## Next task
 
@@ -125,6 +126,10 @@ for the active domains, $14.6 measurement spend 2026-10-01…13, ~$1–2/day); t
   `JOB_CONCURRENCY=8`: 2026-10-12 12–14 h UTC 12 of 889 jobs (1.3 %), 20–22 h 20 of 750 (2.7 %). The owner set
   `JOB_CONCURRENCY=4` on 2026-10-13 (~08 h UTC); compare the next burst by hour:
   `select date_trunc('hour', created_at), count(*), count(*) filter (where last_error like 'Job did not finish%') from jobs …`.
-  One job also FAILED every hour on 2026-10-12 01–08 h and 15–19 h — not yet looked at.
+  The hourly FAILED jobs on 2026-10-12 (01–08 h, 15–19 h) were "credit balance is too low" from Anthropic (54
+  measurement.submit, 8 analysis.submit, last at 19:30 UTC); resolved by the top-up.
+- Answer analysis covers competitor-only answers in a 10 % sample (`COMPETITOR_DISCOVERY_SAMPLE`), so
+  `untrackedEntities` is missing on most of them; anything built on it (competitor suggestions, listing sources)
+  under-counts until the "broader answer analysis" decision above.
 - Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
 - Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.
