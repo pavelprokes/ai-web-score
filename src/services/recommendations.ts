@@ -1,4 +1,4 @@
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import {
@@ -18,6 +18,9 @@ import { DomainProfile } from "@/core/domain-profile";
 import type { RawSignals } from "@/core/signals/extract";
 import { type AnswerObservation, diagnose, type Finding } from "@/core/recommendations/diagnostics";
 import { LlmRecommendations, RECOMMENDATIONS_SYSTEM, recommendationsUserPrompt } from "@/core/recommendations/generate-llm";
+import { type BriefExample, pickExamples, renderAgentBrief } from "@/core/recommendations/agent-brief";
+import type { VisibilityMetrics } from "@/core/scoring/scoring";
+import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { deadlineSignal } from "@/lib/deadline";
 import { throwIfJobCancelled } from "@/jobs/queue";
@@ -30,9 +33,10 @@ import { throwIfJobCancelled } from "@/jobs/queue";
  */
 
 const MAX_ITEMS = 8;
-const WINDOW_DAYS = 30;
+const WINDOW_DAYS = DEFAULT_WINDOW_DAYS;
 
-export async function generateRecommendations(domainId: string) {
+/** Profile, recent answers and the deterministic findings of a domain — shared by recommendations and the agent brief. */
+async function collectFindings(domainId: string) {
   const db = getDb();
   const [domain] = await db.select().from(domains).where(eq(domains.id, domainId));
   if (!domain) throw new Error("Domain not found");
@@ -54,8 +58,16 @@ export async function generateRecommendations(domainId: string) {
     llmsTxt: site.llmsTxt,
     answers,
     clusters,
-    providerLabels: Object.fromEntries(listProviders().map((p) => [p.id, p.label])),
+    providerLabels: providerLabels(),
   });
+  return { domain, profile, answers, clusters, findings };
+}
+
+const providerLabels = () => Object.fromEntries(listProviders().map((p) => [p.id, p.label]));
+
+export async function generateRecommendations(domainId: string) {
+  const db = getDb();
+  const { profile, answers, findings } = await collectFindings(domainId);
   await throwIfJobCancelled();
 
   const plan: { summary: string; items: PlanItem[]; model: string | null } =
@@ -144,11 +156,14 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
       providerId: measurements.providerId,
       signals: measurementSignals.signals,
       searchQueries: measurements.searchQueries,
+      category: promptVersions.category,
     })
     .from(measurements)
     .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    // Only topics still monitored, as in the score (dropped clusters would show up as gaps under raw keys).
+    .innerJoin(topicClusters, and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true)))
     .where(
       and(
         eq(measurements.domainId, domainId),
@@ -166,6 +181,7 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
     providerId: r.providerId,
     signals: r.signals as RawSignals,
     searchQueries: Array.isArray(r.searchQueries) ? (r.searchQueries as string[]) : [],
+    branded: r.category === "BRAND_VALIDATION",
   }));
 }
 
@@ -213,4 +229,70 @@ export async function setRecommendationStatus(id: string, status: "OPEN" | "DONE
     .returning({ domainId: recommendations.domainId });
   if (!rows[0]) throw new RecommendationNotFound("Recommendation not found");
   return rows[0].domainId;
+}
+
+/** Markdown brief for a coding agent working in the website's repository (see `renderAgentBrief`). */
+export async function agentBrief(domainId: string): Promise<{ hostname: string; markdown: string }> {
+  const { domain, profile, findings, clusters } = await collectFindings(domainId);
+  const [snapshots, sources, rows] = await Promise.all([latestScores(domainId, domain.scoringVersion), sourcesFor(domainId), loadExampleRows(domainId)]);
+  const scope = (s: string) => snapshots.filter((x) => x.scope === s).map((x) => ({ providerId: x.scopeKey, metrics: x.metrics as VisibilityMetrics }));
+  const markdown = renderAgentBrief({
+    hostname: domain.hostname,
+    generatedAt: new Date(),
+    windowDays: DEFAULT_WINDOW_DAYS,
+    findingsWindowDays: WINDOW_DAYS,
+    profile,
+    providerLabels: providerLabels(),
+    clusterNames: Object.fromEntries(clusters.map((c) => [c.key, c.name])),
+    overall: scope("DOMAIN")[0]?.metrics ?? null,
+    byProvider: scope("PROVIDER").sort((a, b) => b.metrics.sampleCount - a.metrics.sampleCount),
+    brand: scope("BRAND")[0]?.metrics ?? null,
+    findings,
+    sources,
+    examples: pickExamples(rows),
+  });
+  return { hostname: domain.hostname, markdown };
+}
+
+/** Recent answers on active topics that recommend others but not the brand, and answers about the brand by name that describe it poorly. */
+async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
+  const sig = measurementSignals.signals;
+  const rows = await getDb()
+    .select({
+      clusterKey: prompts.clusterKey,
+      providerId: measurements.providerId,
+      prompt: promptVersions.text,
+      branded: sql<boolean>`${promptVersions.category} = 'BRAND_VALIDATION'`,
+      // Excerpts need the start (gaps) or the brand mention, which sits early in answers about the brand.
+      answerText: sql<string | null>`left(${measurements.answerText}, 3000)`,
+      signals: sig,
+    })
+    .from(measurements)
+    .innerJoin(measurementSignals, currentSignals)
+    .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
+    .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    .innerJoin(topicClusters, and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true)))
+    .where(
+      and(
+        eq(measurements.domainId, domainId),
+        eq(measurements.status, "SUCCEEDED"),
+        eq(measurements.purpose, "STANDARD"),
+        gte(measurements.finishedAt, new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86_400_000)),
+        sql`(
+          (${promptVersions.category} <> 'BRAND_VALIDATION' and ${sig}->>'brandMentioned' = 'false' and ${sig}->>'recommendationPresent' = 'true')
+          or (${promptVersions.category} = 'BRAND_VALIDATION' and (${sig}->>'brandDescriptionAccuracy')::float < 0.6))`,
+      ),
+    )
+    .orderBy(desc(measurements.finishedAt))
+    .limit(200);
+  return rows
+    .filter((r) => r.answerText)
+    .map((r) => ({
+      kind: r.branded ? ("INACCURATE" as const) : ("GAP" as const),
+      clusterKey: r.clusterKey,
+      providerId: r.providerId,
+      prompt: r.prompt,
+      answerText: r.answerText!,
+      signals: r.signals as RawSignals,
+    }));
 }

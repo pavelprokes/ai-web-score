@@ -48,6 +48,8 @@ export interface AnswerObservation {
   providerId: string;
   signals: RawSignals;
   searchQueries: string[];
+  /** Asked about the brand by name: counts for accuracy and sentiment, not for visibility. */
+  branded?: boolean;
 }
 
 export interface ClusterInfo {
@@ -149,17 +151,19 @@ const MIN_ANSWERS = 4;
 // ─── diagnostics ─────────────────────────────────────────────────────────────
 
 export function diagnose(input: DiagnosticsInput): Finding[] {
+  // Visibility findings read unbranded answers only, like the geo-v2 score; a question naming the brand always "mentions" it.
+  const unbranded = { ...input, answers: input.answers.filter((a) => !a.branded) };
   const findings: Finding[] = [
     ...crawlerAccess(input),
     ...structuredData(input),
-    ...topicGaps(input),
-    ...citationSources(input),
-    ...mentionedNotCited(input),
-    ...weakPosition(input),
+    ...topicGaps(unbranded),
+    ...citationSources(unbranded),
+    ...mentionedNotCited(unbranded),
+    ...weakPosition(unbranded),
     ...accuracy(input),
     ...sentiment(input),
-    ...providerGaps(input),
-    ...untrackedCompetitors(input),
+    ...providerGaps(unbranded),
+    ...untrackedCompetitors(unbranded),
     ...markets(input),
   ];
   return findings.sort((a, b) => b.severity - a.severity || a.key.localeCompare(b.key));

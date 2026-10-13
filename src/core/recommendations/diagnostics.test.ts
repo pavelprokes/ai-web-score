@@ -122,3 +122,13 @@ describe("diagnose", () => {
     for (const x of f) expect(x.action.steps.length).toBeGreaterThan(0);
   });
 });
+
+describe("diagnose on branded answers", () => {
+  it("does not count questions naming the brand as visibility", () => {
+    const answers = [
+      ...Array.from({ length: 6 }, () => answer({ competitorsMentioned: ["rival"] })),
+      ...Array.from({ length: 6 }, () => answer({ brandMentioned: true }, { branded: true })),
+    ];
+    expect(diagnose(input({ answers })).map((f) => f.key)).toContain("topic-gap:yoga");
+  });
+});
