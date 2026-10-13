@@ -28,14 +28,14 @@ const HOSTNAME = /^(?:www\.)?[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.[a-z]{2,}$/iu;
 
 /**
  * Matching key: "Brzy svoji", "Brzy-svoji.cz" and "BRZY SVOJI (svatební web)" are one brand — case, accents,
- * a leading www., a trailing TLD, parenthesised notes, spacing and punctuation are dropped.
+ * a leading www., a trailing TLD (also .co.uk, .com.au), parenthesised notes, spacing and punctuation are dropped.
  */
-const key = (s: string) =>
+export const nameKey = (s: string) =>
   normalizeText(s)
     .replace(/\([^)]*\)/g, "")
     .trim()
     .replace(/^www\./, "")
-    .replace(/\.[a-z]{2,}$/, "")
+    .replace(/(?:\.(?:com|co|org|net|edu|gov|ac))?\.[a-z]{2,}$/, "")
     .replace(/[^\p{L}\p{N}]+/gu, "");
 
 type ProfileNames = Pick<DomainProfile, "brandName" | "brand" | "ownedDomains" | "domain" | "competitors">;
@@ -50,13 +50,13 @@ function knownKeys(profile: ProfileNames, ignored: string[]) {
       ...profile.ownedDomains,
       ...profile.competitors.flatMap((c) => [c.name, ...c.aliases, ...c.domains]),
       ...ignored,
-    ].map(key),
+    ].map(nameKey),
   );
 }
 
 /** Is `name` already the brand, a tracked competitor or ignored? */
 export function isKnownCompetitorName(name: string, profile: ProfileNames, ignored: string[]) {
-  return knownKeys(profile, ignored).has(key(name));
+  return knownKeys(profile, ignored).has(nameKey(name));
 }
 
 export function suggestCompetitors(
@@ -74,16 +74,16 @@ export function suggestCompetitors(
       (a.signals.untrackedEntities ?? [])
         .map(clean)
         .filter((n) => !HOSTNAME.test(n))
-        .map(key),
+        .map(nameKey),
     ),
   );
   const group = (name: string) => {
-    if (!HOSTNAME.test(name)) return `n:${key(name)}`;
-    return nameKeys.has(key(name)) ? `n:${key(name)}` : `h:${name.toLowerCase().replace(/^www\./, "")}`;
+    if (!HOSTNAME.test(name)) return `n:${nameKey(name)}`;
+    return nameKeys.has(nameKey(name)) ? `n:${nameKey(name)}` : `h:${name.toLowerCase().replace(/^www\./, "")}`;
   };
   const by = new Map<string, { names: Map<string, number>; answers: number; prompts: Set<string>; providers: Set<string> }>();
   for (const a of answers) {
-    const names = (a.signals.untrackedEntities ?? []).map(clean).filter((n) => n && key(n) && !known.has(key(n)));
+    const names = (a.signals.untrackedEntities ?? []).map(clean).filter((n) => n && nameKey(n) && !known.has(nameKey(n)));
     for (const g of new Set(names.map(group))) {
       const row = by.get(g) ?? { names: new Map(), answers: 0, prompts: new Set(), providers: new Set() };
       row.answers++;

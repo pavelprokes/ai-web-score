@@ -35,18 +35,28 @@ import { throwIfJobCancelled } from "@/jobs/queue";
 const MAX_ITEMS = 8;
 const WINDOW_DAYS = DEFAULT_WINDOW_DAYS;
 
+/** No domain (404) or no profile yet (409); the API answers with the status instead of a 500. */
+export class RecommendationsUnavailable extends Error {
+  constructor(
+    readonly status: 404 | 409,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /** Profile, recent answers and the deterministic findings of a domain — shared by recommendations and the agent brief. */
 async function collectFindings(domainId: string) {
   const db = getDb();
   const [domain] = await db.select().from(domains).where(eq(domains.id, domainId));
-  if (!domain) throw new Error("Domain not found");
+  if (!domain) throw new RecommendationsUnavailable(404, "Domain not found");
   const [profileRow] = await db
     .select({ profile: domainProfiles.profile, digest: domainProfiles.crawlDigest })
     .from(domainProfiles)
     .where(eq(domainProfiles.domainId, domainId))
     .orderBy(desc(domainProfiles.version))
     .limit(1);
-  if (!profileRow) throw new Error("Run the discovery first — recommendations need the domain profile");
+  if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
   const [answers, clusters, site] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname)]);

@@ -101,6 +101,29 @@ describe("diagnose", () => {
     expect(JSON.stringify(authority.evidence)).not.toContain("rival.cz");
   });
 
+  it("skips sites of tracked competitors and of businesses the answer recommends, keeps a directory cited for others", () => {
+    const answers = Array.from({ length: 6 }, (_, i) =>
+      answer(
+        {
+          competitorsMentioned: ["rival"],
+          // "Studio Om" is named in 3 answers to 2 questions: a suggested competitor, so its site never counts.
+          untrackedEntities: [...(i < 2 ? ["Petr Doležal", "Yogadir"] : ["Petr Doležal"]), ...(i < 3 ? ["Studio Om"] : [])],
+          citedDomains: ["petr-dolezal.cz", "yogadir.com", "the-rival.com", "studio-om.cz", "blog.the-rival.com"],
+        },
+        { promptId: `p${i % 2}` },
+      ),
+    );
+    const named = { ...profile, competitors: [{ name: "The Rival", aliases: [], domains: [] }] } as unknown as DomainProfile;
+    const sources = (ignoredCompetitors: string[]) =>
+      diagnose(input({ answers, profile: named, ignoredCompetitors })).find((f) => f.key === "authority:third-party-sources")!.evidence.sources;
+    expect(sources([])).toEqual([{ value: "yogadir.com", count: 4 }]);
+    // An ignored name is not a competitor, so its site counts again.
+    expect(sources(["Yogadir", "Studio Om"])).toEqual([
+      { value: "studio-om.cz", count: 6 },
+      { value: "yogadir.com", count: 6 },
+    ]);
+  });
+
   it("flags a brand that is mentioned but never cited", () => {
     const answers = Array.from({ length: 5 }, () => answer({ brandMentioned: true, domainCited: false }));
     expect(diagnose(input({ answers })).map((f) => f.key)).toContain("citation:own-pages");

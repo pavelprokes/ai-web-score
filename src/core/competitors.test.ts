@@ -44,6 +44,7 @@ describe("suggestCompetitors", () => {
   it("recognises the brand, tracked rivals and ignored names", () => {
     expect(isKnownCompetitorName("rival studio", profile, [])).toBe(true);
     expect(isKnownCompetitorName("www.rival.cz", profile, [])).toBe(true);
+    expect(isKnownCompetitorName("rival.co.uk", profile, [])).toBe(true);
     expect(isKnownCompetitorName("Other", profile, ["other"])).toBe(true);
     expect(isKnownCompetitorName("Other", profile, [])).toBe(false);
   });

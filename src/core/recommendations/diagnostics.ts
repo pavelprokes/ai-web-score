@@ -1,7 +1,7 @@
 import type { CrawlDigest } from "../discovery/crawl";
 import type { DomainProfile } from "../domain-profile";
 import type { RawSignals } from "../signals/extract";
-import { suggestCompetitors } from "../competitors";
+import { nameKey, suggestCompetitors } from "../competitors";
 
 /**
  * RECOMMENDATIONS — step 1: deterministic diagnostics. Pure functions over what we already know about a
@@ -308,16 +308,30 @@ function topicGaps({ answers, clusters }: DiagnosticsInput): Finding[] {
   return out;
 }
 
-function citationSources({ answers, profile, hostname }: DiagnosticsInput): Finding[] {
+function citationSources({ answers, profile, hostname, ignoredCompetitors }: DiagnosticsInput): Finding[] {
   const missing = answers.filter((a) => !a.signals.brandMentioned && a.signals.competitorsMentioned.length > 0);
   if (missing.length < MIN_ANSWERS) return [];
   const own = new Set([hostname, ...profile.ownedDomains].map(hostOf));
   const competitorHosts = new Set(profile.competitors.flatMap((c) => (c.domains ?? []).map(hostOf)));
-  const domains = missing.flatMap((a) => [...new Set([...a.signals.citedDomains, ...a.signals.retrievedUrls.map(hostOf)].map(hostOf))]);
-  const third = topCounts(
-    domains.filter((d) => d && !own.has(d) && !competitorHosts.has(d)),
-    8,
-  ).filter((d) => d.count >= 2);
+  // A competitor's own site is not a place to get listed: a host spelling a tracked or suggested competitor
+  // (bridgeacademy.cz for "Bridge Academy", also blog.bridgeacademy.cz), or a business the same answer recommends
+  // (petr-dolezal.cz next to "Petr Doležal"; only analysed answers name those). Directories cited for others still
+  // count, and an ignored name is never a competitor: ignoring "MyWed" keeps mywed.com as a source.
+  const ignored = new Set((ignoredCompetitors ?? []).map(nameKey));
+  const suggested = suggestCompetitors(answers, profile, ignoredCompetitors ?? [], Infinity);
+  const competitorNames = new Set(
+    [...profile.competitors, ...suggested].flatMap((c) => [c.name, ...c.aliases, ...(c.domains ?? [])]).map(nameKey),
+  );
+  const domains = missing.flatMap((a) => {
+    const named = new Set((a.signals.untrackedEntities ?? []).map(nameKey));
+    const isCompetitor = (k: string) => !ignored.has(k) && (competitorNames.has(k) || named.has(k));
+    return [...new Set([...a.signals.citedDomains, ...a.signals.retrievedUrls.map(hostOf)].map(hostOf))].filter((d) => {
+      const labels = d.split(".");
+      const keys = labels.slice(0, -1).map((_, i) => nameKey(labels.slice(i).join("."))); // the host and its parents
+      return d && !own.has(d) && !competitorHosts.has(d) && !keys.some(isCompetitor);
+    });
+  });
+  const third = topCounts(domains, 8).filter((d) => d.count >= 2);
   if (third.length === 0) return [];
   const share = third[0]!.count / missing.length;
   return [
