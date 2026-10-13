@@ -33,7 +33,7 @@ import { throwIfJobCancelled } from "@/jobs/queue";
  */
 
 const MAX_ITEMS = 8;
-const WINDOW_DAYS = 30;
+const WINDOW_DAYS = DEFAULT_WINDOW_DAYS;
 
 /** Profile, recent answers and the deterministic findings of a domain — shared by recommendations and the agent brief. */
 async function collectFindings(domainId: string) {
@@ -156,11 +156,14 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
       providerId: measurements.providerId,
       signals: measurementSignals.signals,
       searchQueries: measurements.searchQueries,
+      category: promptVersions.category,
     })
     .from(measurements)
     .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    // Only topics still monitored, as in the score (dropped clusters would show up as gaps under raw keys).
+    .innerJoin(topicClusters, and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true)))
     .where(
       and(
         eq(measurements.domainId, domainId),
@@ -178,6 +181,7 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
     providerId: r.providerId,
     signals: r.signals as RawSignals,
     searchQueries: Array.isArray(r.searchQueries) ? (r.searchQueries as string[]) : [],
+    branded: r.category === "BRAND_VALIDATION",
   }));
 }
 
@@ -259,7 +263,8 @@ async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
       providerId: measurements.providerId,
       prompt: promptVersions.text,
       branded: sql<boolean>`${promptVersions.category} = 'BRAND_VALIDATION'`,
-      answerText: measurements.answerText,
+      // Excerpts need the start (gaps) or the brand mention, which sits early in answers about the brand.
+      answerText: sql<string | null>`left(${measurements.answerText}, 3000)`,
       signals: sig,
     })
     .from(measurements)
@@ -279,7 +284,7 @@ async function loadExampleRows(domainId: string): Promise<BriefExample[]> {
       ),
     )
     .orderBy(desc(measurements.finishedAt))
-    .limit(300);
+    .limit(200);
   return rows
     .filter((r) => r.answerText)
     .map((r) => ({
