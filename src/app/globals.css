@@ -1,64 +1,34 @@
-/* Admin UI — WCAG 2.2 AA. Every colour pair below was checked: body text ≥ 7:1, secondary/muted
- * text ≥ 4.5:1, interactive borders, focus ring and meter fill ≥ 3:1 (light and dark). */
+/* Admin UI — WCAG 2.2 AA. Colours come from hig-web-kit in its AA mode (<html data-hig-mode="aa">):
+ * every text pair ≥ 4.5:1, control boundaries and focus ring ≥ 3:1, light/dark/increased contrast
+ * follow the OS. The aliases below keep the admin's own names; only --serious has no kit token. */
 
 :root {
-  color-scheme: light;
-  --bg: #f6f6f4;
-  --surface: #ffffff;
-  --surface-2: #f0efec;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --muted: #6b6a66;
-  --border: #dddcd7;          /* decorative separators only */
-  --border-strong: #767570;   /* form controls: 4.6:1 */
-  --link: #1c5cab;
-  --primary: #256abf;         /* white text 5.4:1 */
-  --primary-hover: #1c5cab;
-  --on-primary: #ffffff;
-  --focus: #1c5cab;
-  --good: #0a7d0a;
-  --info: #1c5cab;
-  --warning: #8f5d00;
-  --serious: #b5471c;
-  --critical: #b42323;
-  --badge-bg: #f0efec;
-  --meter-track: #cde2fb;
-  --meter-fill: #256abf;
-  --meter-warning: #8f5d00;
-  --meter-critical: #b42323;
-  --radius: 10px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 6%);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #121211;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --text: #ffffff;
-    --text-2: #c3c2b7;
-    --muted: #a5a49b;
-    --border: #34342f;
-    --border-strong: #8a8980;
-    --link: #86b6ef;
-    --primary: #1c5cab;
-    --primary-hover: #256abf;
-    --on-primary: #ffffff;
-    --focus: #86b6ef;
-    --good: #5fd35f;
-    --info: #86b6ef;
-    --warning: #fab219;
-    --serious: #ec835a;
-    --critical: #ff8a8a;
-    --badge-bg: #232321;
-    --meter-track: #104281;
-    --meter-fill: #6da7ec;
-    --meter-warning: #fab219;
-    --meter-critical: #ff8a8a;
-    --shadow: none;
-  }
+  --bg: var(--hig-grouped-bg);
+  --surface: var(--hig-grouped-bg-2);
+  --surface-2: var(--hig-grouped-bg-3);
+  --text: var(--hig-label);
+  --text-2: var(--hig-label-2);
+  --muted: var(--hig-label-2);
+  --border: var(--hig-sep);                   /* decorative separators only */
+  --border-strong: var(--hig-control-border); /* form controls: ≥ 3:1 */
+  --link: var(--hig-link);
+  --primary: var(--hig-accent-fill);          /* white text ≥ 4.5:1 */
+  --primary-hover: color-mix(in srgb, var(--hig-accent-fill) 85%, black);
+  --on-primary: var(--hig-on-accent);
+  --focus: var(--hig-focus-ring);
+  --good: var(--hig-success-text);
+  --info: var(--hig-link);
+  --warning: var(--hig-warning-text);
+  --serious: light-dark(#b5471c, #ec835a);
+  --critical: var(--hig-destructive-text);
+  --badge-bg: var(--hig-fill-3);
+  --meter-track: var(--hig-fill);
+  --meter-fill: var(--hig-accent);            /* ≥ 3:1 on the track in both schemes */
+  --meter-warning: var(--hig-warning-text);
+  --meter-critical: var(--hig-destructive-text);
+  --radius: var(--hig-radius-md);
+  --shadow: 0 1px 2px light-dark(rgb(0 0 0 / 6%), transparent);
+  font-family: var(--hig-font-sans);
 }
 
 *,

@@ -27,6 +27,7 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.3",
+    "hig-web-kit": "github:pavelprokes/hig-web-kit#fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c",
     "next": "^16.3.8",
     "next-auth": "5.0.0-beta.32",
     "postgres": "^3.4.9",

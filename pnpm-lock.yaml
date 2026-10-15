@@ -17,6 +17,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@opentelemetry/api@1.9.1)(pg@8.23.1)(postgres@3.4.9)
+      hig-web-kit:
+        specifier: github:pavelprokes/hig-web-kit#fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c
+        version: https://codeload.github.com/pavelprokes/hig-web-kit/tar.gz/fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c
       next:
         specifier: ^16.3.8
         version: 16.3.8(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1153,6 +1156,16 @@ packages:
 
   get-tsconfig@4.14.3:
     resolution: {integrity: sha512-++QEw4DIY7WGoukz+/+A/8dGYPT9l9yIadnmSgZ8Rjr3YVSVDipQSO9CdnJo9ePqFqUUqh+wk9uIaoiAwsiPkA==}
+
+  hig-web-kit@https://codeload.github.com/pavelprokes/hig-web-kit/tar.gz/fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c:
+    resolution: {gitHosted: true, integrity: sha512-QXhmsKNxOeVLO8WzP3gpCa9ntU7/tc4QF8GuKmusfyJy9WqtUTIJk+/KDoL+YPxf6jddykprlboz9cKtBWbj7g==, tarball: https://codeload.github.com/pavelprokes/hig-web-kit/tar.gz/fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c}
+    version: 0.3.0
+    engines: {node: '>=20'}
+    peerDependencies:
+      antd: '>=5.12'
+    peerDependenciesMeta:
+      antd:
+        optional: true
 
   htmlparser2@10.1.0:
     resolution: {integrity: sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ==}
@@ -2294,6 +2307,8 @@ snapshots:
   get-tsconfig@4.14.3:
     dependencies:
       resolve-pkg-maps: 1.0.0
+
+  hig-web-kit@https://codeload.github.com/pavelprokes/hig-web-kit/tar.gz/fecdfc5951afc6b8d8b4cf7e79663bebc11f7a8c: {}
 
   htmlparser2@10.1.0:
     dependencies:
