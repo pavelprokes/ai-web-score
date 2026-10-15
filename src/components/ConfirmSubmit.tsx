@@ -43,12 +43,13 @@ export function ConfirmSubmit({
           {body}
         </div>
         <div className="btn-row confirm__actions">
-          <SubmitButton className="btn btn--primary" pendingLabel={pendingLabel}>
-            {confirmLabel}
-          </SubmitButton>
-          <button ref={cancelRef} type="button" className="btn" onClick={() => ref.current?.close()}>
+          {/* HIG: Cancel on the leading side. */}
+          <button ref={cancelRef} type="button" className="hig-btn" onClick={() => ref.current?.close()}>
             Cancel
           </button>
+          <SubmitButton className="hig-btn hig-btn--prominent" pendingLabel={pendingLabel}>
+            {confirmLabel}
+          </SubmitButton>
         </div>
       </dialog>
     </>

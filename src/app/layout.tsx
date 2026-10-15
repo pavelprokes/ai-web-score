@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import "hig-web-kit/hig.css";
+import "hig-web-kit/components.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-hig-mode="aa">
       {/* Browser extensions (e.g. ColorZilla's cz-shortcut-listen) add attributes to <body> before hydration. */}
       <body suppressHydrationWarning>{children}</body>
     </html>

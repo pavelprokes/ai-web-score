@@ -205,7 +205,7 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
           {METRICS.map((m) => (
             <label key={m.id}>
               <input type="radio" name={`${uid}-metric`} value={m.id} checked={metric === m.id} onChange={() => setMetric(m.id)} />
-              <span>{m.label}</span>
+              <span className="hig-chip">{m.label}</span>
             </label>
           ))}
         </fieldset>
@@ -214,7 +214,7 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
           {RANGES.map((r) => (
             <label key={r.days}>
               <input type="radio" name={`${uid}-range`} value={r.days} checked={rangeDays === r.days} onChange={() => setRangeDays(r.days)} />
-              <span>{r.label}</span>
+              <span className="hig-chip">{r.label}</span>
             </label>
           ))}
         </fieldset>
@@ -364,7 +364,7 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
       <details className="trend__table">
         <summary>Show data as table</summary>
         <div className="table-scroll" role="region" aria-label={`${metricDef.label} by day (scrollable)`} tabIndex={0}>
-          <table>
+          <table className="hig-table">
             <caption className="sr-only">
               {metricDef.label} by day, last {rangeDays} days
             </caption>

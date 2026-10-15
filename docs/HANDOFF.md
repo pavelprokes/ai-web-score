@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-10-13.
+Read this first in a new session. Last updated 2026-10-15.
 
 ## How to continue in a new session
 
@@ -61,6 +61,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #42 | Competitors from answers: "Named by AI, not tracked" in the domain profile (≥3 analysed answers to ≥2 questions, spellings merged); Track = new profile version + re-extraction of stored answers (`signals.reextract`) + score history rebuild; Ignore = `domains.ignored_competitors` (migration 0010); re-discovery keeps added competitors |
 | #44 | Pages no longer stall 20 s: postgres.js pipelined queries onto busy connections and the Supabase transaction pooler sometimes never answered (`max_pipeline: 1` still pipelines one; 0 breaks transactions) → `src/db/limit.ts` keeps queries in flight ≤ pool size; `<Link prefetch={false}>` everywhere (16 extra renders per page load). Production burst of 8 API reads: 2 of 8 at 22–24 s before, worst 2.2 s after |
 | #46 | "Get listed on the sources assistants cite" no longer names competitors' own sites (se-vezmou.cz got vezmemese.cz, wemarry.io, lumiwed.com; now reddit.com, svatbona.cz, svatka.cz): hosts spelling a tracked or suggested competitor (subdomains too) or a business the same answer recommends are skipped, directories (mywed.com, fotoprofici.cz) stay; agent brief API answers 404/409 instead of 500 |
+| #47 | Admin UI on hig-web-kit (Apple HIG) in its WCAG 2.2 AA mode: tokens, capsule buttons, kit tables and chips, sticky top bar with a scroll edge, HIG alert for confirmations (Cancel leading); schedule interval rounded |
 
 ## Next task
 

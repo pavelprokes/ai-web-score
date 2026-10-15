@@ -1,64 +1,33 @@
-/* Admin UI — WCAG 2.2 AA. Every colour pair below was checked: body text ≥ 7:1, secondary/muted
- * text ≥ 4.5:1, interactive borders, focus ring and meter fill ≥ 3:1 (light and dark). */
+/* Admin UI — WCAG 2.2 AA. Colours come from hig-web-kit in its AA mode (<html data-hig-mode="aa">):
+ * every text pair ≥ 4.5:1, control boundaries and focus ring ≥ 3:1, light/dark/increased contrast
+ * follow the OS. The aliases below keep the admin's own names; only --serious has no kit token. */
 
 :root {
-  color-scheme: light;
-  --bg: #f6f6f4;
-  --surface: #ffffff;
-  --surface-2: #f0efec;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --muted: #6b6a66;
-  --border: #dddcd7;          /* decorative separators only */
-  --border-strong: #767570;   /* form controls: 4.6:1 */
-  --link: #1c5cab;
-  --primary: #256abf;         /* white text 5.4:1 */
-  --primary-hover: #1c5cab;
-  --on-primary: #ffffff;
-  --focus: #1c5cab;
-  --good: #0a7d0a;
-  --info: #1c5cab;
-  --warning: #8f5d00;
-  --serious: #b5471c;
-  --critical: #b42323;
-  --badge-bg: #f0efec;
-  --meter-track: #cde2fb;
-  --meter-fill: #256abf;
-  --meter-warning: #8f5d00;
-  --meter-critical: #b42323;
-  --radius: 10px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 6%);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #121211;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --text: #ffffff;
-    --text-2: #c3c2b7;
-    --muted: #a5a49b;
-    --border: #34342f;
-    --border-strong: #8a8980;
-    --link: #86b6ef;
-    --primary: #1c5cab;
-    --primary-hover: #256abf;
-    --on-primary: #ffffff;
-    --focus: #86b6ef;
-    --good: #5fd35f;
-    --info: #86b6ef;
-    --warning: #fab219;
-    --serious: #ec835a;
-    --critical: #ff8a8a;
-    --badge-bg: #232321;
-    --meter-track: #104281;
-    --meter-fill: #6da7ec;
-    --meter-warning: #fab219;
-    --meter-critical: #ff8a8a;
-    --shadow: none;
-  }
+  --bg: var(--hig-grouped-bg);
+  --surface: var(--hig-grouped-bg-2);
+  --surface-2: var(--hig-grouped-bg-3);
+  --text: var(--hig-label);
+  --text-2: var(--hig-label-2);
+  --muted: var(--hig-label-2);
+  --border: var(--hig-sep);                   /* decorative separators only */
+  --border-strong: var(--hig-control-border); /* form controls: ≥ 3:1 */
+  --link: var(--hig-link);
+  --primary: var(--hig-accent-fill);          /* white text ≥ 4.5:1 */
+  --primary-hover: color-mix(in srgb, var(--hig-accent-fill) 85%, black);
+  --on-primary: var(--hig-on-accent);
+  --focus: var(--hig-focus-ring);
+  --good: var(--hig-success-text);
+  --info: var(--hig-link);
+  --warning: var(--hig-warning-text);
+  --serious: light-dark(#b5471c, #ec835a);
+  --critical: var(--hig-destructive-text);
+  --badge-bg: var(--hig-fill-3);
+  --meter-track: var(--hig-fill);
+  --meter-fill: var(--hig-accent);            /* ≥ 3:1 on the track in both schemes */
+  --meter-warning: var(--hig-warning-text);
+  --meter-critical: var(--hig-destructive-text);
+  --radius: var(--hig-radius-md);
+  font-family: var(--hig-font-sans);
 }
 
 *,
@@ -69,6 +38,8 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* Focused or linked elements never hide under the sticky top bar (WCAG 2.4.11). */
+  scroll-padding-top: 5.5rem;
 }
 
 body {
@@ -80,12 +51,11 @@ body {
 }
 
 h1, h2, h3 {
-  line-height: 1.25;
   margin: 0;
 }
-h1 { font-size: 1.6rem; }
-h2 { font-size: 1.15rem; }
-h3 { font-size: 1rem; }
+h1 { font: var(--hig-text-title-1); letter-spacing: -0.01em; }
+h2 { font: var(--hig-text-title-3); }
+h3 { font: var(--hig-text-headline); font-size: 1rem; }
 
 a {
   color: var(--link);
@@ -131,9 +101,28 @@ a {
 
 /* ── App shell ───────────────────────────────────────────────────── */
 
+/* HIG toolbar: no solid bar; content scrolls under a hard scroll edge (near-opaque, blurred). */
 .topbar {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 30;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 0.5px solid var(--hig-sep);
+}
+/* Sticky only where it fits on one line; on phones it wraps and would eat the screen. */
+@media (min-width: 761px) {
+  .topbar {
+    position: sticky;
+    top: 0;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .topbar {
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 .topbar__inner {
   max-width: 1480px;
@@ -158,20 +147,20 @@ a {
 }
 .nav a {
   display: inline-block;
-  padding: 0.45rem 0.75rem;
-  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
   color: var(--text-2);
   text-decoration: none;
   min-height: 44px;
   line-height: 1.9;
 }
 .nav a:hover {
-  background: var(--surface-2);
+  background: var(--hig-fill-4);
   color: var(--text);
 }
 .nav a[aria-current="page"] {
   color: var(--text);
-  background: var(--surface-2);
+  background: var(--hig-fill-3);
   font-weight: 600;
 }
 .topbar__user {
@@ -210,10 +199,8 @@ main {
 
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 1.1rem 1.25rem;
+  border-radius: var(--hig-radius-lg);
+  padding: 1.25rem 1.4rem;
   margin-bottom: 1.25rem;
 }
 .card__head {
@@ -228,6 +215,7 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 1.25rem;
+  margin-bottom: 1.25rem;
 }
 .grid-2 > .card {
   margin-bottom: 0;
@@ -244,7 +232,6 @@ main {
 }
 .tile {
   background: var(--surface);
-  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.85rem 1rem;
 }
@@ -255,7 +242,8 @@ main {
 .tile__value {
   margin: 0.2rem 0 0;
   font-size: 1.6rem;
-  font-weight: 650;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .tile__detail {
   margin: 0.1rem 0 0;
@@ -296,8 +284,8 @@ main {
   border-radius: 999px;
   background: var(--badge-bg);
   color: var(--text);
-  font-size: 0.85rem;
-  font-weight: 550;
+  font: var(--hig-text-footnote);
+  font-weight: 600;
   white-space: nowrap;
 }
 .badge__icon { flex: none; }
@@ -342,9 +330,10 @@ main {
   font-size: 0.9rem;
 }
 .meter__track {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: var(--meter-track);
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
   overflow: hidden;
   margin-top: 0.3rem;
 }
@@ -362,42 +351,39 @@ main {
 
 /* ── Tables ──────────────────────────────────────────────────────── */
 
+/* Tables are kit .hig-table (zebra rows, footnote headings); the admin adds row headers, numeric
+   cells and top alignment for multi-line cells. */
 .table-scroll {
   position: relative; /* contains absolutely positioned .sr-only text */
   overflow-x: auto;
-  border-radius: 8px;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.95rem;
+  border-radius: var(--radius);
 }
 caption {
   text-align: left;
   color: var(--text-2);
   padding-bottom: 0.5rem;
 }
-th,
-td {
-  text-align: left;
-  padding: 0.6rem 0.6rem;
-  border-bottom: 1px solid var(--border);
+.hig-table td,
+.hig-table tbody th {
   vertical-align: top;
 }
-thead th {
-  color: var(--text-2);
-  font-size: 0.85rem;
-  font-weight: 600;
-  white-space: nowrap;
-  background: var(--surface-2);
+/* Row headers are data, not column headings. */
+.hig-table tbody th {
+  position: static;
+  padding: 10px 14px;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--hig-label);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
 }
+.hig-table tbody tr:nth-child(even) th { background: var(--hig-fill-4); }
+.hig-table tbody tr:hover th { background: var(--hig-fill-3); }
 td.num,
 th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-tbody tr:hover {
-  background: var(--surface-2);
 }
 .cell-sub {
   display: block;
@@ -410,40 +396,26 @@ tbody tr:hover {
 
 /* ── Buttons & forms ─────────────────────────────────────────────── */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  min-height: 44px;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-weight: 550;
-  cursor: pointer;
+/* Buttons are kit .hig-btn (capsule; gray, --prominent, --destructive, --sm). */
+a.hig-btn,
+summary.hig-btn {
   text-decoration: none;
 }
-.btn:hover {
-  background: var(--surface-2);
+/* The kit's translucent gray fill drops accent text below 4.5:1 on the gray page and on zebra rows,
+   so secondary buttons sit on the card surface with the AA control boundary instead. */
+.hig-btn:not(.hig-btn--prominent) {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
 }
-.btn--primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--on-primary);
+@media (hover: hover) {
+  .hig-btn:not(.hig-btn--prominent, [aria-disabled="true"]):hover {
+    background: color-mix(in srgb, var(--surface) 92%, var(--hig-label));
+  }
+  .hig-btn--prominent:not([aria-disabled="true"]):hover {
+    background: var(--primary-hover);
+  }
 }
-.btn--primary:hover {
-  background: var(--primary-hover);
-}
-.btn--small {
-  min-height: 36px;
-  padding: 0.3rem 0.75rem;
-  font-size: 0.9rem;
-}
-.btn[aria-disabled="true"] {
-  opacity: 0.65;
+.hig-btn[aria-busy="true"] {
   cursor: progress;
 }
 .btn-row {
@@ -467,14 +439,17 @@ form.inline {
   color: var(--text-2);
   font-size: 0.875rem;
 }
-.field input[type="text"],
-.field input[type="number"],
-.field input[type="url"] {
+/* Text fields and selects take the kit's field look: fill, field radius, 3:1 boundary in AA mode. */
+.field input:is([type="text"], [type="number"], [type="url"]),
+.models-form select,
+.balance-form input,
+.filters select {
   min-height: 44px;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: var(--hig-radius-field);
+  background: var(--hig-fill-3);
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
   color: var(--text);
   font: inherit;
 }
@@ -498,13 +473,6 @@ form.inline {
 .models-form select {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
 }
 .balance-form {
   display: flex;
@@ -513,17 +481,9 @@ form.inline {
 }
 .balance-form input {
   width: 9rem;
-  min-height: 36px;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
 }
 .field input[aria-invalid="true"] {
-  border-color: var(--critical);
-  border-width: 2px;
+  box-shadow: inset 0 0 0 2px var(--critical);
 }
 .error-text {
   color: var(--critical);
@@ -544,7 +504,7 @@ form.inline {
 }
 
 .alert {
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 0.75rem 1rem;
   margin-bottom: 1rem;
   background: var(--surface-2);
@@ -558,14 +518,15 @@ form.inline {
 
 dialog {
   width: min(520px, calc(100vw - 2rem));
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  border: 0;
+  border-radius: var(--hig-radius-lg);
   padding: 1.5rem;
-  background: var(--surface);
+  background: var(--hig-bg-elevated);
   color: var(--text);
+  box-shadow: 0 20px 60px var(--hig-glass-shadow-color), 0 0 0 0.5px var(--hig-sep);
 }
 dialog::backdrop {
-  background: rgb(0 0 0 / 50%);
+  background: var(--hig-scrim);
 }
 .dialog__head {
   display: flex;
@@ -588,7 +549,6 @@ dialog::backdrop {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .btn,
   .nav a {
     transition: background-color 120ms ease;
   }
@@ -596,9 +556,11 @@ dialog::backdrop {
 
 @media (forced-colors: active) {
   .badge,
-  .btn,
+  .hig-btn,
+  .hig-chip,
   .tile,
-  .card {
+  .card,
+  dialog {
     border: 1px solid CanvasText;
   }
   .meter__fill {
@@ -611,7 +573,6 @@ tbody th[scope="row"] {
   font-weight: 400;
 }
 .domain-link,
-.btn,
 time,
 .badge {
   white-space: nowrap;
@@ -704,7 +665,6 @@ td .meter {
 }
 .tiles--inner .tile {
   background: var(--surface-2);
-  border-color: transparent;
 }
 .tiles--inner .tile__value {
   font-size: 1.3rem;
@@ -718,9 +678,9 @@ td .meter {
   gap: 0.4rem;
 }
 .chips li {
-  border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 0.15rem 0.65rem;
+  background: var(--hig-fill-3);
   font-size: 0.875rem;
 }
 .proposals {
@@ -807,18 +767,27 @@ td .meter {
   gap: 0.35rem;
   min-width: 15rem;
   padding: 0.5rem;
-  background: var(--surface);
+  background: var(--hig-bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 0.18));
+  box-shadow: 0 8px 28px var(--hig-glass-shadow-color);
 }
+/* Items read as menu rows, not stacked buttons. */
 .menu__panel form,
-.menu__panel .btn {
-  display: block;
+.menu__panel .hig-btn {
+  display: flex;
   width: 100%;
 }
-.menu__panel .btn {
+.menu__panel .hig-btn {
   justify-content: flex-start;
+  min-height: 36px;
+  padding-inline: 0.75rem;
+  border-radius: var(--hig-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 400;
+  font-size: 1rem;
   text-align: left;
 }
 @media (max-width: 600px) {
@@ -852,7 +821,7 @@ td .meter {
   white-space: nowrap;
 }
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--hig-font-mono);
   font-size: 0.9em;
 }
 .section-intro {
@@ -950,24 +919,14 @@ code {
   margin: 0;
   cursor: pointer;
 }
-.segmented span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0.3rem 0.75rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 0.9rem;
-  background: var(--surface);
-  color: var(--text);
+/* Spans are kit .hig-chip (scope bar); native radios keep keyboard and screen-reader behaviour. */
+.segmented label:hover .hig-chip {
+  background: var(--hig-fill-2);
 }
-.segmented label:hover span {
-  background: var(--surface-2);
-}
-.segmented input:checked + span {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--surface);
+.segmented input:checked + .hig-chip {
+  background: var(--hig-label);
+  color: var(--hig-bg);
+  box-shadow: none;
   font-weight: 600;
 }
 .segmented input:focus-visible + span {
@@ -1110,11 +1069,11 @@ code {
   z-index: 50;
   width: 280px;
   padding: 0.6rem 0.75rem;
-  background: var(--surface);
+  background: var(--hig-bg-elevated);
   color: var(--text);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  border-radius: var(--hig-radius-sm);
+  box-shadow: 0 8px 28px var(--hig-glass-shadow-color);
   font-size: 0.85rem;
   font-weight: 400;
   line-height: 1.45;
@@ -1149,8 +1108,8 @@ code {
 }
 .metrics-toc {
   position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
+  top: 5.5rem;
+  max-height: calc(100vh - 6.5rem);
   overflow: auto;
   font-size: 0.9rem;
 }
@@ -1179,7 +1138,7 @@ code {
   margin: 0 0 0.4rem;
 }
 .metric-card {
-  scroll-margin-top: 1rem;
+  scroll-margin-top: 5.5rem;
 }
 .metric-card:target {
   outline: 3px solid var(--focus);
@@ -1212,8 +1171,8 @@ code {
   margin: 0;
   padding: 0.6rem 0.75rem;
   background: var(--surface-2);
-  border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border-radius: var(--hig-radius-sm);
+  font-family: var(--hig-font-mono);
   font-size: 0.85rem;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -1246,17 +1205,18 @@ code {
   gap: 0.5rem;
   min-height: 40px;
   max-width: 28rem;
-  padding: 0.35rem 0.8rem;
-  border: 1px solid var(--border-strong);
+  padding: 0.35rem 0.9rem;
+  border: 0;
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--hig-fill-3);
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
   color: var(--text);
   font: inherit;
   font-size: 0.9rem;
   cursor: pointer;
 }
 .activity__button:hover {
-  background: var(--surface-2);
+  background: var(--hig-fill-2);
 }
 .activity__summary {
   overflow: hidden;
@@ -1294,10 +1254,10 @@ code {
   z-index: 40;
   width: min(24rem, calc(100vw - 2rem));
   padding: 0.75rem 0.9rem;
-  background: var(--surface);
+  background: var(--hig-bg-elevated);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  box-shadow: 0 8px 28px var(--hig-glass-shadow-color);
 }
 .activity__panel[hidden] {
   display: none;
@@ -1384,11 +1344,11 @@ code {
 }
 
 /* ── Busy buttons and pop-confirm ────────────────────────────────── */
-.btn.btn--busy,
-.btn.btn--busy:hover {
+.hig-btn.btn--busy,
+.hig-btn.btn--busy:hover {
   cursor: not-allowed;
-  background: var(--surface-2);
-  border-color: var(--border-strong);
+  opacity: 1;
+  background: var(--hig-fill-3);
   color: var(--text-2);
 }
 .btn__spinner {
@@ -1406,8 +1366,10 @@ code {
     border-color: var(--link);
   }
 }
+/* HIG alert: larger radius, equal-width buttons, Cancel on the leading side. */
 dialog.confirm {
-  width: min(460px, calc(100vw - 2rem));
+  width: min(420px, calc(100vw - 2rem));
+  border-radius: var(--hig-radius-alert);
 }
 dialog.confirm h2 {
   margin: 0 0 0.6rem;
@@ -1421,7 +1383,9 @@ dialog.confirm h2 {
   margin: 0 0 0.5rem;
 }
 .confirm__actions {
-  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 1.25rem;
 }
 .activity__actions {
   display: flex;
@@ -1429,11 +1393,6 @@ dialog.confirm h2 {
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.2rem;
-}
-.btn.btn--danger {
-  border-color: var(--critical);
-  color: var(--critical);
-  font-weight: 650;
 }
 
 /* ── Answer viewer ───────────────────────────────────────────────── */
@@ -1454,13 +1413,6 @@ dialog.confirm h2 {
 .filters select {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
 }
 .answers {
   list-style: none;

@@ -87,7 +87,7 @@ export default async function DomainsPage({
           <>
             <div className="only-wide">
               <TableScroll label="Monitored domains (scrollable)">
-                <table>
+                <table className="hig-table">
                   <caption className="sr-only">
                     Monitored domains with visibility scores, last activity and
                     cost. Rates show the 95 % confidence interval in small

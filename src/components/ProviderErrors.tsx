@@ -11,7 +11,7 @@ export function ProviderErrors({ errors, now }: { errors: ProviderErrorGroup[]; 
   return (
     <Section title={`Provider errors in the last 24 h (${total})`} id="provider-errors-heading">
       <TableScroll label="Provider errors (scrollable)">
-        <table>
+        <table className="hig-table">
           <thead>
             <tr>
               <th scope="col">Provider</th>

@@ -60,6 +60,10 @@ Test files run serially (`fileParallelism: false`) because DB suites share and r
   `src/core/measurement/providers/<name>.ts` and register it in `providers/index.ts`.
 - Discovery prompts never contain the brand, never force web search, always set location.
 - Admin UI targets WCAG 2.2 AA (light + dark contrast, keyboard, status not by colour alone, 320 px reflow).
+- Admin UI is built on hig-web-kit (Apple HIG, `github:pavelprokes/hig-web-kit` pinned to a commit) in its AA mode
+  (`<html data-hig-mode="aa">`): colours only via `--hig-*` tokens (aliased in `globals.css`), kit classes
+  `.hig-btn`, `.hig-table`, `.hig-chip`. Secondary buttons are outlined on purpose (the kit's gray fill fails 4.5:1
+  on the gray page). To update the kit, re-pin the commit and run `pnpm a11y`.
 - Freshly published deps can be blocked by pnpm's `minimumReleaseAge`; pin the previous version instead of
   relaxing the policy. Install-script allowlist is in `pnpm-workspace.yaml`.
 

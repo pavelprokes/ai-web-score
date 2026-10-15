@@ -31,7 +31,7 @@ export function InternalModels({ current }: { current: Record<LlmTask, string> }
             </select>
           </div>
         ))}
-        <SubmitButton className="btn" pendingLabel="Saving…">
+        <SubmitButton className="hig-btn" pendingLabel="Saving…">
           Save models
         </SubmitButton>
       </form>

@@ -13,7 +13,7 @@ export function Accounts({ accounts, now }: { accounts: AccountRow[]; now: Date 
         remainder is estimated from the spend tracked since.
       </p>
       <TableScroll label="Accounts (scrollable)">
-        <table>
+        <table className="hig-table">
           <thead>
             <tr>
               <th scope="col">Account</th>
@@ -68,7 +68,7 @@ export function Accounts({ accounts, now }: { accounts: AccountRow[]; now: Date 
                         {a.label} balance in USD
                       </label>
                       <input id={`balance-${a.id}`} name="amountUsd" type="text" inputMode="decimal" placeholder="USD, e.g. 25.40" required />
-                      <SubmitButton className="btn btn--small" pendingLabel="Saving…">
+                      <SubmitButton className="hig-btn hig-btn--sm" pendingLabel="Saving…">
                         Save<span className="sr-only"> {a.label} balance</span>
                       </SubmitButton>
                     </form>

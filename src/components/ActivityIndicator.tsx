@@ -273,7 +273,7 @@ export function ActivityIndicator({ initial, renderedAt }: { initial: ActivityIt
                     <div className="activity__actions">
                       <button
                         type="button"
-                        className={`btn btn--small${confirming === i.id ? " btn--danger" : ""}`}
+                        className={`hig-btn hig-btn--sm${confirming === i.id ? " hig-btn--destructive" : ""}`}
                         aria-disabled={stopping === i.id}
                         onClick={() => stopping !== i.id && void stop(i)}
                         onBlur={() => confirming === i.id && setConfirming(null)}
