@@ -220,7 +220,7 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
       )}
       {discovered && (
         <details className="menu">
-          <summary className="btn">More actions</summary>
+          <summary className="hig-btn">More actions</summary>
           <div className="menu__panel">
             {discovery("Re-run discovery")}
             <ActionButton
@@ -248,7 +248,7 @@ function DomainActions({ detail, returnTo, busy }: { detail: Detail; returnTo: s
             <ActionButton {...common} action="optimize-portfolio" label="Optimise portfolio" busy={busyReason("optimize-portfolio", busy)} />
             <ActionButton domainId={d.id} action="recalculate-scores" label="Recalculate scores" pendingLabel="Recalculating…" returnTo={returnTo} />
             {detail.umamiUrl && (
-              <a className="btn" href={detail.umamiUrl} target="_blank" rel="noreferrer">
+              <a className="hig-btn" href={detail.umamiUrl} target="_blank" rel="noreferrer">
                 Open in Umami<span className="sr-only"> (opens in a new tab)</span>
               </a>
             )}
@@ -299,7 +299,7 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
   // A plain link: the API accepts the admin session cookie, and the response downloads as a .md file.
   const actions = (
     <div className="btn-row">
-      <a className="btn btn--small" href={`/api/domains/${d.id}/brief`} download>
+      <a className="hig-btn hig-btn--sm" href={`/api/domains/${d.id}/brief`} download>
         Download agent brief
       </a>
       {generate}
@@ -383,7 +383,7 @@ function CompetitorButton(props: { domainId: string; name: string; aliases?: str
       {props.aliases?.length ? <input type="hidden" name="aliases" value={props.aliases.join("\n")} /> : null}
       {props.domains?.length ? <input type="hidden" name="domains" value={props.domains.join("\n")} /> : null}
       <input type="hidden" name="returnTo" value={props.returnTo} />
-      <SubmitButton className="btn btn--small" pendingLabel="Saving…">
+      <SubmitButton className="hig-btn hig-btn--sm" pendingLabel="Saving…">
         {props.label}
         <span className="sr-only"> {props.name}</span>
       </SubmitButton>
@@ -396,7 +396,7 @@ function RecommendationStatus({ id, status, label, title }: { id: string; status
     <form action={recommendationAction} className="inline">
       <input type="hidden" name="recommendationId" value={id} />
       <input type="hidden" name="status" value={status} />
-      <SubmitButton className="btn btn--small" pendingLabel="Saving…">
+      <SubmitButton className="hig-btn hig-btn--sm" pendingLabel="Saving…">
         {label}
         <span className="sr-only"> {title}</span>
       </SubmitButton>
@@ -501,7 +501,7 @@ function Sources({ rows }: { rows: SourceRow[] }) {
         <p className="muted">No cited sites yet.</p>
       ) : (
         <TableScroll label="Where AI looks (scrollable)">
-          <table>
+          <table className="hig-table">
             <thead>
               <tr>
                 <th scope="col">Site</th>
@@ -548,7 +548,7 @@ function ProviderScores({ detail }: { detail: Detail }) {
         <p className="muted">No provider scores yet.</p>
       ) : (
         <TableScroll label="Visibility by AI provider (scrollable)">
-          <table>
+          <table className="hig-table">
             <thead>
               <tr>
                 <th scope="col">Provider</th>
@@ -615,7 +615,7 @@ function Costs({ detail }: { detail: Detail }) {
       </dl>
       {c.byProvider.length > 0 && (
         <TableScroll label="Measurement cost by provider, all time (scrollable)">
-          <table>
+          <table className="hig-table">
             <caption>By provider, all time</caption>
             <thead>
               <tr>
@@ -846,7 +846,7 @@ function ClusterScores({ detail }: { detail: Detail }) {
   return (
     <Section title="Visibility by topic" id="clusters-heading">
       <TableScroll label="Visibility by topic (scrollable)">
-        <table>
+        <table className="hig-table">
           <thead>
             <tr>
               <th scope="col">Topic</th>
@@ -915,7 +915,7 @@ function Schedule({ detail, now }: { detail: Detail; now: Date }) {
       </dl>
       {s.nextDueCells.length > 0 && (
         <TableScroll label="Next due measurements (scrollable)">
-          <table>
+          <table className="hig-table">
             <caption>Next due measurements — the planner re-measures where uncertainty is highest</caption>
             <thead>
               <tr>
@@ -943,7 +943,7 @@ function Schedule({ detail, now }: { detail: Detail; now: Date }) {
                   <td>
                     <TimeAgo date={c.nextDueAt} now={now} />
                   </td>
-                  <td className="num">{c.recommendedIntervalDays == null ? "–" : `${c.recommendedIntervalDays} d`}</td>
+                  <td className="num">{c.recommendedIntervalDays == null ? "–" : `${num(c.recommendedIntervalDays)} d`}</td>
                   <td className="num">{pct(c.confidence)}</td>
                 </tr>
               ))}
@@ -965,7 +965,7 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
         <p className="muted">No active prompts yet.</p>
       ) : (
         <TableScroll label="Active prompts (scrollable)">
-          <table>
+          <table className="hig-table">
             <caption className="sr-only">
               Active prompts with their topic, intent, role, how often the brand appears in answers and how certain that estimate is.
             </caption>
@@ -1019,7 +1019,7 @@ function Runs({ detail, now }: { detail: Detail; now: Date }) {
         <p className="muted">No runs yet.</p>
       ) : (
         <TableScroll label="Recent runs (scrollable)">
-          <table>
+          <table className="hig-table">
             <thead>
               <tr>
                 <th scope="col">Run</th>
@@ -1075,7 +1075,7 @@ function FailedMeasurements({ detail, now }: { detail: Detail; now: Date }) {
   return (
     <Section title={`Failed measurements (${detail.failedMeasurements.length})`} id="failed-heading">
       <TableScroll label="Failed measurements (scrollable)">
-        <table>
+        <table className="hig-table">
           <thead>
             <tr>
               <th scope="col">Provider</th>

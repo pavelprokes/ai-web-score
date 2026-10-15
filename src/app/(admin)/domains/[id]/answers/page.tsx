@@ -103,7 +103,7 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
               ))}
             </select>
           </label>
-          <button type="submit" className="btn">
+          <button type="submit" className="hig-btn">
             Show
           </button>
         </form>
@@ -175,12 +175,12 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
           <nav aria-label="Pages" className="btn-row">
             {data.page > 1 && (
               // Past the end (no rows) jumps back to the first page rather than one page back.
-              <Link prefetch={false} className="btn" href={pageHref(data.answers.length ? data.page - 1 : 1)}>
+              <Link prefetch={false} className="hig-btn" href={pageHref(data.answers.length ? data.page - 1 : 1)}>
                 Newer answers
               </Link>
             )}
             {data.hasMore && (
-              <Link prefetch={false} className="btn" href={pageHref(data.page + 1)}>
+              <Link prefetch={false} className="hig-btn" href={pageHref(data.page + 1)}>
                 Older answers
               </Link>
             )}

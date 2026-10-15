@@ -33,7 +33,7 @@ export function ActionButton({
   /** When the same work is already running: the reason, shown instead of the label; the button is disabled. */
   busy?: string | null;
 }) {
-  const className = `btn${primary ? " btn--primary" : ""}${small ? " btn--small" : ""}`;
+  const className = `hig-btn${primary ? " hig-btn--prominent" : ""}${small ? " hig-btn--sm" : ""}`;
   const content = (
     <>
       {label}

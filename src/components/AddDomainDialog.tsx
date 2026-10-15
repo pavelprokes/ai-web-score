@@ -21,7 +21,7 @@ export function AddDomainDialog() {
   const v = state.values;
   return (
     <>
-      <button ref={triggerRef} type="button" className="btn btn--primary" onClick={() => ref.current?.showModal()}>
+      <button ref={triggerRef} type="button" className="hig-btn hig-btn--prominent" onClick={() => ref.current?.showModal()}>
         <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">
           <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
         </svg>
@@ -30,7 +30,7 @@ export function AddDomainDialog() {
       <dialog ref={ref} aria-labelledby={ids.title} onClose={() => triggerRef.current?.focus()}>
         <div className="dialog__head">
           <h2 id={ids.title}>Add a domain</h2>
-          <button type="button" className="btn btn--small" onClick={() => ref.current?.close()}>
+          <button type="button" className="hig-btn hig-btn--sm" onClick={() => ref.current?.close()}>
             Close<span className="sr-only"> dialog</span>
           </button>
         </div>
@@ -103,10 +103,10 @@ export function AddDomainDialog() {
             </label>
           </div>
           <div className="btn-row">
-            <SubmitButton className="btn btn--primary" pendingLabel="Adding…">
+            <SubmitButton className="hig-btn hig-btn--prominent" pendingLabel="Adding…">
               Add domain
             </SubmitButton>
-            <button type="button" className="btn" onClick={() => ref.current?.close()}>
+            <button type="button" className="hig-btn" onClick={() => ref.current?.close()}>
               Cancel
             </button>
           </div>

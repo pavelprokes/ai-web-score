@@ -3,7 +3,7 @@
 import { useFormStatus } from "react-dom";
 
 /** Submit button that announces its pending state and prevents double submits. */
-export function SubmitButton({ children, pendingLabel, className = "btn", ...rest }: {
+export function SubmitButton({ children, pendingLabel, className = "hig-btn", ...rest }: {
   children: React.ReactNode;
   pendingLabel?: string;
   className?: string;
@@ -17,6 +17,7 @@ export function SubmitButton({ children, pendingLabel, className = "btn", ...res
       className={className}
       type="submit"
       aria-disabled={pending}
+      aria-busy={pending}
       onClick={(e) => {
         if (pending) e.preventDefault();
       }}

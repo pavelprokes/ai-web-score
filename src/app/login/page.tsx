@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             await signIn("google", { redirectTo: "/" });
           }}
         >
-          <button className="btn btn--primary" type="submit">
+          <button className="hig-btn hig-btn--prominent" type="submit">
             Sign in with Google
           </button>
         </form>

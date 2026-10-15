@@ -43,7 +43,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   await signOut({ redirectTo: "/login" });
                 }}
               >
-                <button className="btn btn--small" type="submit">
+                <button className="hig-btn hig-btn--sm" type="submit">
                   Sign out
                 </button>
               </form>

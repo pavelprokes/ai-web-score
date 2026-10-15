@@ -85,7 +85,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
 
       <Section title="Providers" id="providers-heading">
         <TableScroll label="Providers (scrollable)">
-          <table>
+          <table className="hig-table">
             <caption className="sr-only">AI providers with status, reach weight, cost and value recommendation.</caption>
             <thead>
               <tr>
@@ -128,7 +128,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       {data.internalLlmCostThisMonth.length > 0 && (
         <Section title="Internal analysis cost this month" id="llm-heading">
           <TableScroll label="Internal analysis cost by purpose (scrollable)">
-            <table>
+            <table className="hig-table">
               <thead>
                 <tr>
                   <th scope="col">Purpose</th>
@@ -230,7 +230,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
         once they agree with it as well as the reference agrees with itself.
       </p>
       <TableScroll label="Configurations (scrollable)">
-        <table>
+        <table className="hig-table">
           <thead>
             <tr>
               <th scope="col">Configuration</th>
@@ -333,7 +333,7 @@ function ProviderButton({
       <input type="hidden" name="providerId" value={providerId} />
       <input type="hidden" name="action" value={action} />
       {configurationId && <input type="hidden" name="configurationId" value={configurationId} />}
-      <SubmitButton className={`btn btn--small${action === "promote" ? " btn--primary" : ""}`}>
+      <SubmitButton className={`hig-btn hig-btn--sm${action === "promote" ? " hig-btn--prominent" : ""}`}>
         {label}
         <span className="sr-only"> {context}</span>
       </SubmitButton>
