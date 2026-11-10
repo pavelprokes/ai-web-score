@@ -121,14 +121,14 @@ export type ProviderErrorClass = "RATE_LIMIT" | "QUOTA" | "AUTH" | "BAD_REQUEST"
 
 /**
  * What a stored provider error message means, from its HTTP status ("HTTP 401: {…}", see httpJson), the
- * provider's error type in the body, or DataForSEO's five-digit task code ("40501 Invalid Field…").
+ * provider's error type in the body, or DataForSEO's five-digit task code ("40501 Invalid Field…"); a leading "ProviderError: " (String(e)) is ignored.
  * Out of credit comes first: Perplexity answers it with 401 `insufficient_quota` or 402, OpenAI with 429
  * `insufficient_quota`, Anthropic with 400 "credit balance is too low" — none of them is what the status says.
  */
 export function classifyProviderError(message: string): ProviderErrorClass {
   // "Skipped: <provider> rejected N requests … (<the error>)" belongs to the class of the error it quotes.
   const text = message.replace(/^Skipped: [^(]*\(/, "");
-  const code = Number(/^(?:HTTP |DataForSEO )?(\d{3,5})\b/.exec(text)?.[1] ?? NaN);
+  const code = Number(/^(?:\w*Error: )?(?:HTTP |DataForSEO )?(\d{3,5})\b/.exec(text)?.[1] ?? NaN);
   if (/insufficient_quota|payment_required|credit balance is too low/i.test(text) || [402, 40200, 40203, 40210].includes(code)) return "QUOTA";
   if (/rate_limit/i.test(text) || [429, 40202, 40209].includes(code)) return "RATE_LIMIT";
   if (/authentication_error|permission_error|^Missing environment variable/.test(text) || [401, 403, 40100, 40104, 40207].includes(code)) return "AUTH";

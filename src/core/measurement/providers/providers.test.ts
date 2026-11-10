@@ -249,6 +249,9 @@ describe("classifyProviderError", () => {
       ['HTTP 401: {"error":{"message":"Invalid API key","type":"invalid_api_key","code":401}}', "AUTH"],
       ["Missing environment variable PERPLEXITY_API_KEY", "AUTH"],
       ["DataForSEO 50000 Internal Error.", "UPSTREAM"],
+      // DataForSEO collect stores String(e).
+      ['ProviderError: HTTP 401: {"status_code":40100,"status_message":"You are not authorized."}', "AUTH"],
+      ["ProviderError: DataForSEO 40200: Payment Required.", "QUOTA"],
       ["HTTP 503: upstream connect error", "UPSTREAM"],
       ["batch result errored: overloaded_error: Overloaded", "UPSTREAM"],
       ["Async result timed out", "TIMEOUT"],
