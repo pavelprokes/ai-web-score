@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatgptUi, parseAiMode, parseLlmScraper } from "./dataforseo";
 import { buildClaudeParams, noteUnsupportedCountry, parseClaudeMessage } from "./anthropic";
 import { buildOpenAiBody, parseOpenAiResponse } from "./openai";
@@ -274,11 +274,13 @@ describe("registry & pricing", () => {
 });
 
 describe("DataForSEO live path (smoke tests)", () => {
+  beforeEach(() => {
+    process.env.DATAFORSEO_LOGIN = "l";
+    process.env.DATAFORSEO_PASSWORD = "p";
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("posts one task to live/advanced with CZ location and parses the result", async () => {
-    process.env.DATAFORSEO_LOGIN = "l";
-    process.env.DATAFORSEO_PASSWORD = "p";
     let captured: { url: string; body: Array<Record<string, unknown>> } | null = null;
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       captured = { url, body: JSON.parse(String(init.body)) };
@@ -311,9 +313,11 @@ describe("DataForSEO live path (smoke tests)", () => {
     });
     const au = { ...req, language: "en-AU", country: "AU" };
     await chatgptUi.submit!(
-      [au, { ...au, measurementId: "m2", country: "nz" }, { ...au, measurementId: "m3", country: "New Zealand" }],
+      [au, { ...au, measurementId: "m2", country: "nz" }, { ...au, measurementId: "m3", country: "New Zealand" }, { ...au, measurementId: "m4", language: "pt-br" }],
       chatgptUi.configurations[0]!,
     );
+    // DataForSEO lists pt-BR, zh-CN and zh-TW, and no plain "pt" or "zh".
+    expect(body[3]).toMatchObject({ language_code: "pt-BR" });
     expect(body[0]).toMatchObject({ location_code: 2036, language_code: "en" });
     expect(body[0]).not.toHaveProperty("location_name");
     // Not in the table: the full English name, never the two-letter code (rejected as 40501).

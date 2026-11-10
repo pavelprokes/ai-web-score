@@ -108,12 +108,16 @@ function locationName(country: string): string {
   }
 }
 
-/** Location and language of a task; `language_code` is ISO 639-1 ("en", not "en-AU"). */
+/** The only regional codes in DataForSEO's language list, which has no plain "pt" or "zh". */
+const REGIONAL_LANGUAGES = ["pt-BR", "zh-CN", "zh-TW"];
+
+/** Location and language of a task; `language_code` is ISO 639-1 ("en", not "en-AU") except REGIONAL_LANGUAGES. */
 function localeFields(req: MeasurementRequest) {
   const code = LOCATION_CODES[req.country.toUpperCase()];
+  const regional = REGIONAL_LANGUAGES.find((l) => l.toLowerCase() === req.language.trim().replace("_", "-").toLowerCase());
   return {
     ...(code ? { location_code: code } : { location_name: locationName(req.country) }),
-    language_code: isoLanguage(req.language) ?? req.language,
+    language_code: regional ?? isoLanguage(req.language) ?? req.language,
   };
 }
 
