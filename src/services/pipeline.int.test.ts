@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -522,7 +522,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
     const [version] = await db.select().from(s.promptVersions).limit(1);
     const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "perplexity-api")).limit(1);
-    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 2 }).returning();
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 3 }).returning();
     const row = (id: string, sampleIndex: number, scheduledAt: Date) => ({
       id,
       runId: run!.id,
@@ -535,23 +535,40 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       scheduledAt,
       configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
     });
-    await db.insert(s.measurements).values([row("limited-fresh", 0, new Date()), row("limited-old", 1, new Date(Date.now() - 3 * 3600_000))]);
+    await db.insert(s.measurements).values([row("limited-fresh", 0, new Date()), row("limited-old", 1, new Date(Date.now() - 3 * 3600_000)), row("limited-quota", 2, new Date())]);
     const cellStates = async () => (await db.select().from(s.cellStates)).map((c) => JSON.stringify(c)).sort().join();
     const before = await cellStates();
     const saved = process.env.PERPLEXITY_API_KEY;
     process.env.PERPLEXITY_API_KEY = "test";
     const realFetch = globalThis.fetch;
     let limited = true;
+    let retryAfter = "40";
+    let errorType = "request_rate_limit_exceeded";
     globalThis.fetch = (async () =>
       limited
-        ? new Response('{"error":{"message":"Request rate limit exceeded","type":"request_rate_limit_exceeded"}}', { status: 429, headers: { "Retry-After": "0" } })
+        ? new Response(`{"error":{"message":"Request rate limit exceeded","type":"${errorType}"}}`, { status: 429, headers: { "Retry-After": retryAfter } })
         : new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }))) as typeof fetch;
     try {
       // Twice rate limited: the job is rescheduled, nothing is counted against the answer.
-      for (let i = 0; i < 2; i++) await expect(executeMeasurement("limited-fresh")).rejects.toBeInstanceOf(RescheduleJob);
+      // The job comes back no sooner than the provider's Retry-After.
+      const first = await executeMeasurement("limited-fresh").catch((x: unknown) => x);
+      expect(first).toBeInstanceOf(RescheduleJob);
+      expect((first as InstanceType<typeof RescheduleJob>).delaySeconds).toBeGreaterThanOrEqual(40);
+      retryAfter = "0";
+      await expect(executeMeasurement("limited-fresh")).rejects.toBeInstanceOf(RescheduleJob);
       let [m] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-fresh"));
-      expect(m).toMatchObject({ status: "SCHEDULED", attempts: 0, errors: null });
+      expect(m).toMatchObject({ status: "SCHEDULED", attempts: 0 });
+      // Both 429s stay on the row, so rate limiting is measurable after the answer succeeds.
+      expect(m!.errors).toHaveLength(2);
+      expect(JSON.stringify(m!.errors)).toContain("HTTP 429");
       expect(await cellStates()).toBe(before);
+
+      // An exhausted balance is not "not now": it spends the attempt like any retryable failure.
+      errorType = "insufficient_quota";
+      await expect(executeMeasurement("limited-quota")).rejects.toBeInstanceOf(ProviderError);
+      const [quota] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-quota"));
+      expect(quota!.attempts).toBe(1);
+      errorType = "request_rate_limit_exceeded";
 
       // Past the patience bound a 429 is an ordinary retryable failure again.
       await expect(executeMeasurement("limited-old")).rejects.toBeInstanceOf(ProviderError);
@@ -563,12 +580,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await executeMeasurement("limited-fresh");
       [m] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-fresh"));
       expect(m).toMatchObject({ status: "SUCCEEDED", attempts: 1 });
+      expect(m!.errors).toHaveLength(2);
     } finally {
       globalThis.fetch = realFetch;
       if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;
       else process.env.PERPLEXITY_API_KEY = saved;
       // Leave nothing in flight for the tests that follow.
-      await db.update(s.measurements).set({ status: "CANCELLED", finishedAt: new Date() }).where(eq(s.measurements.id, "limited-old"));
+      await db.update(s.measurements).set({ status: "CANCELLED", finishedAt: new Date() }).where(inArray(s.measurements.id, ["limited-old", "limited-quota"]));
       await db.update(s.runs).set({ status: "PARTIAL", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
     }
   }, 60_000);

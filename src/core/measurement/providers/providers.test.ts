@@ -66,10 +66,20 @@ describe("provider request builders", () => {
       starts.length = 0;
       vi.stubGlobal("fetch", async () => {
         starts.push(Date.now());
-        return starts.length === 1 ? new Response('{"error":{"type":"request_rate_limit_exceeded"}}', { status: 429, headers: { "Retry-After": "1" } }) : ok();
+        return starts.length === 1 ? new Response('{"error":{"type":"request_rate_limit_exceeded"}}', { status: 429, headers: { "Retry-After": "2" } }) : ok();
       });
       expect((await perplexityApi.execute!(req, config)).answer.answerText).toBe("ok");
-      expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(990);
+      expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(1990); // the header, not the 1 s fallback
+
+      // A long Retry-After is not slept through in place: the caller (job queue) waits instead.
+      starts.length = 0;
+      vi.stubGlobal("fetch", async () => {
+        starts.push(Date.now());
+        return new Response("slow down", { status: 429, headers: { "Retry-After": "60" } });
+      });
+      const long = await perplexityApi.execute!(req, config).catch((x: unknown) => x);
+      expect(long).toMatchObject({ status: 429, retryAfterSeconds: 60 });
+      expect(starts).toHaveLength(1);
 
       vi.stubGlobal("fetch", async () => new Response("slow down", { status: 429, headers: { "Retry-After": "7" } }));
       const e = await httpJson("https://provider.example").catch((x: unknown) => x);

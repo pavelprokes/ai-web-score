@@ -57,6 +57,8 @@ async function startSlot() {
 
 /** A rate-limited request is not billed and clears within about a second, so it is retried in place. */
 const MAX_429_RETRIES = 5;
+/** A longer wait would hold a job worker (shared by all job types) asleep; the job queue waits instead. */
+const MAX_IN_PLACE_WAIT_MS = 10_000;
 /** Time kept for the answer itself after waiting (p99 ≈ 30 s); a longer wait goes back to the job queue. */
 const ANSWER_RESERVE_MS = 30_000;
 
@@ -207,7 +209,8 @@ export const perplexityApi: ProviderAdapter = {
           if (!(e instanceof ProviderError) || e.status !== 429) throw e;
           // Jitter so that two processes rejected together do not retry together.
           const waitMs = (e.retryAfterSeconds ?? 1) * 1000 + Math.random() * 500;
-          if (retries >= MAX_429_RETRIES || waitMs + ANSWER_RESERVE_MS > deadlineRemainingMs()) throw e;
+          if (retries >= MAX_429_RETRIES || waitMs > MAX_IN_PLACE_WAIT_MS || waitMs + ANSWER_RESERVE_MS > deadlineRemainingMs()) throw e;
+          console.warn(`[perplexity] rate limited, retrying in ${Math.round(waitMs)} ms`);
           // Hold back every caller of this process, not only this one: the limit is shared.
           nextStartAt = Math.max(nextStartAt, Date.now() + waitMs);
         }
