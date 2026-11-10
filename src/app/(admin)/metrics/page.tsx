@@ -1,10 +1,12 @@
+import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import { METRIC_GROUPS, METRICS } from "@/components/metrics-catalog";
 
 export const metadata: Metadata = { title: "Metrics" };
 
 /** Reference of every metric in the admin: what it is, how it is calculated, an example and how to read it. */
-export default function MetricsPage() {
+export default async function MetricsPage() {
+  await requireAdminPage();
   return (
     <>
       <div className="page-head">

@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import { providersOverview } from "@/services/overview";
 import { providerAction } from "@/app/(admin)/actions";
@@ -41,6 +42,7 @@ const DECISION: Record<string, { tone: Tone; label: string }> = {
 };
 
 export default async function ProvidersPage({ searchParams }: { searchParams: Promise<{ done?: string; error?: string }> }) {
+  await requireAdminPage();
   const { done, error } = await searchParams;
   const tasks = Object.keys(LLM_TASKS) as LlmTask[];
   const [data, errors, accounts, models] = await Promise.all([

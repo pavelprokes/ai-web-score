@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -8,6 +9,7 @@ import { Badge, Section, TimeAgo } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  await requireAdminPage();
   const detail = await domainDetail((await params).id);
   return { title: detail ? `AI answers · ${detail.domain.hostname}` : "Domain not found" };
 }
@@ -23,6 +25,7 @@ type Params = {
 const pick = <T extends object>(map: T, v: string | undefined) => (v && v in map ? (v as keyof T) : undefined);
 
 export default async function AnswersPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Params> }) {
+  await requireAdminPage();
   const { id } = await params;
   const q = await searchParams;
   const filters: AnswerFilters = {
