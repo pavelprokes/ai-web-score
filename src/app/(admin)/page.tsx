@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { listDomainsOverview } from "@/services/overview";
@@ -29,6 +30,7 @@ export default async function DomainsPage({
 }: {
   searchParams: Promise<{ done?: string; error?: string }>;
 }) {
+  await requireAdminPage();
   const { done, error } = await searchParams;
   const [domains, busyMap] = await Promise.all([listDomainsOverview(), busyKindsByDomain()]);
   const now = new Date();

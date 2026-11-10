@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { adminEmails, auth } from "@/auth";
 
@@ -10,16 +11,20 @@ export function isAuthDisabled(): boolean {
   return process.env.NODE_ENV === "development" && process.env.AUTH_DISABLED !== "0";
 }
 
-/** Signed-in admin email, "developer" when auth is disabled, or null. */
-export async function currentAdmin(): Promise<string | null> {
+/** Signed-in admin email, "developer" when auth is disabled, or null. Read once per render pass. */
+export const currentAdmin = cache(async (): Promise<string | null> => {
   if (isAuthDisabled()) return "developer (sign-in disabled in dev)";
   if (!process.env.AUTH_SECRET) return null;
   const session = await auth();
   const email = session?.user?.email?.toLowerCase();
   return email && adminEmails().includes(email) ? email : null;
-}
+});
 
-/** For pages: redirect to the sign-in page when not an allowed admin. */
+/**
+ * For pages: redirect to the sign-in page when not an allowed admin. Call it first in every page component and
+ * generateMetadata under (admin) — the layout's call does not keep the page from rendering (see src/proxy.ts,
+ * which is the first line of defence; this is the check next to the data).
+ */
 export async function requireAdminPage(): Promise<string> {
   const admin = await currentAdmin();
   if (!admin) redirect("/login");

@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -27,6 +28,7 @@ type Detail = NonNullable<Awaited<ReturnType<typeof domainDetail>>>;
 type PromptRow = Awaited<ReturnType<typeof listPrompts>>[number];
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  await requireAdminPage();
   const { id } = await params;
   const detail = await domainDetail(id);
   return { title: detail?.domain.hostname ?? "Domain not found" };
@@ -46,6 +48,7 @@ export default async function DomainPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ done?: string; added?: string; error?: string }>;
 }) {
+  await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
   const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions] = await Promise.all([
