@@ -13,7 +13,7 @@ import {
   topicClusters,
 } from "@/db/schema";
 import { listProviders } from "@/core/measurement/providers";
-import type { CrawlDigest } from "@/core/discovery/crawl";
+import { type CrawlDigest, fetchFromSite } from "@/core/discovery/crawl";
 import { DomainProfile } from "@/core/domain-profile";
 import type { RawSignals } from "@/core/signals/extract";
 import { type AnswerObservation, diagnose, type Finding } from "@/core/recommendations/diagnostics";
@@ -22,7 +22,6 @@ import { type BriefExample, pickExamples, renderAgentBrief } from "@/core/recomm
 import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
-import { deadlineSignal } from "@/lib/deadline";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
 /**
@@ -269,17 +268,10 @@ async function loadClusters(domainId: string) {
 
 /** robots.txt and /llms.txt, fetched live (the crawl digest does not keep them). Failures count as unknown. */
 async function fetchSiteFiles(hostname: string): Promise<{ robotsTxt: string | null; llmsTxt: boolean | null }> {
-  const get = async (path: string) => {
-    try {
-      const res = await fetch(`https://${hostname}${path}`, { signal: deadlineSignal(10_000), redirect: "follow" });
-      return { status: res.status, text: res.ok ? (await res.text()).slice(0, 200_000) : "" };
-    } catch {
-      return null;
-    }
-  };
+  const get = (path: string) => fetchFromSite(`https://${hostname}${path}`, [hostname.replace(/^www\./, "")]);
   const [robots, llms] = await Promise.all([get("/robots.txt"), get("/llms.txt")]);
   return {
-    robotsTxt: robots && robots.status === 200 ? robots.text : null,
+    robotsTxt: robots && robots.status === 200 ? robots.text.slice(0, 200_000) : null,
     llmsTxt: llms ? llms.status === 200 : null,
   };
 }
