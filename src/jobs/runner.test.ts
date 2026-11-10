@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { typesThatFit } from "./runner";
+import { typesThatFit, weekStart } from "./runner";
 import { JobTimeoutError, runAsJob, throwIfJobCancelled } from "./queue";
 import { deadlineFetch, deadlineRemainingMs, deadlineSignal, runWithDeadline } from "@/lib/deadline";
 import { chatgptUi } from "@/core/measurement/providers/dataforseo";
@@ -105,5 +105,14 @@ describe("mapWithConcurrency", () => {
     });
     expect(out).toEqual([50, 10, 40, 20, 30]);
     expect(peak).toBe(2);
+  });
+});
+
+describe("weekStart", () => {
+  it("is the Monday of the ISO week (UTC), across a year boundary too", () => {
+    expect(weekStart(new Date("2026-11-09T00:00:00Z"))).toBe("2026-11-09"); // Monday
+    expect(weekStart(new Date("2026-11-15T23:59:59Z"))).toBe("2026-11-09"); // Sunday
+    expect(weekStart(new Date("2026-11-16T00:00:00Z"))).toBe("2026-11-16");
+    expect(weekStart(new Date("2027-01-01T12:00:00Z"))).toBe("2026-12-28"); // Friday of ISO week 2026-W53
   });
 });

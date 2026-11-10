@@ -33,6 +33,7 @@ import { throwIfJobCancelled } from "@/jobs/queue";
  */
 
 const MAX_ITEMS = 8;
+const MAX_ANSWERS = 3000;
 const WINDOW_DAYS = DEFAULT_WINDOW_DAYS;
 
 /** No domain (404) or no profile yet (409); the API answers with the status instead of a 500. */
@@ -85,6 +86,7 @@ export async function generateRecommendations(domainId: string) {
     findings.length === 0 ? { summary: "No issues found in the current data.", items: [], model: null } : await writePlan(domainId, profile, findings, answers.length);
   await throwIfJobCancelled();
 
+  const closed = await closedFindings(domainId);
   const [set] = await db
     .insert(recommendationSets)
     .values({
@@ -109,10 +111,38 @@ export async function generateRecommendations(domainId: string) {
         impactMetric: item.impactMetric,
         effort: item.effort,
         findingKeys: item.findingKeys,
+        // Closed only when every finding behind the item was closed before: anything else is new advice.
+        ...(item.findingKeys.every((k) => closed.has(k)) ? closed.get(item.findingKeys[0]!) : {}),
       })),
     );
   }
   return { setId: set!.id, findings: findings.length, items: plan.items.length };
+}
+
+/**
+ * Done / Dismissed of the latest set by finding key, to carry onto the next set (the status lives on a row of one
+ * generation; finding keys such as "llms-txt" are stable across generations). Dismissed holds while the finding
+ * recurs. Done holds only while the window can still contain answers from before the fix: a finding still there
+ * after that was not fixed, so its item comes back open.
+ */
+async function closedFindings(domainId: string) {
+  const previous = await latestRecommendations(domainId);
+  const cutoff = Date.now() - WINDOW_DAYS * 86_400_000;
+  const closed = new Map<string, { status: string; statusChangedAt: Date | null }>();
+  for (const r of previous?.items ?? []) {
+    if (r.status === "OPEN" || (r.status === "DONE" && (r.statusChangedAt?.getTime() ?? 0) < cutoff)) continue;
+    for (const key of r.findingKeys as string[]) closed.set(key, { status: r.status, statusChangedAt: r.statusChangedAt });
+  }
+  return closed;
+}
+
+const OUT_OF_DATE_DAYS = 14;
+
+/** Advice that missed two weekly refreshes, or was written from at most half of the answers now behind the score. */
+export function recommendationsOutOfDate(set: { createdAt: Date; answersAnalysed: number }, scoredAnswers: number | undefined, now: Date) {
+  if (now.getTime() - set.createdAt.getTime() > OUT_OF_DATE_DAYS * 86_400_000) return true;
+  // A set that read the maximum number of answers cannot read more on a refresh.
+  return !!scoredAnswers && set.answersAnalysed < MAX_ANSWERS && scoredAnswers >= 2 * set.answersAnalysed;
 }
 
 type PlanItem = LlmRecommendations["items"][number];
@@ -184,7 +214,7 @@ async function loadAnswers(domainId: string): Promise<AnswerObservation[]> {
       ),
     )
     .orderBy(desc(measurements.finishedAt))
-    .limit(3000);
+    .limit(MAX_ANSWERS);
   return rows.map((r) => ({
     promptId: r.promptId,
     clusterKey: r.clusterKey,

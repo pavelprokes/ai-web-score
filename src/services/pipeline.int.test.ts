@@ -420,7 +420,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const { enqueue } = await import("@/jobs/queue");
     const { processJobs } = await import("@/jobs/runner");
     const { setLlmOverride } = await import("@/lib/llm");
-    const { generateRecommendations, latestRecommendations, setRecommendationStatus } = await import("@/services/recommendations");
+    const { generateRecommendations, latestRecommendations, recommendationsOutOfDate, setRecommendationStatus } = await import("@/services/recommendations");
     const db = getDb();
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
     const realFetch = globalThis.fetch;
@@ -464,7 +464,47 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(llm!.items.map((i) => i.title)).toEqual(["Allow AI crawlers"]);
 
       expect(await setRecommendationStatus(llm!.items[0]!.id, "DONE")).toBe(demo!.id);
-      expect((await latestRecommendations(demo!.id))!.items[0]!.status).toBe("DONE");
+      const done = (await latestRecommendations(demo!.id))!.items[0]!;
+      expect(done.status).toBe("DONE");
+
+      // A refresh keeps Done / Dismissed on items about the same findings; an item that also covers a finding
+      // nobody closed is new advice and stays open.
+      const other = rules!.items.map((i) => (i.findingKeys as string[])[0]!).find((k) => !k.startsWith("robots:"))!;
+      expect(other).toBeTruthy();
+      const item = { why: "w", steps: ["s"], category: "TECHNICAL", impactMetric: "citation-rate", effort: "LOW" };
+      const refresh = async () => {
+        setLlmOverride(() => ({
+          summary: "Again.",
+          items: [
+            { ...item, title: "Allow AI crawlers (reworded)", findingKeys: ["robots:Bingbot"] },
+            { ...item, title: "Crawlers and more", findingKeys: ["robots:Bingbot", other] },
+          ],
+        }));
+        try {
+          await generateRecommendations(demo!.id);
+        } finally {
+          setLlmOverride(null);
+        }
+        return (await latestRecommendations(demo!.id))!;
+      };
+      const kept = await refresh();
+      expect(kept.set.id).not.toBe(llm!.set.id);
+      expect(kept.items.map((i) => i.status)).toEqual(["DONE", "OPEN"]);
+      expect(kept.items[0]!.statusChangedAt).toEqual(done.statusChangedAt);
+      // Done so long ago that every answer in the window is from after the fix, and the finding is still there: reopened.
+      const longAgo = new Date(Date.now() - 40 * 86_400_000);
+      await db.update(s.recommendations).set({ statusChangedAt: longAgo }).where(eq(s.recommendations.id, kept.items[0]!.id));
+      const reopened = await refresh();
+      expect(reopened.items.map((i) => i.status)).toEqual(["OPEN", "OPEN"]);
+      // Dismissed is the owner's decision, not a claim about the site: it stays however old.
+      await db.update(s.recommendations).set({ status: "DISMISSED", statusChangedAt: longAgo }).where(eq(s.recommendations.id, reopened.items[0]!.id));
+      expect((await refresh()).items.map((i) => i.status)).toEqual(["DISMISSED", "OPEN"]);
+
+      const set = { createdAt: new Date("2026-11-01T00:00:00Z"), answersAnalysed: 400 };
+      expect(recommendationsOutOfDate(set, 700, new Date("2026-11-14T00:00:00Z"))).toBe(false);
+      expect(recommendationsOutOfDate(set, 700, new Date("2026-11-16T00:00:00Z"))).toBe(true); // older than 14 days
+      expect(recommendationsOutOfDate(set, 800, new Date("2026-11-02T00:00:00Z"))).toBe(true); // scored answers doubled
+      expect(recommendationsOutOfDate(set, undefined, new Date("2026-11-02T00:00:00Z"))).toBe(false);
 
       // The brief route answers 404/409 instead of a 500 for an unknown domain or one without a profile.
       const { agentBrief } = await import("@/services/recommendations");
@@ -475,6 +515,33 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  it("schedules one recommendations refresh per ACTIVE domain per week", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { schedulerTick, weekStart } = await import("@/jobs/runner");
+    const { createDomain } = await import("@/services/domains");
+    const db = getDb();
+    const active = await db.select().from(s.domains).where(eq(s.domains.status, "ACTIVE"));
+    expect(active.length).toBeGreaterThan(0);
+    const paused = await createDomain({ hostname: "paused.example", runDiscovery: false });
+    await db.update(s.domains).set({ status: "PAUSED" }).where(eq(s.domains.id, paused.id));
+    const keys = async () => (await db.select().from(s.jobs).where(eq(s.jobs.type, "recommendations.generate"))).map((j) => j.dedupeKey).sort();
+    const expected = active.map((d) => `recommendations:${d.id}:${weekStart(new Date())}`).sort();
+
+    await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+    await schedulerTick();
+    await schedulerTick();
+    expect(await keys()).toEqual(expected);
+    // Not again once this week's job has finished, whatever its outcome.
+    for (const status of ["DONE", "FAILED"]) {
+      await db.update(s.jobs).set({ status, finishedAt: new Date() }).where(eq(s.jobs.type, "recommendations.generate"));
+      await schedulerTick();
+      expect(await keys()).toEqual(expected);
+    }
+    await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+    await db.delete(s.domains).where(eq(s.domains.id, paused.id));
   });
 
   it("stops a provider that rejects every request and shows the error", async () => {

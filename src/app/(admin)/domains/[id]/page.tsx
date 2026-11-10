@@ -6,7 +6,7 @@ import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
 import type { SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
-import { latestRecommendations } from "@/services/recommendations";
+import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
 import { competitorSuggestions } from "@/services/competitors";
 import type { CompetitorSuggestion } from "@/core/competitors";
@@ -323,6 +323,13 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
       <p className="muted">
         Based on {num(recs.set.answersAnalysed)} answers · generated <TimeAgo date={recs.set.createdAt} now={now} /> ·{" "}
         {recs.set.generatedBy === "llm" ? "written by AI" : "rule-based"}
+        {d.status === "ACTIVE" && " · refreshed weekly"}
+        {recommendationsOutOfDate(recs.set, detail.scores.domain?.samples, now) && (
+          <>
+            {" "}
+            <Badge tone="warning">Out of date</Badge> Refresh to use the latest answers.
+          </>
+        )}
       </p>
       {open.length === 0 ? (
         <p className="muted">{recs.items.length ? "All recommendations are done or dismissed. Refresh after the next measurements." : "Nothing to improve right now."}</p>
