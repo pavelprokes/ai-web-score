@@ -540,6 +540,112 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
 
+  it("counts each answer of a rejected async batch once, and migration 0012 repairs older counters", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { submitAsync } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
+    const [provider] = await db.select().from(s.providers).where(eq(s.providers.id, "chatgpt-ui"));
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "chatgpt-ui"));
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 40 }).returning();
+    await db.insert(s.measurements).values(
+      Array.from({ length: 40 }, (_, i) => ({
+        id: `batch-reject-${i}`,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "chatgpt-ui",
+        model: config!.model,
+        sampleIndex: 200 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    process.env.DATAFORSEO_LOGIN = "l";
+    process.env.DATAFORSEO_PASSWORD = "p";
+    const realFetch = globalThis.fetch;
+    // What production got for a country outside the location table: every task of the batch rejected alike.
+    globalThis.fetch = (async (_url: string, init: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          status_code: 20000,
+          status_message: "Ok.",
+          tasks: (JSON.parse(String(init.body)) as Array<{ tag: string }>).map((t) => ({ id: "t", status_code: 40501, status_message: "Invalid Field: 'location_name'.", data: { tag: t.tag }, result: null })),
+        }),
+      )) as typeof fetch;
+    try {
+      await submitAsync(run!.id, config!.id);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DATAFORSEO_LOGIN;
+      delete process.env.DATAFORSEO_PASSWORD;
+      await db.update(s.providers).set({ enabled: provider!.enabled }).where(eq(s.providers.id, "chatgpt-ui"));
+    }
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(rows.every((r) => r.status === "FAILED")).toBe(true);
+    const finishedRun = async () => (await db.select().from(s.runs).where(eq(s.runs.id, run!.id)))[0]!;
+    expect(await finishedRun()).toMatchObject({ status: "FAILED", completedCount: 0, failedCount: 40 });
+
+    // Runs finished before the fix carry 3 + 37 + 37 failures for 40 answers; the migration recounts them from the rows.
+    await db.update(s.runs).set({ failedCount: 77 }).where(eq(s.runs.id, run!.id));
+    const migration = readFileSync("./drizzle/0012_recount_run_failures.sql", "utf8");
+    for (let i = 0; i < 2; i++) {
+      await db.execute(sql.raw(migration));
+      expect(await finishedRun()).toMatchObject({ status: "FAILED", completedCount: 0, failedCount: 40 });
+    }
+  });
+
+  it("stops a provider for the run after one out-of-credit rejection, even after earlier answers", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { executeMeasurement } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "perplexity-api")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 4 }).returning();
+    const ids = Array.from({ length: 4 }, (_, i) => `quota-${i}`);
+    await db.insert(s.measurements).values(
+      ids.map((id, i) => ({
+        id,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "perplexity-api",
+        model: config!.model,
+        sampleIndex: 300 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    const saved = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    // The balance runs out after the first answer of the run (production, 2026-10-29).
+    globalThis.fetch = (async () =>
+      ++calls === 1
+        ? new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }))
+        : new Response('{"error":{"message":"You exceeded your current quota, add credits at https://console.perplexity.ai/project/billing.","type":"insufficient_quota","code":401}}\n', { status: 401 })) as typeof fetch;
+    try {
+      for (const id of ids) await executeMeasurement(id);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;
+      else process.env.PERPLEXITY_API_KEY = saved;
+    }
+    expect(calls).toBe(2);
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(rows.map((r) => r.status).sort()).toEqual(["FAILED", "FAILED", "FAILED", "SUCCEEDED"]);
+    expect(rows.filter((r) => JSON.stringify(r.errors).includes("Skipped: perplexity-api rejected 1 request in this run")).length).toBe(2);
+    const [finished] = await db.select().from(s.runs).where(eq(s.runs.id, run!.id));
+    expect(finished).toMatchObject({ status: "PARTIAL", completedCount: 1, failedCount: 3 });
+  });
+
   it("puts a rate-limited answer back in the queue without spending an attempt, until it is too old", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { cellStates, domains, measurementSignals, measurements, promptVersions, providers, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
-import { ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
+import { classifyProviderError, ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
 import type { MeasurementRequest } from "@/core/measurement/types";
 import { computeCost, selectPrice } from "@/core/pricing/cost";
 import { type CellState, confidence, initialCellState, recommendedIntervalDays, recommendedSampleCount, updateCell } from "@/core/sampling/cell-state";
@@ -172,10 +172,14 @@ async function recordFailure(m: MeasurementRow, error: unknown, attempts: number
   const retryable = error instanceof ProviderError ? error.retryable : true;
   const final = !retryable || attempts >= MAX_ATTEMPTS;
   const errors = [...((m.errors as unknown[]) ?? []), { at: new Date().toISOString(), message: message.slice(0, 1000) }];
-  await db
+  // Only an answer still in flight can fail. A whole rejected batch reaches this once per answer after
+  // stopRejectedProvider has already failed (and counted) the rest of it; those were counted twice.
+  const changed = await db
     .update(measurements)
     .set({ errors, attempts, ...(final ? { status: "FAILED", finishedAt: new Date() } : {}) })
-    .where(sql`${measurements.id} = ${m.id} and ${measurements.status} <> 'CANCELLED'`);
+    .where(and(eq(measurements.id, m.id), inArray(measurements.status, ["SCHEDULED", "SUBMITTED"])))
+    .returning({ id: measurements.id });
+  if (changed.length === 0) return;
   console.warn(`[measure] ${m.providerId} ${final ? "failed" : `attempt ${attempts} failed`}: ${message.slice(0, 300)}`);
   if (final) {
     await db.update(runs).set({ failedCount: sql`${runs.failedCount} + 1` }).where(eq(runs.id, m.runId));
@@ -191,6 +195,8 @@ export const REJECTIONS_TO_STOP = 3;
  * Runtime check: a provider that rejects every request the same way (bad request, auth, quota) would
  * otherwise fail each remaining prompt one by one. After REJECTIONS_TO_STOP identical rejections and no
  * success in the run, its still-scheduled measurements are marked failed with an explanation.
+ * An exhausted balance or a rejected key stops it at the first rejection, also after earlier answers
+ * (credit runs out mid-run): the next request cannot go better. The next run probes with one request.
  */
 async function stopRejectedProvider(m: MeasurementRow, message: string) {
   const db = getDb();
@@ -200,8 +206,10 @@ async function stopRejectedProvider(m: MeasurementRow, message: string) {
            count(*) filter (where status = 'SUCCEEDED')::int as ok
     from measurements where run_id = ${m.runId} and provider_id = ${m.providerId}`);
   const same = Number(row?.same ?? 0);
-  if (same < REJECTIONS_TO_STOP || Number(row?.ok ?? 0) > 0) return;
-  const note = `Skipped: ${m.providerId} rejected ${same} requests in this run with the same error (${message.slice(0, 300)})`;
+  const kind = classifyProviderError(message);
+  const hopeless = kind === "QUOTA" || kind === "AUTH";
+  if (!hopeless && (same < REJECTIONS_TO_STOP || Number(row?.ok ?? 0) > 0)) return;
+  const note = `Skipped: ${m.providerId} rejected ${same} request${same === 1 ? "" : "s"} in this run with the same error (${message.slice(0, 300)})`;
   const skipped = await db
     .update(measurements)
     .set({
