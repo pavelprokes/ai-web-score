@@ -71,6 +71,7 @@ export async function standardConfigurationIds(): Promise<string[]> {
  * Learned cell states the planner can still measure: current versions of ACTIVE prompts on enabled STANDARD
  * configurations. cell_states also keeps rows of paused prompts, replaced versions and disabled providers.
  * `confidence` is recomputed for `now` — the stored column is a snapshot from the last answer and never decays.
+ * Planner cells that were never measured have no row yet and are not returned (their confidence would be 0).
  */
 export async function liveCells(domainId: string, now = new Date()) {
   const ids = await standardConfigurationIds();

@@ -820,6 +820,15 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const liveConfig = (await enabledConfigurations()).find((c) => c.role === "STANDARD")!.id;
     await db.update(s.providers).set({ enabled: false }).where(eq(s.providers.id, "claude-api"));
     const [deadConfig] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "claude-api")).limit(1);
+    // An enabled provider with credentials whose configuration is not STANDARD (no request is sent here).
+    const candidateConfig = "openai-api:gpt-6-luna";
+    process.env.OPENAI_API_KEY = "test-not-a-key";
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "openai-api"));
+    await db.update(s.providerConfigurations).set({ enabled: true }).where(eq(s.providerConfigurations.id, candidateConfig));
+    expect((await enabledConfigurations()).find((c) => c.id === candidateConfig)?.role).toBe("CANDIDATE");
+    // A version of the kept prompt that is not its current one.
+    const [current] = await db.select().from(s.promptVersions).where(eq(s.promptVersions.id, keptVersion));
+    const [replaced] = await db.insert(s.promptVersions).values({ ...current!, id: undefined, createdAt: undefined, version: current!.version + 100 }).returning();
 
     const day = 86_400_000;
     const state = { mean: 0.5, variance: 0.01, processNoisePerDay: 0.002, n: 5, lastObservedAt: new Date(Date.now() - 10 * day).toISOString(), changeDetectedAt: null, responseVariance: 0.1, cusumUp: 0, cusumDown: 0 };
@@ -838,6 +847,8 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       cell(keptVersion, liveConfig, 0.9, 1),
       cell(keptVersion, deadConfig!.id, 0.1, -30), // provider disabled
       cell(pausedVersion, liveConfig, 0.1, -30), // prompt paused
+      cell(replaced!.id, liveConfig, 0.1, -30), // replaced prompt version
+      cell(keptVersion, candidateConfig, 0.1, -30), // not a STANDARD configuration
     ]);
     await db.update(s.prompts).set({ status: "PAUSED" }).where(eq(s.prompts.id, paused!.id));
     try {
@@ -851,8 +862,12 @@ describe.skipIf(!url)("pipeline (integration)", () => {
 
       const row = (await listPrompts(demo!.id)).find((p) => p.id === kept!.id)!;
       expect(row.cells).toBe(1);
-      expect(Number(row.meanConfidence)).toBeCloseTo(0.9, 6);
+      // The per-prompt column decays like the schedule next to it, not the stored 0.9.
+      expect(row.meanConfidence).toBeCloseTo(decayed, 3);
     } finally {
+      delete process.env.OPENAI_API_KEY;
+      await db.update(s.providers).set({ enabled: false }).where(eq(s.providers.id, "openai-api"));
+      await db.delete(s.promptVersions).where(eq(s.promptVersions.id, replaced!.id));
       await db.update(s.prompts).set({ status: "ACTIVE" }).where(eq(s.prompts.id, paused!.id));
     }
   });
