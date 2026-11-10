@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: ai_web_score_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d ai_web_score_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      # Reads the pnpm version from "packageManager" in package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # With TEST_DATABASE_URL set the DB suites run instead of skipping; they drop and recreate the schema.
+      # No provider keys: the suites stub every provider and the internal LLM.
+      - run: pnpm test
+        env:
+          TEST_DATABASE_URL: postgres://app:app@localhost:5432/ai_web_score_test
+      # Not `vercel-build`: that one migrates a database. `next build` needs no database and no env.
+      - run: pnpm build

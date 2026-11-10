@@ -19,6 +19,9 @@ pnpm test                           # unit tests
 pnpm test:int                       # end-to-end pipeline against TEST_DATABASE_URL
 ```
 
+CI (`.github/workflows/ci.yml`) runs `pnpm typecheck`, `pnpm test` with `TEST_DATABASE_URL` set (so the DB suites
+run, not skip) and `pnpm build` on every pull request and on pushes to `main`.
+
 Backend-first usage (no UI needed):
 
 ```bash
