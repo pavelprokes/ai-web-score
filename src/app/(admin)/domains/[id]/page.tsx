@@ -324,7 +324,7 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
         Based on {num(recs.set.answersAnalysed)} answers · generated <TimeAgo date={recs.set.createdAt} now={now} /> ·{" "}
         {recs.set.generatedBy === "llm" ? "written by AI" : "rule-based"}
         {d.status === "ACTIVE" && " · refreshed weekly"}
-        {recommendationsOutOfDate(recs.set, detail.scores.domain?.samples, now) && (
+        {recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now) && (
           <>
             {" "}
             <Badge tone="warning">Out of date</Badge> Refresh to use the latest answers.

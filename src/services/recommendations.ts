@@ -86,7 +86,7 @@ export async function generateRecommendations(domainId: string) {
     findings.length === 0 ? { summary: "No issues found in the current data.", items: [], model: null } : await writePlan(domainId, profile, findings, answers.length);
   await throwIfJobCancelled();
 
-  const closed = await closedFindings(domainId);
+  const decided = await ownerDecisions(domainId);
   const [set] = await db
     .insert(recommendationSets)
     .values({
@@ -111,35 +111,68 @@ export async function generateRecommendations(domainId: string) {
         impactMetric: item.impactMetric,
         effort: item.effort,
         findingKeys: item.findingKeys,
-        // Closed only when every finding behind the item was closed before: anything else is new advice.
-        ...(item.findingKeys.every((k) => closed.has(k)) ? closed.get(item.findingKeys[0]!) : {}),
+        ...decided(item.findingKeys),
       })),
     );
   }
   return { setId: set!.id, findings: findings.length, items: plan.items.length };
 }
 
+/** Findings read from measured answers; the others come from the crawl or from robots.txt / llms.txt. */
+const ANSWER_BASED = /^(topic-gap|accuracy|authority|citation|position|reputation|provider-gap|competition):/;
+const itemId = (keys: string[]) => [...keys].sort().join("|");
+
 /**
- * Done / Dismissed of the latest set by finding key, to carry onto the next set (the status lives on a row of one
- * generation; finding keys such as "llms-txt" are stable across generations). Dismissed holds while the finding
- * recurs. Done holds only while the window can still contain answers from before the fix: a finding still there
- * after that was not fixed, so its item comes back open.
+ * The owner's Done / Dismissed, to carry onto a new set (the status lives on a row of one generation; finding
+ * keys such as "llms-txt" are stable across generations). Read from every set of the domain, newest first, so a
+ * generation that lacks the finding (robots.txt timed out, the LLM kept other items) does not lose the decision.
+ * Only rows with a decision count (`statusChangedAt`; carried copies keep it, Reopen is a decision too).
+ *
+ * An item whose exact findings were decided before gets that decision. Any other item is closed only when every
+ * finding behind it was closed — anything else is new advice — and closing a merged item does not close a
+ * finding whose own item was left open in the same set.
+ *
+ * Dismissed holds while the finding recurs. Done on a finding measured from answers holds only while the window
+ * can still contain answers from before the fix: still there after that, it was not fixed and comes back open.
+ * Done on a website finding (crawl, robots.txt, llms.txt) holds until the owner reopens it.
  */
-async function closedFindings(domainId: string) {
-  const previous = await latestRecommendations(domainId);
+async function ownerDecisions(domainId: string) {
+  const rows = await getDb()
+    .select({ setId: recommendations.setId, findingKeys: recommendations.findingKeys, status: recommendations.status, statusChangedAt: recommendations.statusChangedAt })
+    .from(recommendations)
+    .innerJoin(recommendationSets, eq(recommendationSets.id, recommendations.setId))
+    .where(eq(recommendations.domainId, domainId))
+    .orderBy(desc(recommendationSets.createdAt), desc(recommendations.statusChangedAt));
   const cutoff = Date.now() - WINDOW_DAYS * 86_400_000;
-  const closed = new Map<string, { status: string; statusChangedAt: Date | null }>();
-  for (const r of previous?.items ?? []) {
-    if (r.status === "OPEN" || (r.status === "DONE" && (r.statusChangedAt?.getTime() ?? 0) < cutoff)) continue;
-    for (const key of r.findingKeys as string[]) closed.set(key, { status: r.status, statusChangedAt: r.statusChangedAt });
+  const openIn = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (r.status !== "OPEN") continue;
+    const keys = openIn.get(r.setId) ?? new Set<string>();
+    for (const k of r.findingKeys as string[]) keys.add(k);
+    openIn.set(r.setId, keys);
   }
-  return closed;
+  type Decision = { status: string; statusChangedAt: Date } | null; // null = open
+  const byItem = new Map<string, Decision>();
+  const byKey = new Map<string, Decision>();
+  for (const r of rows) {
+    if (!r.statusChangedAt) continue;
+    const keys = r.findingKeys as string[];
+    const expired = r.status === "DONE" && r.statusChangedAt.getTime() < cutoff && keys.some((k) => ANSWER_BASED.test(k));
+    const decision = r.status === "OPEN" || expired ? null : { status: r.status, statusChangedAt: r.statusChangedAt };
+    if (!byItem.has(itemId(keys))) byItem.set(itemId(keys), decision);
+    for (const k of keys) if (!byKey.has(k) && !(decision && openIn.get(r.setId)?.has(k))) byKey.set(k, decision);
+  }
+  return (keys: string[]) => (byItem.has(itemId(keys)) ? byItem.get(itemId(keys)) : keys.every((k) => byKey.get(k)) ? byKey.get(keys[0]!) : null) ?? {};
 }
 
 const OUT_OF_DATE_DAYS = 14;
 
-/** Advice that missed two weekly refreshes, or was written from at most half of the answers now behind the score. */
-export function recommendationsOutOfDate(set: { createdAt: Date; answersAnalysed: number }, scoredAnswers: number | undefined, now: Date) {
+/**
+ * Advice that missed two refreshes, or was written from at most half of the answers now behind the score. Only for
+ * a monitored domain: a paused one gets no new answers, so a refresh could not clear the warning.
+ */
+export function recommendationsOutOfDate(set: { createdAt: Date; answersAnalysed: number }, monitored: boolean, scoredAnswers: number | undefined, now: Date) {
+  if (!monitored) return false;
   if (now.getTime() - set.createdAt.getTime() > OUT_OF_DATE_DAYS * 86_400_000) return true;
   // A set that read the maximum number of answers cannot read more on a refresh.
   return !!scoredAnswers && set.answersAnalysed < MAX_ANSWERS && scoredAnswers >= 2 * set.answersAnalysed;

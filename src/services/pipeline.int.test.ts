@@ -469,17 +469,11 @@ describe.skipIf(!url)("pipeline (integration)", () => {
 
       // A refresh keeps Done / Dismissed on items about the same findings; an item that also covers a finding
       // nobody closed is new advice and stays open.
-      const other = rules!.items.map((i) => (i.findingKeys as string[])[0]!).find((k) => !k.startsWith("robots:"))!;
-      expect(other).toBeTruthy();
+      const other = "authority:third-party-sources"; // measured from answers; robots:* is read from the website
+      expect(rules!.items.map((i) => (i.findingKeys as string[])[0])).toContain(other);
       const item = { why: "w", steps: ["s"], category: "TECHNICAL", impactMetric: "citation-rate", effort: "LOW" };
-      const refresh = async () => {
-        setLlmOverride(() => ({
-          summary: "Again.",
-          items: [
-            { ...item, title: "Allow AI crawlers (reworded)", findingKeys: ["robots:Bingbot"] },
-            { ...item, title: "Crawlers and more", findingKeys: ["robots:Bingbot", other] },
-          ],
-        }));
+      const refresh = async (items: string[][]) => {
+        setLlmOverride(() => ({ summary: "Again.", items: items.map((findingKeys) => ({ ...item, title: findingKeys.join(" + "), findingKeys })) }));
         try {
           await generateRecommendations(demo!.id);
         } finally {
@@ -487,24 +481,50 @@ describe.skipIf(!url)("pipeline (integration)", () => {
         }
         return (await latestRecommendations(demo!.id))!;
       };
-      const kept = await refresh();
+      const statuses = async (items: string[][]) => (await refresh(items)).items.map((i) => i.status);
+      const longAgo = new Date(Date.now() - 40 * 86_400_000);
+      const decide = (id: string, status: string, statusChangedAt = new Date()) => db.update(s.recommendations).set({ status, statusChangedAt }).where(eq(s.recommendations.id, id));
+      const pair = [["robots:Bingbot"], ["robots:Bingbot", other]];
+      const kept = await refresh(pair);
       expect(kept.set.id).not.toBe(llm!.set.id);
       expect(kept.items.map((i) => i.status)).toEqual(["DONE", "OPEN"]);
       expect(kept.items[0]!.statusChangedAt).toEqual(done.statusChangedAt);
-      // Done so long ago that every answer in the window is from after the fix, and the finding is still there: reopened.
-      const longAgo = new Date(Date.now() - 40 * 86_400_000);
-      await db.update(s.recommendations).set({ statusChangedAt: longAgo }).where(eq(s.recommendations.id, kept.items[0]!.id));
-      const reopened = await refresh();
-      expect(reopened.items.map((i) => i.status)).toEqual(["OPEN", "OPEN"]);
+      // Done on a website finding holds however old; Done on a finding measured from answers holds only while the
+      // window can still contain answers from before the fix — still there after that, it comes back open.
+      await decide(kept.items[0]!.id, "DONE", longAgo);
+      await decide(kept.items[1]!.id, "DONE");
+      const both = await refresh(pair);
+      expect(both.items.map((i) => i.status)).toEqual(["DONE", "DONE"]);
+      await decide(both.items[1]!.id, "DONE", longAgo);
+      const reopened = await refresh(pair);
+      expect(reopened.items.map((i) => i.status)).toEqual(["DONE", "OPEN"]);
       // Dismissed is the owner's decision, not a claim about the site: it stays however old.
-      await db.update(s.recommendations).set({ status: "DISMISSED", statusChangedAt: longAgo }).where(eq(s.recommendations.id, reopened.items[0]!.id));
-      expect((await refresh()).items.map((i) => i.status)).toEqual(["DISMISSED", "OPEN"]);
+      await decide(reopened.items[1]!.id, "DISMISSED", longAgo);
+      expect(await statuses(pair)).toEqual(["DONE", "DISMISSED"]);
+      // A generation without the findings (robots.txt timed out, the LLM kept other items) does not lose the decisions.
+      await refresh([["robots:PerplexityBot"]]);
+      expect(await statuses(pair)).toEqual(["DONE", "DISMISSED"]);
+
+      // Dismissing an item that merges findings leaves the findings' own, untouched items open — also after a gap.
+      const merged = [["robots:ChatGPT-User"], ["robots:ClaudeBot"], ["robots:ChatGPT-User", "robots:ClaudeBot"]];
+      const fresh = await refresh(merged);
+      expect(fresh.items.map((i) => i.status)).toEqual(["OPEN", "OPEN", "OPEN"]);
+      await setRecommendationStatus(fresh.items[2]!.id, "DISMISSED");
+      expect(await statuses(merged)).toEqual(["OPEN", "OPEN", "DISMISSED"]);
+      await refresh([["robots:PerplexityBot"]]);
+      const again = await refresh(merged);
+      expect(again.items.map((i) => i.status)).toEqual(["OPEN", "OPEN", "DISMISSED"]);
+      // Reopen is a decision too: the older Dismissed does not come back.
+      await setRecommendationStatus(again.items[2]!.id, "OPEN");
+      expect(await statuses(merged)).toEqual(["OPEN", "OPEN", "OPEN"]);
 
       const set = { createdAt: new Date("2026-11-01T00:00:00Z"), answersAnalysed: 400 };
-      expect(recommendationsOutOfDate(set, 700, new Date("2026-11-14T00:00:00Z"))).toBe(false);
-      expect(recommendationsOutOfDate(set, 700, new Date("2026-11-16T00:00:00Z"))).toBe(true); // older than 14 days
-      expect(recommendationsOutOfDate(set, 800, new Date("2026-11-02T00:00:00Z"))).toBe(true); // scored answers doubled
-      expect(recommendationsOutOfDate(set, undefined, new Date("2026-11-02T00:00:00Z"))).toBe(false);
+      expect(recommendationsOutOfDate(set, true, 700, new Date("2026-11-14T00:00:00Z"))).toBe(false);
+      expect(recommendationsOutOfDate(set, true, 700, new Date("2026-11-16T00:00:00Z"))).toBe(true); // older than 14 days
+      expect(recommendationsOutOfDate(set, true, 800, new Date("2026-11-02T00:00:00Z"))).toBe(true); // scored answers doubled
+      expect(recommendationsOutOfDate(set, true, undefined, new Date("2026-11-02T00:00:00Z"))).toBe(false);
+      // A paused domain gets no new answers: a refresh could not clear the warning.
+      expect(recommendationsOutOfDate(set, false, 800, new Date("2026-12-16T00:00:00Z"))).toBe(false);
 
       // The brief route answers 404/409 instead of a 500 for an unknown domain or one without a profile.
       const { agentBrief } = await import("@/services/recommendations");
@@ -517,31 +537,46 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
-  it("schedules one recommendations refresh per ACTIVE domain per week", async () => {
+  it("schedules a recommendations refresh for ACTIVE domains whose latest set is a week old, once a day", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
-    const { schedulerTick, weekStart } = await import("@/jobs/runner");
+    const { schedulerTick } = await import("@/jobs/runner");
     const { createDomain } = await import("@/services/domains");
     const db = getDb();
     const active = await db.select().from(s.domains).where(eq(s.domains.status, "ACTIVE"));
-    expect(active.length).toBeGreaterThan(0);
+    const [demo] = active.filter((d) => d.hostname === "kodovani-pro-deti.example");
+    expect(demo).toBeTruthy(); // has sets from the test above
     const paused = await createDomain({ hostname: "paused.example", runDiscovery: false });
     await db.update(s.domains).set({ status: "PAUSED" }).where(eq(s.domains.id, paused.id));
-    const keys = async () => (await db.select().from(s.jobs).where(eq(s.jobs.type, "recommendations.generate"))).map((j) => j.dedupeKey).sort();
-    const expected = active.map((d) => `recommendations:${d.id}:${weekStart(new Date())}`).sort();
+    const jobs = () => db.select().from(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+    const keys = async () => (await jobs()).map((j) => j.dedupeKey).sort();
+    const today = new Date().toISOString().slice(0, 10);
+    const all = active.map((d) => `recommendations:${d.id}:${today}`).sort();
+    const shiftSets = (days: number) => db.execute(sql`update recommendation_sets set created_at = created_at + make_interval(days => ${days})`);
 
+    // A set from this week: nothing to do for that domain.
     await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
     await schedulerTick();
-    await schedulerTick();
-    expect(await keys()).toEqual(expected);
-    // Not again once this week's job has finished, whatever its outcome.
-    for (const status of ["DONE", "FAILED"]) {
-      await db.update(s.jobs).set({ status, finishedAt: new Date() }).where(eq(s.jobs.type, "recommendations.generate"));
+    expect(await keys()).toEqual(all.filter((k) => !k.includes(demo!.id)));
+
+    await shiftSets(-8);
+    try {
       await schedulerTick();
-      expect(await keys()).toEqual(expected);
+      await schedulerTick();
+      expect(await keys()).toEqual(all);
+      // Not again the same day, whatever the outcome...
+      await db.update(s.jobs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.jobs.type, "recommendations.generate"));
+      await schedulerTick();
+      expect(await keys()).toEqual(all);
+      // ...but a failed run (no new set) is tried again the next day.
+      await db.execute(sql`update jobs set dedupe_key = replace(dedupe_key, ${today}, '2000-01-01') where type = 'recommendations.generate'`);
+      await schedulerTick();
+      expect((await jobs()).filter((j) => j.status === "QUEUED").map((j) => j.dedupeKey).sort()).toEqual(all);
+    } finally {
+      await shiftSets(8);
+      await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+      await db.delete(s.domains).where(eq(s.domains.id, paused.id));
     }
-    await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
-    await db.delete(s.domains).where(eq(s.domains.id, paused.id));
   });
 
   it("stops a provider that rejects every request and shows the error", async () => {
