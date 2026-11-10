@@ -366,10 +366,19 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       if (req.purpose !== "discovery") return world.fakeLlm(req);
       asked = req.user;
       const profile = world.fakeDiscoveryProfile();
-      return { ...profile, topics: profile.topics.filter((t) => topics(t.name)) };
+      // The model only sees the crawl: this time it forgets a rival it named before and names a new one.
+      const competitors = [...profile.competitors.slice(1), { name: "Novy Rival", aliases: [], domains: [], overlap: 0.5 }];
+      return { ...profile, competitors, topics: profile.topics.filter((t) => topics(t.name)) };
     });
+    const reextractJobs = () => db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), sql`${s.jobs.payload}->>'domainId' = ${domainId}`));
+    const jobsBefore = (await reextractJobs()).length;
     try {
       await runDiscovery(domainId, "MANUAL");
+      // The forgotten rival stays tracked, and the stored answers are re-read with the new profile.
+      const { latestProfile } = await import("@/services/discovery");
+      const kept = (await latestProfile(domainId))!;
+      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([...world.COMPETITORS.map((c) => c.name), "Novy Rival"].sort());
+      expect((await reextractJobs()).slice(jobsBefore).map((j) => j.dedupeKey)).toEqual([`reextract:${domainId}:v${kept.version}`]);
       for (const c of clusters) expect(asked).toContain(`- ${c.name}\n`);
       expect(asked).not.toContain("Half-written topic");
       expect(await proposals()).toEqual({ ADD_PROMPT: "SUPERSEDED", ACTIVATE: "SUPERSEDED" });

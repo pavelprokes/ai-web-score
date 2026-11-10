@@ -90,16 +90,20 @@ const REEXTRACT_BUDGET_MS = 60_000;
  * judgements. Brand position and share among tracked rivals rank against the tracked entities, so a newly
  * tracked competitor would otherwise only count in new answers and the rolling window would drift for weeks.
  * Runs in slices (cursor in the job payload); the last slice rebuilds the score history.
+ * Every profile version enqueues its own job, and jobs of versions created seconds apart run concurrently: one
+ * that started on an older version stops, or it would overwrite the newer job's rows with its stale entities.
  */
 export async function reextractSignals(domainId: string, after: string | null) {
   const db = getDb();
   const latest = await latestProfile(domainId);
   if (!latest) return;
   const { brand, competitors } = trackedEntities(latest.profile);
+  const newer = and(eq(domainProfiles.domainId, domainId), gt(domainProfiles.version, latest.version));
   const started = Date.now();
   let cursor = after ?? "";
   while (Date.now() - started < REEXTRACT_BUDGET_MS) {
     await throwIfJobCancelled();
+    if ((await db.select({ version: domainProfiles.version }).from(domainProfiles).where(newer).limit(1)).length > 0) return;
     const rows = await db
       .select({
         id: measurements.id,
@@ -148,11 +152,13 @@ export async function reextractSignals(domainId: string, after: string | null) {
       const signals: RawSignals = { ...(r.signals as RawSignals), ...fresh };
       return sql`(${r.id}, ${JSON.stringify(signals)}::jsonb, ${fresh.brandMentioned}::boolean, ${fresh.domainCited}::boolean, ${fresh.recommendationPosition}::int, ${presenceIndex(fresh)}::float8)`;
     });
+    // Checked again in the statement: a version created since the check above has a job that may be past these rows.
     await db.execute(sql`
       update measurement_signals s set signals = v.signals, brand_mentioned = v.bm, domain_cited = v.dc,
         recommendation_position = v.rp, presence = v.pr
       from (values ${sql.join(values, sql`, `)}) as v(id, signals, bm, dc, rp, pr)
-      where s.measurement_id = v.id and s.extractor_version = ${EXTRACTOR_VERSION}`);
+      where s.measurement_id = v.id and s.extractor_version = ${EXTRACTOR_VERSION}
+        and not exists (select 1 from ${domainProfiles} where ${newer})`);
     cursor = rows.at(-1)!.id;
   }
   await enqueue("signals.reextract", { domainId, after: cursor }, { dedupeKey: `reextract:${domainId}:${cursor}` });

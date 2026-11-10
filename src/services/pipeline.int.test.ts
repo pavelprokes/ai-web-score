@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
 /**
@@ -803,6 +803,40 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(sig!.signals).toMatchObject({ competitorsMentioned: ["Nova Akademie"], sentiment: 0.4 });
     const pending = await db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), ne(s.jobs.status, "DONE")));
     expect(pending).toEqual([]);
+  });
+
+  it("stops a re-extract job once a newer profile version exists; the newer version's job covers every answer", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { reextractSignals, trackCompetitor } = await import("@/services/competitors");
+    const { processJobs } = await import("@/jobs/runner");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [answer] = await db.select().from(s.measurements).where(sql`${s.measurements.answerText} like '1. Nova Akademie%'`);
+    await db.update(s.measurements).set({ answerText: "1. Nova Akademie – kurzy. 2. Druha Skola – kroužky." }).where(eq(s.measurements.id, answer!.id));
+    const ofAnswer = eq(s.measurementSignals.measurementId, answer!.id);
+    // Anything the job of the current version writes would replace this.
+    await db.update(s.measurementSignals).set({ signals: sql`jsonb_set(${s.measurementSignals.signals}, '{competitorsMentioned}', '["untouched"]')` }).where(ofAnswer);
+    const stored = async () => ((await db.select().from(s.measurementSignals).where(ofAnswer))[0]!.signals as { competitorsMentioned: string[] }).competitorsMentioned;
+
+    // A second Track lands while the first job is between reading a batch and writing it.
+    const execute = db.execute.bind(db) as (q: unknown) => Promise<unknown>;
+    const spy = vi.spyOn(db, "execute").mockImplementationOnce((async (q: unknown) => {
+      await trackCompetitor(demo!.id, "Druha Skola");
+      return execute(q);
+    }) as never);
+    try {
+      await reextractSignals(demo!.id, null);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await stored()).toEqual(["untouched"]);
+    // Only the new version's job is waiting: the superseded one did not continue.
+    const queued = await db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), ne(s.jobs.status, "DONE")));
+    expect(queued.map((j) => j.payload)).toEqual([{ domainId: demo!.id }]);
+
+    await processJobs({ deadlineMs: 600_000, types: ["signals.reextract"] });
+    expect(await stored()).toEqual(["Nova Akademie", "Druha Skola"]);
   });
 
   it("reads only cells the planner can still measure in the schedule, confidence and prompt columns", async () => {
