@@ -18,6 +18,7 @@ import {
   measurementSignals,
 } from "@/db/schema";
 import { listProviders, missingEnv } from "@/core/measurement/providers";
+import { type CellState, confidence } from "@/core/sampling/cell-state";
 import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import type { TopicCluster } from "@/core/portfolio/clusters";
 import { portfolioQuality } from "@/core/portfolio/selection";
@@ -25,7 +26,7 @@ import { umamiDashboardUrl } from "@/core/analytics/umami";
 import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, monthStart, providerValueReport } from "./costs";
 import { latestProfile } from "./discovery";
 import { promptCounts } from "./portfolio";
-import { DEFAULT_MONTHLY_BUDGET_USD } from "./planning";
+import { DEFAULT_MONTHLY_BUDGET_USD, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
 import type { Citation } from "@/core/measurement/types";
 import type { RawSignals } from "@/core/signals/extract";
@@ -158,7 +159,7 @@ export async function domainDetail(domainId: string) {
       .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "FAILED")))
       .orderBy(desc(measurements.finishedAt))
       .limit(20),
-    db.select().from(cellStates).where(eq(cellStates.domainId, domainId)),
+    liveCells(domainId),
     costByProvider(new Date(0), domainId),
     promptCounts(domainId),
   ]);
@@ -317,34 +318,55 @@ export async function scoreHistory(domainId: string, days = 180) {
 }
 
 /** Prompt portfolio with current version, role, status and learned statistics per prompt. */
-export async function listPrompts(domainId: string, status?: string | null) {
-  return getDb()
-    .select({
-      id: prompts.id,
-      status: prompts.status,
-      role: prompts.role,
-      clusterKey: prompts.clusterKey,
-      exploratory: prompts.exploratory,
-      uniqueness: prompts.uniqueness,
-      version: prompts.currentVersion,
-      promptVersionId: promptVersions.id,
-      text: promptVersions.text,
-      category: promptVersions.category,
-      intent: promptVersions.intent,
-      language: promptVersions.language,
-      country: promptVersions.country,
-      location: promptVersions.location,
-      importance: promptVersions.importance,
-      commercialValue: promptVersions.commercialValue,
-      expectedVolatility: promptVersions.expectedVolatility,
-      cells: sql<number>`(select count(*)::int from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
-      meanPresence: sql<number | null>`(select avg((c.state->>'mean')::float) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
-      meanConfidence: sql<number | null>`(select avg(c.confidence) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
-    })
-    .from(prompts)
-    .innerJoin(promptVersions, and(eq(promptVersions.promptId, prompts.id), eq(promptVersions.version, prompts.currentVersion)))
-    .where(status ? and(eq(prompts.domainId, domainId), eq(prompts.status, status)) : eq(prompts.domainId, domainId))
-    .orderBy(prompts.status, prompts.role, prompts.clusterKey);
+export async function listPrompts(domainId: string, status?: string | null, now = new Date()) {
+  const db = getDb();
+  // Only cells the planner still measures; rows of disabled providers would drag the averages.
+  const ids = await standardConfigurationIds();
+  const [rows, cells] = await Promise.all([
+    db
+      .select({
+        id: prompts.id,
+        status: prompts.status,
+        role: prompts.role,
+        clusterKey: prompts.clusterKey,
+        exploratory: prompts.exploratory,
+        uniqueness: prompts.uniqueness,
+        version: prompts.currentVersion,
+        promptVersionId: promptVersions.id,
+        text: promptVersions.text,
+        category: promptVersions.category,
+        intent: promptVersions.intent,
+        language: promptVersions.language,
+        country: promptVersions.country,
+        location: promptVersions.location,
+        importance: promptVersions.importance,
+        commercialValue: promptVersions.commercialValue,
+        expectedVolatility: promptVersions.expectedVolatility,
+      })
+      .from(prompts)
+      .innerJoin(promptVersions, and(eq(promptVersions.promptId, prompts.id), eq(promptVersions.version, prompts.currentVersion)))
+      .where(status ? and(eq(prompts.domainId, domainId), eq(prompts.status, status)) : eq(prompts.domainId, domainId))
+      .orderBy(prompts.status, prompts.role, prompts.clusterKey),
+    ids.length
+      ? db
+          .select({ promptVersionId: cellStates.promptVersionId, state: cellStates.state })
+          .from(cellStates)
+          .where(and(eq(cellStates.domainId, domainId), inArray(cellStates.configurationId, ids)))
+      : [],
+  ]);
+  const states = new Map<string, CellState[]>();
+  for (const c of cells) states.set(c.promptVersionId, [...(states.get(c.promptVersionId) ?? []), c.state as CellState]);
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null);
+  return rows.map((r) => {
+    const own = states.get(r.promptVersionId) ?? [];
+    return {
+      ...r,
+      cells: own.length,
+      meanPresence: mean(own.map((x) => x.mean)),
+      // Decayed to `now`, like the schedule on the same page; the stored column is a snapshot from the last answer.
+      meanConfidence: mean(own.map((x) => confidence(x, now))),
+    };
+  });
 }
 
 export async function providersOverview() {

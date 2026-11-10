@@ -16,7 +16,7 @@ import {
 import { getProvider, listProviders, missingEnv } from "@/core/measurement/providers";
 import type { ProviderConfigurationSeed } from "@/core/measurement/provider";
 import type { PromptRole } from "@/core/prompt";
-import { type CellState, initialCellState } from "@/core/sampling/cell-state";
+import { type CellState, confidence, initialCellState } from "@/core/sampling/cell-state";
 import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle } from "@/core/sampling/planner";
 import { expectedCostPerSample } from "@/core/pricing/cost";
 import { enqueue } from "@/jobs/queue";
@@ -60,6 +60,29 @@ export async function enabledConfigurations(): Promise<Array<ConfigRow & { reach
     .innerJoin(providers, eq(providers.id, providerConfigurations.providerId))
     .where(and(eq(providers.enabled, true), eq(providerConfigurations.enabled, true)));
   return rows.filter((r) => known.has(r.c.id)).map((r) => ({ ...r.c, reach: r.reach }));
+}
+
+/** Ids of the configurations the planner measures on: enabled, STANDARD role. */
+export async function standardConfigurationIds(): Promise<string[]> {
+  return (await enabledConfigurations()).filter((c) => c.role === "STANDARD").map((c) => c.id);
+}
+
+/**
+ * Learned cell states the planner can still measure: current versions of ACTIVE prompts on enabled STANDARD
+ * configurations. cell_states also keeps rows of paused prompts, replaced versions and disabled providers.
+ * `confidence` is recomputed for `now` — the stored column is a snapshot from the last answer and never decays.
+ * Planner cells that were never measured have no row yet and are not returned (their confidence would be 0).
+ */
+export async function liveCells(domainId: string, now = new Date()) {
+  const ids = await standardConfigurationIds();
+  if (ids.length === 0) return [];
+  const rows = await getDb()
+    .select({ c: cellStates })
+    .from(cellStates)
+    .innerJoin(promptVersions, eq(promptVersions.id, cellStates.promptVersionId))
+    .innerJoin(prompts, and(eq(prompts.id, promptVersions.promptId), eq(prompts.currentVersion, promptVersions.version)))
+    .where(and(eq(cellStates.domainId, domainId), eq(prompts.status, "ACTIVE"), inArray(cellStates.configurationId, ids)));
+  return rows.map((r) => ({ ...r.c, confidence: confidence(r.c.state as CellState, now) }));
 }
 
 export async function spentThisMonth(domainId: string, now = new Date()) {
