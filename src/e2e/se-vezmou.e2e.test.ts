@@ -361,13 +361,16 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     await db.insert(s.topicClusters).values({ ...half, key: "half-written", name: "Half-written topic" });
 
     let asked = "";
+    const RENAMED = "Alfa svatby (katalog)"; // only the domain still links it to "Svatební portál Alfa"
     let topics = (name: string) => name !== dropped.name;
     setLlmOverride((req) => {
       if (req.purpose !== "discovery") return world.fakeLlm(req);
       asked = req.user;
       const profile = world.fakeDiscoveryProfile();
-      // The model only sees the crawl: this time it forgets a rival it named before and names a new one.
-      const competitors = [...profile.competitors.slice(1), { name: "Novy Rival", aliases: [], domains: [], overlap: 0.5 }];
+      // The model only sees the crawl: this time it forgets a rival it named before, re-spells another (same
+      // domain) and names a new one.
+      const [renamed, , ...rest] = profile.competitors;
+      const competitors = [{ ...renamed!, name: RENAMED }, ...rest, { name: "Novy Rival", aliases: [], domains: [], overlap: 0.5 }];
       return { ...profile, competitors, topics: profile.topics.filter((t) => topics(t.name)) };
     });
     const reextractJobs = () => db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), sql`${s.jobs.payload}->>'domainId' = ${domainId}`));
@@ -377,8 +380,12 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       // The forgotten rival stays tracked, and the stored answers are re-read with the new profile.
       const { latestProfile } = await import("@/services/discovery");
       const kept = (await latestProfile(domainId))!;
-      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([...world.COMPETITORS.map((c) => c.name), "Novy Rival"].sort());
-      expect((await reextractJobs()).slice(jobsBefore).map((j) => j.dedupeKey)).toEqual([`reextract:${domainId}:v${kept.version}`]);
+      // The re-spelled rival is tracked once, under the new spelling.
+      const [, forgotten, ...same] = world.COMPETITORS.map((c) => c.name);
+      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([forgotten, RENAMED, ...same, "Novy Rival"].sort());
+      const jobs = await reextractJobs();
+      expect(jobs.length).toBe(jobsBefore + 1);
+      expect(jobs.map((j) => j.dedupeKey)).toContain(`reextract:${domainId}:v${kept.version}`);
       for (const c of clusters) expect(asked).toContain(`- ${c.name}\n`);
       expect(asked).not.toContain("Half-written topic");
       expect(await proposals()).toEqual({ ADD_PROMPT: "SUPERSEDED", ACTIVATE: "SUPERSEDED" });

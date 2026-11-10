@@ -132,5 +132,10 @@ for the active domains, $14.6 measurement spend 2026-10-01…13, ~$1–2/day); t
 - Answer analysis covers competitor-only answers in a 10 % sample (`COMPETITOR_DISCOVERY_SAMPLE`), so
   `untrackedEntities` is missing on most of them; anything built on it (competitor suggestions, listing sources)
   under-counts until the "broader answer analysis" decision above.
+- Tracked competitors are append-only: re-discovery keeps every earlier pick (a rival the model re-spells is matched
+  by any shared spelling or domain and tracked once), and there is no remove action yet — a wrong pick can only be
+  removed by a database edit. Next PR: "Remove" in the domain profile (new profile version without the competitor;
+  `signals.reextract` is enqueued as for Track). Until then do not press re-discovery on a monitored domain unless the
+  profile really changed.
 - Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
 - Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.

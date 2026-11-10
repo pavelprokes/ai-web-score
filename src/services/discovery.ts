@@ -55,9 +55,11 @@ export async function runDiscovery(domainId: string, trigger: string) {
 
     // Tracked competitors survive re-discovery, the model's earlier picks too: it only knows the crawl and names a
     // different list every run, while stored signals and the share among rivals are keyed by the tracked names.
+    // The model also re-spells a rival ("Fler/Svatební portál Beremese.cz (directory)" → "Beremese.cz"): one that
+    // shares any spelling or domain with the new list is the same rival, and tracking both would count it twice.
     const previous = await latestProfile(domainId);
     for (const c of previous?.profile.competitors ?? []) {
-      if (!isKnownCompetitorName(c.name, profile, [])) profile.competitors.push(c);
+      if (![c.name, ...c.aliases, ...c.domains].some((n) => isKnownCompetitorName(n, profile, []))) profile.competitors.push(c);
     }
     const version = await nextProfileVersion(domainId);
     await db.insert(domainProfiles).values({
