@@ -1273,6 +1273,31 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(overview.warnings).toEqual([]);
     const config = overview.providers.find((p) => p.id === "claude-api")!.configurations.find((c) => c.id === candidate)!;
     expect(config.calibration.map((x) => (x.report as { pairs: number }).pairs)).toEqual([5]);
+
+    // The pair is tested only while both sides are measured: a missing API key or switching the reference
+    // off pauses it, although the candidate and its provider stay on. (No request is made with the fake key.)
+    const set = (id: string, enabled: boolean) => db.update(s.providerConfigurations).set({ enabled }).where(eq(s.providerConfigurations.id, id));
+    const before = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "claude-api"));
+    const [provider] = await db.select().from(s.providers).where(eq(s.providers.id, "claude-api"));
+    const key = process.env.ANTHROPIC_API_KEY;
+    try {
+      await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "claude-api"));
+      await set(reference, true);
+      await set(candidate, true);
+      const active = async () =>
+        (await providersOverview()).providers.find((p) => p.id === "claude-api")!.configurations.find((c) => c.id === candidate)!.calibration[0]!.active;
+      delete process.env.ANTHROPIC_API_KEY;
+      expect(await active()).toBe(false);
+      process.env.ANTHROPIC_API_KEY = "test";
+      expect(await active()).toBe(true);
+      await set(reference, false);
+      expect(await active()).toBe(false);
+    } finally {
+      if (key === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = key;
+      for (const c of before) await set(c.id, c.enabled);
+      await db.update(s.providers).set({ enabled: provider!.enabled }).where(eq(s.providers.id, "claude-api"));
+    }
     expect(overview.databaseBytes).toBeGreaterThan(1_000_000);
   });
 });

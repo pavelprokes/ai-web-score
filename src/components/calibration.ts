@@ -7,12 +7,12 @@ const DECISION: Record<string, { tone: Tone; label: string }> = {
 };
 
 /**
- * Badge for the latest calibration result of a candidate configuration. Pairs are only measured while
- * the provider and the configuration are on, so an unfinished test of a switched-off one is paused, not running.
+ * Badge for the latest calibration result of a pair. A pair is only measured and evaluated while both of
+ * its configurations are (`active`), so an unfinished test of any other pair is paused, not running.
  */
-export function calibrationBadge(decision: string, on: { provider: boolean; configuration: boolean }): { tone: Tone; label: string; paused: boolean } | null {
+export function calibrationBadge(decision: string, active: boolean): { tone: Tone; label: string; paused: boolean } | null {
   const known = DECISION[decision];
   if (!known) return null;
-  if (decision !== "KEEP_TESTING" || (on.provider && on.configuration)) return { ...known, paused: false };
-  return { tone: "neutral", label: `Paused — ${on.provider ? "configuration" : "provider"} is off`, paused: true };
+  if (decision !== "KEEP_TESTING" || active) return { ...known, paused: false };
+  return { tone: "neutral", label: "Paused", paused: true };
 }

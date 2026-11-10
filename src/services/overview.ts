@@ -26,7 +26,7 @@ import { umamiDashboardUrl } from "@/core/analytics/umami";
 import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, monthStart, providerValueReport } from "./costs";
 import { latestProfile } from "./discovery";
 import { promptCounts } from "./portfolio";
-import { DEFAULT_MONTHLY_BUDGET_USD, liveCells, standardConfigurationIds } from "./planning";
+import { calibrationPairKey, calibrationPairs, DEFAULT_MONTHLY_BUDGET_USD, enabledConfigurations, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
 import type { Citation } from "@/core/measurement/types";
 import type { RawSignals } from "@/core/signals/extract";
@@ -383,7 +383,7 @@ export async function providersOverview() {
       return fallback;
     }
   };
-  const [rows, configs, caps, prices, month, total, calib, llm, databaseBytes] = await Promise.all([
+  const [rows, configs, caps, prices, month, total, latestCalib, llm, databaseBytes] = await Promise.all([
     db.select().from(providers),
     db.select().from(providerConfigurations),
     // Latest version per provider/model only; older versions are history.
@@ -411,11 +411,16 @@ export async function providersOverview() {
     optional("Internal analysis cost", internalLlmCost(monthStart()), []),
     optional<number | null>(
       "Database size",
-      db.execute(sql`select pg_database_size(current_database())::float8 as bytes`).then((r) => Number(r[0]!.bytes)),
+      // All databases of the project, which is what Supabase meters (not only the current one).
+      db.execute(sql`select sum(pg_database_size(datname))::float8 as bytes from pg_database`).then((r) => Number(r[0]!.bytes)),
       null,
     ),
   ]);
-  calib.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // newest first, as the page reads it
+  // A pair is measured and evaluated only while both sides are enabled with credentials (reference too).
+  const activePairs = new Set(calibrationPairs(await optional("Measured configurations", enabledConfigurations(), [])).map(calibrationPairKey));
+  const calib = latestCalib
+    .map((x) => ({ ...x, active: activePairs.has(calibrationPairKey({ reference: { id: x.referenceConfigurationId }, candidate: { id: x.candidateConfigurationId } })) }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // newest first, as the page reads it
   const reach = Object.fromEntries(rows.map((r) => [r.id, r.reach]));
   const value = await optional("Provider value", providerValueReport(reach), []);
   return {

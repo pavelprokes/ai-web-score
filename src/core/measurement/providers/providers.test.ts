@@ -32,15 +32,17 @@ describe("provider request builders", () => {
     expect((direct.tools as Array<Record<string, unknown>>)[0]!.search_type).toBe("fast");
   });
 
-  it("Perplexity retries without service_tier only when the 400 names it, and keeps asking for the tier", async () => {
+  it("Perplexity retries a 400 once without service_tier for that request only, and keeps asking for the tier", async () => {
     process.env.PERPLEXITY_API_KEY ??= "test";
     const standard = perplexityApi.configurations.find((c) => c.role === "STANDARD")!;
     const bodies: Array<Record<string, unknown>> = [];
-    let rejection = '{"error":{"message":"Unsupported parameter: service_tier","code":400}}';
+    // The body production got on 2026-10-07: it does not name the field.
+    const rejection = '{"error":{"message":"invalid request","type":"invalid_request","code":400}}';
+    let rejectAll = false;
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
       bodies.push(body);
-      if (body.service_tier) return new Response(rejection, { status: 400 });
+      if (body.service_tier || rejectAll) return new Response(rejection, { status: 400 });
       return new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
     });
     try {
@@ -48,11 +50,11 @@ describe("provider request builders", () => {
       expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
       // No memory of the rejection: the next request asks for the cheaper tier again.
       expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null, "flex", null]);
-      // Any other 400 is the request's own problem and is not repeated at full price.
+      // A 400 that is not about the tier fails after that one extra (unbilled) attempt.
       bodies.length = 0;
-      rejection = '{"error":{"message":"invalid language_preference","code":400}}';
+      rejectAll = true;
       await expect(perplexityApi.execute!(req, standard)).rejects.toThrow(/HTTP 400/);
-      expect(bodies).toHaveLength(1);
+      expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null]);
     } finally {
       vi.unstubAllGlobals();
     }

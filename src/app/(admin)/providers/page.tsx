@@ -36,9 +36,8 @@ const ROLE: Record<string, string> = {
   CANDIDATE: "Candidate — cheaper, in shadow test",
 };
 
-/** Supabase free tier: the project turns read-only when the database reaches 500 MB. */
-const DATABASE_LIMIT_MB = 500;
-const DATABASE_WARN_MB = 400;
+/** Supabase free tier: the project turns read-only when the database reaches 500 MB. Set the plan's limit after an upgrade. */
+const DATABASE_LIMIT_MB = Number(process.env.DATABASE_LIMIT_MB) || 500;
 
 export default async function ProvidersPage({ searchParams }: { searchParams: Promise<{ done?: string; error?: string }> }) {
   await requireAdminPage();
@@ -59,10 +58,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   const withoutCredentials = rows.filter((p) => p.enabled && p.missingEnv.length > 0).length;
   const labels = new Map(rows.map((p) => [p.id, p.label]));
   const databaseMb = data.databaseBytes === null ? null : Math.round(data.databaseBytes / 1024 ** 2);
-  const databaseWarning =
-    databaseMb !== null && databaseMb > DATABASE_WARN_MB
-      ? [`Database is at ${num(databaseMb)} MB of the ${DATABASE_LIMIT_MB} MB free tier; at the limit Supabase makes it read-only and measuring stops. Set RAW_RESPONSE_RETENTION_DAYS or upgrade the plan.`]
-      : [];
+  const databaseFull = databaseMb !== null && databaseMb > DATABASE_LIMIT_MB * 0.8;
 
   return (
     <>
@@ -73,7 +69,15 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
-      <Flash message={done} error={error ?? ([...low, ...databaseWarning, ...data.warnings].join(" ") || undefined)} />
+      <Flash message={done} error={error ?? ([...low, ...data.warnings].join(" ") || undefined)} />
+      {/* Not in Flash: this stays for weeks and must not replace the confirmation of an action. */}
+      {databaseFull && (
+        <div className="alert" role="status">
+          <Badge tone="warning">Storage</Badge> Database is at {num(databaseMb!)} MB of {num(DATABASE_LIMIT_MB)} MB; at the limit Supabase makes it
+          read-only and measuring stops. Set RAW_RESPONSE_RETENTION_DAYS and then run <code>VACUUM FULL measurements</code> (clearing alone
+          does not shrink the database), or upgrade the plan and set DATABASE_LIMIT_MB.
+        </div>
+      )}
 
       <dl className="tiles" aria-label="Summary">
         <StatTile
@@ -87,7 +91,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
           <StatTile
             label="Database"
             value={`${num(databaseMb)} MB`}
-            detail={`of ${DATABASE_LIMIT_MB} MB on the Supabase free tier${databaseWarning.length ? " · running out of space" : ""}`}
+            detail={`of ${num(DATABASE_LIMIT_MB)} MB on the Supabase plan${databaseFull ? " · running out of space" : ""}`}
           />
         )}
       </dl>
@@ -262,7 +266,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
             {rows.flatMap((p) =>
               p.configurations.map((c) => {
                 const latest = c.calibration.find((x) => x.candidateConfigurationId === c.id);
-                const decision = latest ? calibrationBadge(latest.decision, { provider: p.enabled, configuration: c.enabled }) : null;
+                const decision = latest ? calibrationBadge(latest.decision, latest.active) : null;
                 const report = latest?.report as CalibrationReport | undefined;
                 return (
                   <tr key={c.id}>
@@ -283,7 +287,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
                           {report && agreementText(report) && <span className="cell-sub">{agreementText(report)}</span>}
                           {decision.paused ? (
                             <span className="cell-sub">
-                              Last result {absoluteTime(latest!.createdAt)}. Testing resumes when the {p.enabled ? "configuration" : "provider"} is switched on.
+                              Last result {absoluteTime(latest!.createdAt)}. Testing resumes when both configurations are measured again.
                             </span>
                           ) : (
                             report?.reasons?.[0] && <span className="cell-sub">{readableReason(report.reasons[0])}</span>

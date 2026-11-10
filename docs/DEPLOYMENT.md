@@ -51,7 +51,9 @@ pnpm cli action <domainId> run-now
    Do not add the Supabase client/anon key to this app.
 5. Storage budget: raw provider responses dominate (≈10–50 KB each before TOAST compression). Set
    `RAW_RESPONSE_RETENTION_DAYS` (e.g. 180) if you approach the free-tier limit — answers, citations and
-   signals are kept, only raw JSON is dropped.
+   signals are kept, only raw JSON is dropped. Clearing frees space for reuse but does not shrink the
+   database: run `VACUUM FULL measurements` once afterwards. /providers shows the size (all databases, as
+   Supabase meters it) and warns at 80 % of `DATABASE_LIMIT_MB` (default 500).
 
 ## Vercel (Pro)
 
