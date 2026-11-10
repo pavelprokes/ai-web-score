@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { crawlDomain, fetchFromSite, parsePage } from "./crawl";
+import { isIP } from "node:net";
+import { crawlDomain, fetchFromSite, openSite, parsePage } from "./crawl";
 
-// No real DNS or HTTP: every host resolves to a public address unless listed here.
+// No real DNS or HTTP: an IP literal resolves to itself, every name to a public address unless listed here.
 const dns = vi.hoisted(() => ({ hosts: {} as Record<string, string> }));
 vi.mock("node:dns/promises", () => ({
-  lookup: async (host: string) => [{ address: dns.hosts[host] ?? "93.184.216.34", family: 4 }],
+  lookup: async (host: string) => [isIP(host) ? { address: host, family: isIP(host) } : { address: dns.hosts[host] ?? "93.184.216.34", family: 4 }],
 }));
 
 const HTML = `<!doctype html><html lang="cs"><head>
@@ -106,6 +107,32 @@ describe("crawler requests", () => {
     const digest = await crawlDomain("old.example");
     expect(digest.errors).toEqual([]);
     expect(digest.sitemapUrlCount).toBe(1);
+  });
+
+  it.each(["http://169.254.169.254/latest/meta-data", "http://127.0.0.1/", "http://[::1]/", "http://[::ffff:10.0.0.5]/", "http://2130706433/", "https://internal.example/"])(
+    "never follows the homepage to a private address (%s)",
+    async (target) => {
+      dns.hosts = { "internal.example": "192.168.1.10" };
+      const requested = stubFetch({ "https://site.example/": () => redirect(target), [target]: () => html("<h1>secret</h1>") });
+      const digest = await crawlDomain("site.example");
+      expect(requested.filter((u) => !u.startsWith("https://site.example/"))).toEqual([]);
+      expect(digest.errors).toEqual(["Homepage fetch failed (network error)"]);
+      expect(digest.pages).toEqual([]);
+    },
+  );
+
+  it("reads robots.txt and llms.txt through the homepage's redirect to another domain, and nowhere else", async () => {
+    const requested = stubFetch({
+      "https://old.example/": () => redirect("https://new.example/"),
+      "https://new.example/": () => html("<h1>Home</h1>"),
+      "https://old.example/robots.txt": () => redirect("https://new.example/robots.txt"),
+      "https://new.example/robots.txt": () => new Response("User-agent: GPTBot\nDisallow: /"),
+      "https://old.example/llms.txt": () => redirect("https://evil.example/llms.txt"),
+    });
+    const { get } = await openSite("https://old.example");
+    expect((await get("https://old.example/robots.txt"))?.text).toContain("GPTBot");
+    expect(await get("https://old.example/llms.txt")).toBeNull();
+    expect(requested).not.toContain("https://evil.example/llms.txt");
   });
 
   it("gives up on a redirect loop", async () => {

@@ -64,8 +64,9 @@ async function mayRequest(url: URL, hosts: string[] | null): Promise<boolean> {
   if ((url.protocol !== "https:" && url.protocol !== "http:") || url.port) return false;
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (hosts && !hosts.some((h) => host === h || host.endsWith(`.${h}`))) return false;
-  // ponytail: fetch resolves the name again, so DNS that changes between the two lookups (rebinding) gets through;
-  // closing that needs a dispatcher that connects to the checked address (undici is not a dependency).
+  // ponytail: fetch resolves the name again, so a site owner whose DNS changes between the two lookups (rebinding)
+  // still reaches a private address on port 80/443; closing that needs a dispatcher that connects to the checked
+  // address (undici `Agent({ connect: { lookup } })`; undici is not a dependency).
   const addresses = await lookup(host, { all: true });
   return addresses.length > 0 && !addresses.some((a) => NON_PUBLIC.check(a.address, a.family === 6 ? "ipv6" : "ipv4"));
 }
@@ -79,6 +80,17 @@ export async function fetchFromSite(url: string, hosts: string[] | null): Promis
   const first = await fetchOnce(url, UA, hosts);
   if (first && (first.status === 403 || first.status === 429)) return (await fetchOnce(url, BROWSER_UA, hosts)) ?? first;
   return first;
+}
+
+/**
+ * Requests the homepage first: the host it redirects to (apex → www, or a new domain) is part of the site for every
+ * later request made through `get`.
+ */
+export async function openSite(origin: string): Promise<{ home: Fetched | null; get: (url: string) => Promise<Fetched | null> }> {
+  const hosts = [siteHost(new URL(origin).hostname)];
+  const home = await fetchFromSite(origin, null);
+  if (home) hosts.push(siteHost(new URL(home.url).hostname));
+  return { home, get: (url) => fetchFromSite(url, hosts) };
 }
 
 async function fetchOnce(url: string, ua: string, hosts: string[] | null): Promise<Fetched | null> {
@@ -185,11 +197,7 @@ export async function crawlDomain(domain: string): Promise<CrawlDigest> {
     errors,
   };
 
-  // The homepage first: where it redirects to (apex → www, or a new domain) is part of the site for every later request.
-  const hosts = [siteHost(new URL(origin).hostname)];
-  const home = await fetchFromSite(origin, null);
-  if (home) hosts.push(siteHost(new URL(home.url).hostname));
-  const get = (url: string) => fetchFromSite(url, hosts);
+  const { home, get } = await openSite(origin);
 
   // Sitemaps: robots.txt first, then the conventional location.
   const robots = await get(`${origin}/robots.txt`);

@@ -13,7 +13,7 @@ import {
   topicClusters,
 } from "@/db/schema";
 import { listProviders } from "@/core/measurement/providers";
-import { type CrawlDigest, fetchFromSite } from "@/core/discovery/crawl";
+import { type CrawlDigest, openSite } from "@/core/discovery/crawl";
 import { DomainProfile } from "@/core/domain-profile";
 import type { RawSignals } from "@/core/signals/extract";
 import { type AnswerObservation, diagnose, type Finding } from "@/core/recommendations/diagnostics";
@@ -268,8 +268,9 @@ async function loadClusters(domainId: string) {
 
 /** robots.txt and /llms.txt, fetched live (the crawl digest does not keep them). Failures count as unknown. */
 async function fetchSiteFiles(hostname: string): Promise<{ robotsTxt: string | null; llmsTxt: boolean | null }> {
-  const get = (path: string) => fetchFromSite(`https://${hostname}${path}`, [hostname.replace(/^www\./, "")]);
-  const [robots, llms] = await Promise.all([get("/robots.txt"), get("/llms.txt")]);
+  const origin = `https://${hostname}`;
+  const { get } = await openSite(origin);
+  const [robots, llms] = await Promise.all([get(`${origin}/robots.txt`), get(`${origin}/llms.txt`)]);
   return {
     robotsTxt: robots && robots.status === 200 ? robots.text.slice(0, 200_000) : null,
     llmsTxt: llms ? llms.status === 200 : null,
