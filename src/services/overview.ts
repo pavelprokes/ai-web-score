@@ -25,7 +25,7 @@ import { umamiDashboardUrl } from "@/core/analytics/umami";
 import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, monthStart, providerValueReport } from "./costs";
 import { latestProfile } from "./discovery";
 import { promptCounts } from "./portfolio";
-import { DEFAULT_MONTHLY_BUDGET_USD } from "./planning";
+import { DEFAULT_MONTHLY_BUDGET_USD, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
 import type { Citation } from "@/core/measurement/types";
 import type { RawSignals } from "@/core/signals/extract";
@@ -158,7 +158,7 @@ export async function domainDetail(domainId: string) {
       .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "FAILED")))
       .orderBy(desc(measurements.finishedAt))
       .limit(20),
-    db.select().from(cellStates).where(eq(cellStates.domainId, domainId)),
+    liveCells(domainId),
     costByProvider(new Date(0), domainId),
     promptCounts(domainId),
   ]);
@@ -318,6 +318,9 @@ export async function scoreHistory(domainId: string, days = 180) {
 
 /** Prompt portfolio with current version, role, status and learned statistics per prompt. */
 export async function listPrompts(domainId: string, status?: string | null) {
+  // Only cells the planner still measures; rows of disabled providers would drag the averages.
+  const ids = await standardConfigurationIds();
+  const live = ids.length ? sql`c.configuration_id in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})` : sql`false`;
   return getDb()
     .select({
       id: prompts.id,
@@ -337,9 +340,9 @@ export async function listPrompts(domainId: string, status?: string | null) {
       importance: promptVersions.importance,
       commercialValue: promptVersions.commercialValue,
       expectedVolatility: promptVersions.expectedVolatility,
-      cells: sql<number>`(select count(*)::int from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
-      meanPresence: sql<number | null>`(select avg((c.state->>'mean')::float) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
-      meanConfidence: sql<number | null>`(select avg(c.confidence) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id})`,
+      cells: sql<number>`(select count(*)::int from ${cellStates} c where c.prompt_version_id = ${promptVersions.id} and ${live})`,
+      meanPresence: sql<number | null>`(select avg((c.state->>'mean')::float) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id} and ${live})`,
+      meanConfidence: sql<number | null>`(select avg(c.confidence) from ${cellStates} c where c.prompt_version_id = ${promptVersions.id} and ${live})`,
     })
     .from(prompts)
     .innerJoin(promptVersions, and(eq(promptVersions.promptId, prompts.id), eq(promptVersions.version, prompts.currentVersion)))
