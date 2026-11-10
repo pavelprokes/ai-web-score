@@ -78,6 +78,13 @@
       "when": 1791875084947,
       "tag": "0010_ignored_competitors",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794349295569,
+      "tag": "0011_supersede_stale_proposals",
+      "breakpoints": true
     }
   ]
 }

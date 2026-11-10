@@ -331,4 +331,55 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     const profiles = await db.select().from(s.domainProfiles).where(eq(s.domainProfiles.domainId, domainId));
     expect(profiles.length).toBe(2);
   }, T);
+
+  it.skipIf(live)("6) re-discovery is told the measured topics; a dropped topic takes its pending proposals with it", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { runDiscovery } = await import("@/services/discovery");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const world = await import("./fake-world");
+    const db = getDb();
+    const clusters = await db.select().from(s.topicClusters).where(and(eq(s.topicClusters.domainId, domainId), eq(s.topicClusters.active, true)));
+    const dropped = clusters.find((c) => c.name === "Inspirace a trendy")!;
+    const inDropped = and(eq(s.prompts.domainId, domainId), eq(s.prompts.clusterKey, dropped.key));
+    const [measured] = await db.select().from(s.prompts).where(inDropped).limit(1);
+    // Waiting for approval in that topic: a new prompt and the activation of an existing one.
+    await db.insert(s.prompts).values({ id: "P-STALE", domainId, clusterKey: dropped.key, status: "PROPOSED" });
+    await db.insert(s.portfolioProposals).values([
+      { domainId, kind: "ADD_PROMPT", promptId: "P-STALE", reason: "test" },
+      { domainId, kind: "ACTIVATE", promptId: measured!.id, reason: "test" },
+    ]);
+    const proposals = async () =>
+      Object.fromEntries(
+        (await db.select().from(s.portfolioProposals).where(inArray(s.portfolioProposals.promptId, ["P-STALE", measured!.id]))).map((p) => [p.kind, p.status]),
+      );
+    const promptStatus = async () => (await db.select().from(s.prompts).where(eq(s.prompts.id, "P-STALE")))[0]!.status;
+
+    let asked = "";
+    let topics = (name: string) => name !== dropped.name;
+    setLlmOverride((req) => {
+      if (req.purpose !== "discovery") return world.fakeLlm(req);
+      asked = req.user;
+      const profile = world.fakeDiscoveryProfile();
+      return { ...profile, topics: profile.topics.filter((t) => topics(t.name)) };
+    });
+    try {
+      await runDiscovery(domainId, "MANUAL");
+      for (const c of clusters) expect(asked).toContain(`- ${c.name}\n`);
+      expect(await proposals()).toEqual({ ADD_PROMPT: "SUPERSEDED", ACTIVATE: "SUPERSEDED" });
+      expect(await promptStatus()).toBe("REJECTED");
+      // The other topics kept their names: nothing of theirs left the measured set.
+      const paused = await db.select().from(s.prompts).where(and(eq(s.prompts.domainId, domainId), eq(s.prompts.status, "PAUSED"), sql`${s.prompts.lastActiveAt} > now() - interval '1 minute'`));
+      expect(paused.every((p) => p.clusterKey === dropped.key)).toBe(true);
+
+      // The topic comes back: its new prompt waits for approval again (prompt design skips topics that have prompts).
+      topics = () => true;
+      await runDiscovery(domainId, "MANUAL");
+      expect(asked).not.toContain(`- ${dropped.name}\n`);
+      expect(await proposals()).toEqual({ ADD_PROMPT: "PROPOSED", ACTIVATE: "SUPERSEDED" });
+      expect(await promptStatus()).toBe("PROPOSED");
+    } finally {
+      setLlmOverride(world.fakeLlm);
+    }
+  }, T);
 });
