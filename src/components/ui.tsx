@@ -138,7 +138,7 @@ export function BudgetMeter({ spent, budget, estimate }: { spent: number; budget
       </div>
       {estimate !== undefined && (
         <div className="meter__note muted">
-          Forecast {usd(estimate)} / month <MetricInfo id="forecast" />
+          Forecast {usd(estimate)} by month end <MetricInfo id="forecast" />
         </div>
       )}
     </div>

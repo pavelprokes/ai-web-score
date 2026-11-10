@@ -64,6 +64,34 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(run!.status).toBe("SUCCEEDED");
     expect(run!.completedCount).toBe(ms.length);
 
+    // Forecast = spend so far + the run rate to month end. The learned schedule in cell_states (which keeps
+    // cells of paused prompts and disabled providers) plays no part; only an ACTIVE domain has a run rate.
+    const { estimatedMonthlyCost, projectMonthEnd, monthStart } = await import("@/services/costs");
+    const llm = await db.select().from(s.llmUsage).where(eq(s.llmUsage.domainId, domain.id));
+    const spent = ms.reduce((a, m) => a + m.totalCostUsd, 0) + llm.reduce((a, l) => a + l.costUsd, 0);
+    const now = new Date();
+    expect(await estimatedMonthlyCost(domain.id, now)).toBeCloseTo(projectMonthEnd({ spentMtd: spent, trailing: spent, now }), 6);
+    for (const status of ["PAUSED", "READY", "ERROR"]) {
+      await db.update(s.domains).set({ status }).where(eq(s.domains.id, domain.id));
+      expect(await estimatedMonthlyCost(domain.id, now)).toBeCloseTo(spent, 6);
+    }
+    await db.update(s.domains).set({ status: domain.status }).where(eq(s.domains.id, domain.id));
+    // The two windows: a cost between the month start and 7 days ago is in exactly one of them (whichever
+    // starts earlier), a cost 40 days old is in neither.
+    const weekStart = now.getTime() - 7 * 86_400_000;
+    const between = new Date((monthStart(now).getTime() + weekStart) / 2);
+    const usage = { domainId: domain.id, purpose: "test", providerId: "test", model: "test" };
+    await db.insert(s.llmUsage).values([
+      { ...usage, costUsd: 0.5, createdAt: between },
+      { ...usage, costUsd: 3, createdAt: new Date(now.getTime() - 40 * 86_400_000) },
+    ]);
+    const inMonth = monthStart(now).getTime() < weekStart;
+    expect(await estimatedMonthlyCost(domain.id, now)).toBeCloseTo(
+      projectMonthEnd({ spentMtd: spent + (inMonth ? 0.5 : 0), trailing: spent + (inMonth ? 0 : 0.5), now }),
+      6,
+    );
+    await db.delete(s.llmUsage).where(eq(s.llmUsage.purpose, "test"));
+
     // A second immediate cron tick must not re-measure (not due yet) — idempotent scheduling.
     await schedulerTick();
     const plans = await db.execute(sql`select count(*)::int as n from jobs where type = 'measurement.plan' and status = 'QUEUED'`);

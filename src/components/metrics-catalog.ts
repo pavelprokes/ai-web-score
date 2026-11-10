@@ -379,10 +379,11 @@ export const METRICS: MetricDefinition[] = [
     id: "forecast",
     group: "cost",
     name: "Forecast",
-    short: "Expected monthly cost if the current schedule continues.",
-    formula: "Σ over prompt × provider of (30 / interval days) × samples × average cost per answer of that configuration",
-    description: "Early after adding a domain intervals are short (everything is uncertain), so the forecast is high and then falls.",
-    example: "54 prompts × 3 providers, mostly weekly at $0.0012–0.01 per answer → about $4–5 per month.",
+    short: "Expected cost of this calendar month if spending continues at the pace of the last 7 days.",
+    formula: "spent this month + (measurement + internal LLM cost of the last 7 days ÷ 7) × days left in the month (UTC)",
+    description:
+      "Compare it with the budget. A one-off cost in the last 7 days (a re-discovery, a manual run) raises it for a week; a domain that is not active (paused, waiting for approval, in error) adds nothing. Measurement stops at the budget, so a forecast above it means the planner will throttle.",
+    example: "$1.02 spent by the 10th, $0.79 in the last 7 days, 20 days left → 1.02 + (0.79 ÷ 7) × 20 ≈ $3.28 by month end.",
   },
   {
     id: "cost-per-answer",
