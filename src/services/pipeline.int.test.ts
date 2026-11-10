@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -11,6 +11,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
     process.env.MOCK_PROVIDERS = "1";
+    process.env.PERPLEXITY_MIN_INTERVAL_MS = "0";
     process.env.MOCK_BRAND = "Kódování pro děti";
     process.env.MOCK_BRAND_DOMAIN = "kodovani-pro-deti.example";
     delete process.env.ANTHROPIC_API_KEY;
@@ -509,6 +510,104 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const item = (await currentActivity()).find((a) => a.id === `run:${run!.id}`);
     expect(item?.error).toMatch(/^Last error · Perplexity \(Agent API\): /);
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+  });
+
+  it("puts a rate-limited answer back in the queue without spending an attempt, until it is too old", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { executeMeasurement } = await import("@/services/measure");
+    const { RescheduleJob } = await import("@/jobs/queue");
+    const { ProviderError } = await import("@/core/measurement/provider");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "perplexity-api")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 3 }).returning();
+    const row = (id: string, sampleIndex: number, scheduledAt: Date) => ({
+      id,
+      runId: run!.id,
+      domainId: demo!.id,
+      promptVersionId: version!.id,
+      configurationId: config!.id,
+      providerId: "perplexity-api",
+      model: config!.model,
+      sampleIndex,
+      scheduledAt,
+      configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+    });
+    await db.insert(s.measurements).values([row("limited-fresh", 0, new Date()), row("limited-old", 1, new Date(Date.now() - 3 * 3600_000)), row("limited-quota", 2, new Date())]);
+    const cellStates = async () => (await db.select().from(s.cellStates)).map((c) => JSON.stringify(c)).sort().join();
+    const before = await cellStates();
+    const saved = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    let limited = true;
+    let retryAfter = "40";
+    let errorType = "request_rate_limit_exceeded";
+    globalThis.fetch = (async () =>
+      limited
+        ? new Response(`{"error":{"message":"Request rate limit exceeded","type":"${errorType}"}}`, { status: 429, headers: { "Retry-After": retryAfter } })
+        : new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }))) as typeof fetch;
+    try {
+      // Twice rate limited: the job is rescheduled, nothing is counted against the answer.
+      // The job comes back no sooner than the provider's Retry-After.
+      const first = await executeMeasurement("limited-fresh").catch((x: unknown) => x);
+      expect(first).toBeInstanceOf(RescheduleJob);
+      expect((first as InstanceType<typeof RescheduleJob>).delaySeconds).toBeGreaterThanOrEqual(40);
+      retryAfter = "0";
+      await expect(executeMeasurement("limited-fresh")).rejects.toBeInstanceOf(RescheduleJob);
+      let [m] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-fresh"));
+      expect(m).toMatchObject({ status: "SCHEDULED", attempts: 0 });
+      // Both 429s stay on the row, so rate limiting is measurable after the answer succeeds.
+      expect(m!.errors).toHaveLength(2);
+      expect(JSON.stringify(m!.errors)).toContain("HTTP 429");
+      expect(await cellStates()).toBe(before);
+
+      // An exhausted balance is not "not now": it spends the attempt like any retryable failure.
+      errorType = "insufficient_quota";
+      await expect(executeMeasurement("limited-quota")).rejects.toBeInstanceOf(ProviderError);
+      const [quota] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-quota"));
+      expect(quota!.attempts).toBe(1);
+      errorType = "request_rate_limit_exceeded";
+
+      // Past the patience bound a 429 is an ordinary retryable failure again.
+      await expect(executeMeasurement("limited-old")).rejects.toBeInstanceOf(ProviderError);
+      const [old] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-old"));
+      expect(old!.attempts).toBe(1);
+      expect(JSON.stringify(old!.errors)).toContain("HTTP 429");
+
+      limited = false;
+      await executeMeasurement("limited-fresh");
+      [m] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-fresh"));
+      expect(m).toMatchObject({ status: "SUCCEEDED", attempts: 1 });
+      expect(m!.errors).toHaveLength(2);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;
+      else process.env.PERPLEXITY_API_KEY = saved;
+      // Leave nothing in flight for the tests that follow.
+      await db.update(s.measurements).set({ status: "CANCELLED", finishedAt: new Date() }).where(inArray(s.measurements.id, ["limited-old", "limited-quota"]));
+      await db.update(s.runs).set({ status: "PARTIAL", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+    }
+  }, 60_000);
+
+  it("spreads the retries of jobs that failed together", async () => {
+    const { getDb } = await import("@/db");
+    const { fail } = await import("@/jobs/queue");
+    const db = getDb();
+    const rows = await db.execute(sql`
+      insert into jobs (type, payload, status, attempts, run_at)
+      select 'umami.send', '{"test":"jitter"}'::jsonb, 'RUNNING', 1, now() from generate_series(1, 8) returning id`);
+    for (const r of rows) await fail({ id: String(r.id), type: "umami.send", payload: {}, attempts: 1, maxAttempts: 4 }, new Error("boom"));
+    const [spread] = await db.execute(sql`
+      select extract(epoch from max(run_at) - min(run_at)) as spread, extract(epoch from min(run_at) - now()) as soonest,
+             extract(epoch from max(run_at) - now()) as latest
+      from jobs where payload->>'test' = 'jitter' and status = 'QUEUED'`);
+    await db.execute(sql`delete from jobs where payload->>'test' = 'jitter'`);
+    // 30 s ±50 %; eight identical delays would have a spread of a few milliseconds.
+    expect(Number(spread!.spread)).toBeGreaterThan(1);
+    expect(Number(spread!.soonest)).toBeGreaterThan(13);
+    expect(Number(spread!.latest)).toBeLessThan(46);
   });
 
   it("never leaves errored Claude batch results SUBMITTED, and resubmits a rejected location without it", async () => {

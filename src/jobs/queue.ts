@@ -137,8 +137,8 @@ export async function complete(id: string) {
 export async function fail(job: Job, error: unknown, retryable = true) {
   const message = error instanceof Error ? error.message : String(error);
   const final = !retryable || job.attempts >= job.maxAttempts;
-  // Exponential backoff: 30 s, 2 min, 8 min, …
-  const delay = 30 * 4 ** Math.max(0, job.attempts - 1);
+  // Exponential backoff: 30 s, 2 min, 8 min, … ±50 %, so jobs that failed together do not retry together.
+  const delay = 30 * 4 ** Math.max(0, job.attempts - 1) * (0.5 + Math.random());
   await getDb().execute(sql`
     update jobs set status = ${final ? "FAILED" : "QUEUED"}, last_error = ${message.slice(0, 2000)},
       locked_until = null, run_at = now() + make_interval(secs => ${delay}),

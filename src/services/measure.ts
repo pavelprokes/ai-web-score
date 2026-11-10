@@ -24,6 +24,8 @@ import { loadPriceBook, priceModelKey } from "./registry";
  */
 
 const MAX_ATTEMPTS = 3;
+/** A rate-limited answer is put back in the queue for this long before a 429 counts as a failure. */
+const RATE_LIMIT_PATIENCE_MS = 2 * 3600_000;
 
 type MeasurementRow = typeof measurements.$inferSelect;
 
@@ -78,6 +80,17 @@ export async function executeMeasurement(measurementId: string) {
     const result = await adapter.execute(req, m.configuration as ProviderConfigurationSeed);
     await finalizeMeasurement(m.id, result, startedAt);
   } catch (e) {
+    // HTTP 429 means "not now", not a failed answer: nothing was sent or billed. Give the attempt back
+    // and let the job return later; the age bound ends it if the limit never clears. An exhausted
+    // balance (OpenAI answers it with 429 `insufficient_quota`) does not clear by waiting and fails as before.
+    const rateLimited = e instanceof ProviderError && e.status === 429 && !/insufficient_quota/.test(e.message);
+    if (rateLimited && Date.now() - m.scheduledAt.getTime() < RATE_LIMIT_PATIENCE_MS) {
+      // Kept in `errors` (last 20) so that rate limiting stays measurable on answers that succeed later.
+      const errors = [...((m.errors as unknown[]) ?? []), { at: new Date().toISOString(), message: e.message.slice(0, 200) }].slice(-20);
+      await db.update(measurements).set({ attempts: m.attempts, errors }).where(eq(measurements.id, m.id));
+      console.warn(`[measure] ${m.providerId} rate limited, rescheduled: ${e.message.slice(0, 200)}`);
+      throw new RescheduleJob((e.retryAfterSeconds ?? 5) + Math.random() * 30);
+    }
     await recordFailure(m, e, m.attempts + 1);
     if (e instanceof ProviderError && e.retryable && m.attempts + 1 < MAX_ATTEMPTS) throw e;
   }
