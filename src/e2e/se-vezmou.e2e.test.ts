@@ -355,6 +355,10 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       );
     const promptStatus = async () => (await db.select().from(s.prompts).where(eq(s.prompts.id, "P-STALE")))[0]!.status;
 
+    // Left behind by a discovery attempt that failed half-way: active, but nothing was ever written for it.
+    const { id: _id, ...half } = clusters[0]!;
+    await db.insert(s.topicClusters).values({ ...half, key: "half-written", name: "Half-written topic" });
+
     let asked = "";
     let topics = (name: string) => name !== dropped.name;
     setLlmOverride((req) => {
@@ -366,6 +370,7 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     try {
       await runDiscovery(domainId, "MANUAL");
       for (const c of clusters) expect(asked).toContain(`- ${c.name}\n`);
+      expect(asked).not.toContain("Half-written topic");
       expect(await proposals()).toEqual({ ADD_PROMPT: "SUPERSEDED", ACTIVATE: "SUPERSEDED" });
       expect(await promptStatus()).toBe("REJECTED");
       // The other topics kept their names: nothing of theirs left the measured set.

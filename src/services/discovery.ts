@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { domainProfiles, domains, portfolioProposals, prompts, runs, topicClusters } from "@/db/schema";
 import type { DomainProfile } from "@/core/domain-profile";
@@ -26,10 +26,14 @@ export async function runDiscovery(domainId: string, trigger: string) {
     if (digest.pages.length === 0) throw new Error(digest.errors.join("; ") || "Website could not be crawled");
     await throwIfJobCancelled();
 
+    // Only topics that have prompts: a failed attempt can leave re-worded clusters behind (the writes below are
+    // not one transaction), and naming those as "keep" on the retry would make both wordings permanent.
     const existing = await db
       .select({ name: topicClusters.name })
       .from(topicClusters)
-      .where(and(eq(topicClusters.domainId, domainId), eq(topicClusters.active, true)));
+      .where(
+        sql`${topicClusters.domainId} = ${domainId} and ${topicClusters.active} and exists (select 1 from ${prompts} where ${prompts.domainId} = ${topicClusters.domainId} and ${prompts.clusterKey} = ${topicClusters.key})`,
+      );
     const llm = await generateStructured({
       schema: LlmProfile,
       // The profile schema is too large for the structured-outputs grammar compiler.
