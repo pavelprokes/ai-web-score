@@ -300,6 +300,27 @@ describe("DataForSEO live path (smoke tests)", () => {
     expect(r.answer.citations).toHaveLength(1);
   });
 
+  it("queues tasks with a location DataForSEO accepts and an ISO 639-1 language", async () => {
+    let body: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: body.map((t, i) => ({ id: `t${i}`, status_code: 20100, status_message: "Task Created.", data: { tag: t.tag }, result: null })) }),
+        { status: 200 },
+      );
+    });
+    const au = { ...req, language: "en-AU", country: "AU" };
+    await chatgptUi.submit!(
+      [au, { ...au, measurementId: "m2", country: "nz" }, { ...au, measurementId: "m3", country: "New Zealand" }],
+      chatgptUi.configurations[0]!,
+    );
+    expect(body[0]).toMatchObject({ location_code: 2036, language_code: "en" });
+    expect(body[0]).not.toHaveProperty("location_name");
+    // Not in the table: the full English name, never the two-letter code (rejected as 40501).
+    expect(body[1]).toMatchObject({ location_name: "New Zealand" });
+    expect(body[2]).toMatchObject({ location_name: "New Zealand" });
+  });
+
   it("falls back to the price book when task_get reports a zero cost (charged at task_post)", async () => {
     vi.stubGlobal("fetch", async () =>
       new Response(

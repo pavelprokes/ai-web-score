@@ -2,6 +2,7 @@ import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } 
 import { EMPTY_USAGE } from "../types";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { deadlineRemainingMs } from "@/lib/deadline";
+import { isoLanguage } from "../../language";
 import {
   type CollectOutcome,
   httpJson,
@@ -27,12 +28,13 @@ import {
 
 const BASE = process.env.DATAFORSEO_BASE_URL ?? "https://api.dataforseo.com";
 const STANDARD_PRIORITY = 1;
-/** Parallel task_get calls when collecting results (DataForSEO allows up to 2000 calls per minute). */
+/** Parallel task_get calls when collecting results (far below DataForSEO's per-minute call limit). */
 const COLLECT_CONCURRENCY = 10;
 const COLLECT_TIMEOUT_MS = 20_000;
 
-/** DataForSEO location codes for common markets (Google geo target ids). */
+/** DataForSEO location codes for common markets (Google geo target ids: 2000 + ISO 3166-1 numeric). */
 export const LOCATION_CODES: Record<string, number> = {
+  AU: 2036,
   CZ: 2203,
   SK: 2703,
   PL: 2616,
@@ -92,9 +94,27 @@ function keyword(text: string, max: number) {
   return text.replace(/%/g, "%25").slice(0, max);
 }
 
-function locationFields(req: MeasurementRequest) {
+const REGION_NAMES = new Intl.DisplayNames(["en"], { type: "region" });
+
+/**
+ * `location_name` must be the full English name ("New Zealand"); a two-letter code is rejected with 40501.
+ * ponytail: ICU names, not DataForSEO's list — a few differ ("Türkiye" vs "Turkey"); add such a market to LOCATION_CODES.
+ */
+function locationName(country: string): string {
+  try {
+    return REGION_NAMES.of(country.toUpperCase()) ?? country;
+  } catch {
+    return country; // Not a region code — already a name.
+  }
+}
+
+/** Location and language of a task; `language_code` is ISO 639-1 ("en", not "en-AU"). */
+function localeFields(req: MeasurementRequest) {
   const code = LOCATION_CODES[req.country.toUpperCase()];
-  return code ? { location_code: code } : { location_name: req.country };
+  return {
+    ...(code ? { location_code: code } : { location_name: locationName(req.country) }),
+    language_code: isoLanguage(req.language) ?? req.language,
+  };
 }
 
 type Surface = "chat_gpt" | "gemini" | "ai_mode";
@@ -220,7 +240,7 @@ function createAdapter(args: {
       structuredOutputSupport: false,
       batchSupport: true,
       latency: "standard queue ≤45 min; live 6–90 s",
-      rateLimits: "≈2000 API calls/min; ≤100 tasks per POST",
+      rateLimits: "task_post: 10000 API calls/min; ≤100 tasks per POST",
       reliability: "MEDIUM",
       similarityToConsumerProduct: args.similarity,
       measurementQuality: 0.85,
@@ -240,8 +260,7 @@ function createAdapter(args: {
     async execute(req, config) {
       const task = {
         keyword: keyword(req.promptText, MAX_KEYWORD[args.dfsSurface]),
-        ...locationFields(req),
-        language_code: req.language,
+        ...localeFields(req),
         tag: req.measurementId,
         ...(args.dfsSurface === "chat_gpt" && config.params.forceWebSearch ? { force_web_search: true } : {}),
         ...(args.dfsSurface === "ai_mode" ? { device: config.params.device ?? "desktop" } : {}),
@@ -257,8 +276,7 @@ function createAdapter(args: {
       const priority = Number(config.params.priority ?? STANDARD_PRIORITY);
       const tasks = reqs.map((r) => ({
         keyword: keyword(r.promptText, MAX_KEYWORD[args.dfsSurface]),
-        ...locationFields(r),
-        language_code: r.language,
+        ...localeFields(r),
         priority,
         tag: r.measurementId,
         // Never force search: forcing shifts visibility ~20 pts vs. natural behaviour.
