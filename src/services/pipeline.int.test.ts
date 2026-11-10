@@ -1258,4 +1258,21 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await db.update(s.prompts).set({ status: "ACTIVE" }).where(eq(s.prompts.id, paused!.id));
     }
   });
+
+  it("shows the latest calibration result of a pair however old it is, and the database size", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { providersOverview } = await import("@/services/overview");
+    const db = getDb();
+    const [reference, candidate] = ["claude-api:opus-5-5", "claude-api:sonnet-5-5"];
+    const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
+    const result = (pairs: number, createdAt: Date) => ({ referenceConfigurationId: reference, candidateConfigurationId: candidate, report: { pairs, prompts: 5 }, decision: "KEEP_TESTING", createdAt });
+    await db.insert(s.calibrationResults).values([result(4, daysAgo(60)), result(5, daysAgo(45))]);
+
+    const overview = await providersOverview();
+    expect(overview.warnings).toEqual([]);
+    const config = overview.providers.find((p) => p.id === "claude-api")!.configurations.find((c) => c.id === candidate)!;
+    expect(config.calibration.map((x) => (x.report as { pairs: number }).pairs)).toEqual([5]);
+    expect(overview.databaseBytes).toBeGreaterThan(1_000_000);
+  });
 });

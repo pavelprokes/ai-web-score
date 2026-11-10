@@ -80,13 +80,14 @@ export function llmPrice(model: string) {
 }
 
 /**
- * $ per MTok. `cacheRead`: prompt-cache hits; writes cost 1.25× input (5-minute cache).
+ * $ per MTok. `cacheRead`: prompt-cache hits (0.05× input on Opus 5.5 and Sonnet 5.5, 0.1× on Haiku);
+ * writes cost 1.25× input (5-minute cache).
  * Haiku 5.5: rate for prompts up to 100K tokens ($0.50 / $2.50 beyond) — internal prompts stay far below.
  */
 const INTERNAL_PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
-  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
 };
