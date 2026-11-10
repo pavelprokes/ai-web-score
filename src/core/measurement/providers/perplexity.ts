@@ -1,3 +1,4 @@
+import { deadlineRemainingMs } from "@/lib/deadline";
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
 import { isoLanguage } from "../../language";
 import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, ProviderError, requireEnv } from "../provider";
@@ -32,6 +33,32 @@ interface PerplexityParams {
 
 /** Set after the API rejected a request carrying `service_tier`; later requests leave it out. */
 let serviceTierRejected = false;
+
+/**
+ * The Agent API admits a fixed number of requests per rolling second for the whole organization
+ * (tier 0: 1, tier 1: 3 — docs.perplexity.ai/docs/admin/rate-limits-usage-tiers). A 429 comes back in
+ * ~200 ms and frees the worker, so unpaced workers start many requests within the same second.
+ * Request starts are therefore spaced by PERPLEXITY_MIN_INTERVAL_MS (default 1100 = tier 0 plus margin;
+ * 400 fits tier 1). The slot is per process: it paces one queue drain, not two overlapping ones —
+ * those collide rarely and the 429 retry below absorbs it.
+ */
+let nextStartAt = 0;
+
+function minIntervalMs(): number {
+  const ms = Number(process.env.PERPLEXITY_MIN_INTERVAL_MS || NaN); // unset or empty: default
+  return ms >= 0 ? ms : 1100;
+}
+
+async function startSlot() {
+  const at = Math.max(Date.now(), nextStartAt);
+  nextStartAt = at + minIntervalMs();
+  if (at > Date.now()) await new Promise((r) => setTimeout(r, at - Date.now()));
+}
+
+/** A rate-limited request is not billed and clears within about a second, so it is retried in place. */
+const MAX_429_RETRIES = 5;
+/** Time kept for the answer itself after waiting (p99 ≈ 30 s); a longer wait goes back to the job queue. */
+const ANSWER_RESERVE_MS = 30_000;
 
 export function buildPerplexityBody(req: MeasurementRequest, config: ProviderConfigurationSeed, opts: { serviceTier?: boolean } = {}) {
   const p = config.params as PerplexityParams;
@@ -143,7 +170,7 @@ export const perplexityApi: ProviderAdapter = {
     structuredOutputSupport: true,
     batchSupport: false,
     latency: "3–20 s",
-    rateLimits: "tier 0: 50 RPM … tier 5: 8000 RPM",
+    rateLimits: "per organization, rolling second: tier 0: 1 QPS, tier 1: 3, tier 2: 8, tier 3: 17, tier 4–5: 33",
     reliability: "MEDIUM",
     similarityToConsumerProduct: 0.55,
     measurementQuality: 0.6,
@@ -166,13 +193,26 @@ export const perplexityApi: ProviderAdapter = {
     },
   ],
   async execute(req, config) {
-    const post = (serviceTier: boolean) =>
-      httpJson<PplxResponse>(`${BASE}/v1/agent`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
-        body: JSON.stringify(buildPerplexityBody(req, config, { serviceTier })),
-        timeoutMs: 120_000,
-      });
+    const post = async (serviceTier: boolean) => {
+      for (let retries = 0; ; retries++) {
+        await startSlot();
+        try {
+          return await httpJson<PplxResponse>(`${BASE}/v1/agent`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
+            body: JSON.stringify(buildPerplexityBody(req, config, { serviceTier })),
+            timeoutMs: 120_000,
+          });
+        } catch (e) {
+          if (!(e instanceof ProviderError) || e.status !== 429) throw e;
+          // Jitter so that two processes rejected together do not retry together.
+          const waitMs = (e.retryAfterSeconds ?? 1) * 1000 + Math.random() * 500;
+          if (retries >= MAX_429_RETRIES || waitMs + ANSWER_RESERVE_MS > deadlineRemainingMs()) throw e;
+          // Hold back every caller of this process, not only this one: the limit is shared.
+          nextStartAt = Math.max(nextStartAt, Date.now() + waitMs);
+        }
+      }
+    };
     const withTier = Boolean((config.params as PerplexityParams).serviceTier) && !serviceTierRejected;
     let json: PplxResponse;
     try {

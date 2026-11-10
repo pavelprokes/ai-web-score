@@ -38,6 +38,7 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
         DATAFORSEO_PASSWORD: "fake",
         OPENAI_API_KEY: "fake",
         PERPLEXITY_API_KEY: "fake",
+        PERPLEXITY_MIN_INTERVAL_MS: "0", // the fake world has no rate limit
       });
       delete process.env.ANTHROPIC_API_KEY;
     }

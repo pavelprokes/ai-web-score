@@ -109,6 +109,8 @@ export class ProviderError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly status?: number,
+    /** `Retry-After` of the response in seconds, when the provider sent one. */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ProviderError";
@@ -126,7 +128,8 @@ export async function httpJson<T = unknown>(
     const text = await res.text();
     if (!res.ok) {
       const retryable = res.status === 429 || res.status >= 500;
-      throw new ProviderError(`HTTP ${res.status}: ${text.slice(0, 500)}`, retryable, res.status);
+      const retryAfter = Number(res.headers.get("retry-after") ?? NaN); // delta-seconds; an HTTP date is ignored
+      throw new ProviderError(`HTTP ${res.status}: ${text.slice(0, 500)}`, retryable, res.status, Number.isFinite(retryAfter) ? retryAfter : undefined);
     }
     return (text ? JSON.parse(text) : {}) as T;
   } catch (e) {

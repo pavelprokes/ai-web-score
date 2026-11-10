@@ -6,7 +6,9 @@ import { buildPerplexityBody, parsePerplexityResponse, perplexityApi } from "./p
 import { parseGeminiResponse } from "./gemini";
 import { listProviders } from "./index";
 import { computeCost, selectPrice, type PriceEntry } from "../../pricing/cost";
+import { httpJson, ProviderError } from "../provider";
 
+process.env.PERPLEXITY_MIN_INTERVAL_MS = "0"; // no pacing between the stubbed Perplexity calls below
 const req = { measurementId: "m1", promptText: "Kde v Brně koupit kolo pro dítě?", language: "cs", country: "cz", location: "Brno" };
 
 describe("provider request builders", () => {
@@ -44,6 +46,39 @@ describe("provider request builders", () => {
     expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
     expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null, null]);
     vi.unstubAllGlobals();
+  });
+
+  it("Perplexity spaces request starts and retries a 429 in place after Retry-After", async () => {
+    process.env.PERPLEXITY_API_KEY ??= "test";
+    process.env.PERPLEXITY_MIN_INTERVAL_MS = "50";
+    const config = { id: "x", model: "perplexity/sonar", params: {}, role: "CANDIDATE" } as const;
+    const ok = () => new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
+    const starts: number[] = [];
+    try {
+      vi.stubGlobal("fetch", async () => {
+        starts.push(Date.now());
+        return ok();
+      });
+      await Promise.all(Array.from({ length: 4 }, () => perplexityApi.execute!(req, config)));
+      // Unpaced, all four start in the same millisecond. Timers may fire a few ms early.
+      for (let i = 1; i < starts.length; i++) expect(starts[i]! - starts[i - 1]!).toBeGreaterThanOrEqual(40);
+
+      starts.length = 0;
+      vi.stubGlobal("fetch", async () => {
+        starts.push(Date.now());
+        return starts.length === 1 ? new Response('{"error":{"type":"request_rate_limit_exceeded"}}', { status: 429, headers: { "Retry-After": "1" } }) : ok();
+      });
+      expect((await perplexityApi.execute!(req, config)).answer.answerText).toBe("ok");
+      expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(990);
+
+      vi.stubGlobal("fetch", async () => new Response("slow down", { status: 429, headers: { "Retry-After": "7" } }));
+      const e = await httpJson("https://provider.example").catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(ProviderError);
+      expect((e as ProviderError).retryAfterSeconds).toBe(7);
+    } finally {
+      vi.unstubAllGlobals();
+      process.env.PERPLEXITY_MIN_INTERVAL_MS = "0";
+    }
   });
 
   it("OpenAI always sends a user_location (default would be US) and never forces search", () => {

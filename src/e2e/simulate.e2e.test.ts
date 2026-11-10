@@ -20,7 +20,7 @@ describe.skipIf(!url || !days)("cost simulation", () => {
     delete process.env.UMAMI_URL;
     delete process.env.MOCK_PROVIDERS;
     delete process.env.ANTHROPIC_API_KEY;
-    Object.assign(process.env, { DATAFORSEO_LOGIN: "fake", DATAFORSEO_PASSWORD: "fake", OPENAI_API_KEY: "fake", PERPLEXITY_API_KEY: "fake" });
+    Object.assign(process.env, { DATAFORSEO_LOGIN: "fake", DATAFORSEO_PASSWORD: "fake", OPENAI_API_KEY: "fake", PERPLEXITY_API_KEY: "fake", PERPLEXITY_MIN_INTERVAL_MS: "0" });
     const world = await import("./fake-world");
     world.resetFakeWorld();
     vi.stubGlobal("fetch", world.fakeFetch(realFetch));
