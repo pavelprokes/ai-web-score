@@ -64,6 +64,17 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(run!.status).toBe("SUCCEEDED");
     expect(run!.completedCount).toBe(ms.length);
 
+    // Forecast = spend so far + the run rate to month end. The learned schedule in cell_states (which keeps
+    // cells of paused prompts and disabled providers) plays no part; a paused domain adds no run rate.
+    const { estimatedMonthlyCost, projectMonthEnd } = await import("@/services/costs");
+    const llm = await db.select().from(s.llmUsage).where(eq(s.llmUsage.domainId, domain.id));
+    const spent = ms.reduce((a, m) => a + m.totalCostUsd, 0) + llm.reduce((a, l) => a + l.costUsd, 0);
+    const now = new Date();
+    expect(await estimatedMonthlyCost(domain.id, now)).toBeCloseTo(projectMonthEnd({ spentMtd: spent, trailing: spent, days: 1, now }), 6);
+    await db.update(s.domains).set({ status: "PAUSED" }).where(eq(s.domains.id, domain.id));
+    expect(await estimatedMonthlyCost(domain.id, now)).toBeCloseTo(spent, 6);
+    await db.update(s.domains).set({ status: domain.status }).where(eq(s.domains.id, domain.id));
+
     // A second immediate cron tick must not re-measure (not due yet) — idempotent scheduling.
     await schedulerTick();
     const plans = await db.execute(sql`select count(*)::int as n from jobs where type = 'measurement.plan' and status = 'QUEUED'`);
