@@ -382,8 +382,8 @@ export const METRICS: MetricDefinition[] = [
     short: "Expected cost of this calendar month if spending continues at the pace of the last 7 days.",
     formula: "spent this month + (measurement + internal LLM cost of the last 7 days ÷ 7) × days left in the month (UTC)",
     description:
-      "Compare it with the budget. A one-off cost in the last 7 days (a re-discovery, a manual run) raises it for a week; a paused domain adds nothing, and a domain younger than 7 days is averaged over its age.",
-    example: "$1.02 spent by the 10th, $0.79 in the last 7 days, 20 days left → 1.02 + (0.79 ÷ 7) × 20 ≈ $3.27 by month end.",
+      "Compare it with the budget. A one-off cost in the last 7 days (a re-discovery, a manual run) raises it for a week; a domain that is not active (paused, waiting for approval, in error) adds nothing. Measurement stops at the budget, so a forecast above it means the planner will throttle.",
+    example: "$1.02 spent by the 10th, $0.79 in the last 7 days, 20 days left → 1.02 + (0.79 ÷ 7) × 20 ≈ $3.28 by month end.",
   },
   {
     id: "cost-per-answer",

@@ -9,8 +9,7 @@ describe("projectMonthEnd", () => {
     expect(projectMonthEnd({ spentMtd: 1.0181, trailing: 0.7868, now })).toBeCloseTo(3.28, 2);
   });
 
-  it("divides by the days the trailing window really covers and adds nothing without a run rate", () => {
-    expect(projectMonthEnd({ spentMtd: 0.5, trailing: 0.3, days: 2, now })).toBeCloseTo(0.5 + 0.15 * 20.125, 6);
+  it("adds nothing without a run rate", () => {
     expect(projectMonthEnd({ spentMtd: 1.02, trailing: 0, now })).toBe(1.02);
   });
 });

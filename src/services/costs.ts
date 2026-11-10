@@ -69,9 +69,9 @@ export async function internalLlmCost(since: Date) {
 const DAY_MS = 86_400_000;
 
 /** Month-end projection: spend so far + the daily run rate of the trailing window for the rest of the UTC month. */
-export function projectMonthEnd({ spentMtd, trailing, days = 7, now = new Date() }: { spentMtd: number; trailing: number; days?: number; now?: Date }) {
+export function projectMonthEnd({ spentMtd, trailing, now = new Date() }: { spentMtd: number; trailing: number; now?: Date }) {
   const daysLeft = (Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now.getTime()) / DAY_MS;
-  return spentMtd + (trailing / days) * daysLeft;
+  return spentMtd + (trailing / 7) * daysLeft;
 }
 
 /**
@@ -89,17 +89,15 @@ export async function estimatedMonthlyCost(domainId: string, now = new Date()) {
   });
   const [[d], [m], [l]] = await Promise.all([
     db.select({ status: domains.status }).from(domains).where(eq(domains.id, domainId)),
-    db
-      .select({ ...sums(measurements.totalCostUsd, measurements.scheduledAt), first: sql<Date | null>`min(${measurements.scheduledAt})` })
-      .from(measurements)
-      .where(eq(measurements.domainId, domainId)),
+    db.select(sums(measurements.totalCostUsd, measurements.scheduledAt)).from(measurements).where(eq(measurements.domainId, domainId)),
     db.select(sums(llmUsage.costUsd, llmUsage.createdAt)).from(llmUsage).where(eq(llmUsage.domainId, domainId)),
   ]);
   const spentMtd = Number(m?.mtd ?? 0) + Number(l?.mtd ?? 0);
-  if (!d || d.status === "PAUSED") return spentMtd;
-  // A domain measured for less than the window has spent its trailing cost in fewer days.
-  const days = m?.first ? Math.min(7, Math.max(1, (now.getTime() - new Date(m.first).getTime()) / DAY_MS)) : 7;
-  return projectMonthEnd({ spentMtd, trailing: Number(m?.trailing ?? 0) + Number(l?.trailing ?? 0), days, now });
+  // Only ACTIVE domains are planned (schedulerTick); any other status spends nothing more on its own.
+  if (d?.status !== "ACTIVE") return spentMtd;
+  // Always ÷ 7, also for a domain younger than that: its first days hold the one-off setup cost and the
+  // first-day burst, and dividing those by the domain's age projected several times the budget.
+  return projectMonthEnd({ spentMtd, trailing: Number(m?.trailing ?? 0) + Number(l?.trailing ?? 0), now });
 }
 
 /** Provider uniqueness / value analysis over the last 30 days (for "which provider adds least?"). */
