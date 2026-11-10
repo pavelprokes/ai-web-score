@@ -81,10 +81,22 @@ Rules:
   check whether AI answers describe the brand accurately.
 - Use empty strings for unknown URLs/price hints.`;
 
-export function discoveryUserPrompt(digest: CrawlDigest, brandHint?: string | null): string {
+/**
+ * `existingTopics`: names of the topic clusters measured today. A cluster is keyed by the slug of its name, so a
+ * re-worded topic becomes a new cluster and the measured prompts of the old one are paused.
+ */
+export function discoveryUserPrompt(digest: CrawlDigest, brandHint?: string | null, existingTopics: string[] = []): string {
   return [
     `Domain: ${digest.domain}`,
     brandHint ? `Brand name provided by the operator: ${brandHint}` : "",
+    existingTopics.length
+      ? [
+          "Topics already measured for this domain. Renaming one loses its measurement history: for every topic below",
+          "that still applies, reuse the exact name, character for character (do not re-word, translate or merge it).",
+          "Add a new name only for a topic that is not on the list, and leave out the ones that no longer apply.",
+          ...existingTopics.map((t) => `- ${t}`),
+        ].join("\n")
+      : "",
     "Crawl digest (JSON):",
     JSON.stringify(digest).slice(0, 60_000),
   ]
