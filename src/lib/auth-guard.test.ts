@@ -9,6 +9,14 @@ describe("admin pages", () => {
 
   it("finds the pages", () => expect(pages.length).toBeGreaterThanOrEqual(5));
 
+  it("has no page or route outside (admin), login and api", () => {
+    const app = join(process.cwd(), "src/app");
+    const others = (readdirSync(app, { recursive: true }) as string[])
+      .filter((f) => /(^|\/)(page|route)\.\w+$/.test(f))
+      .filter((f) => !f.startsWith("(admin)/") && !f.startsWith("api/") && f !== "login/page.tsx");
+    expect(others).toEqual([]);
+  });
+
   it.each(pages)("%s calls requireAdminPage first in the page and in generateMetadata", (file) => {
     const src = readFileSync(join(root, file), "utf8");
     // First statement of each entry point: the body opens at the first ") {" or "> {" after the signature starts.

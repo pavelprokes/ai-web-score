@@ -29,6 +29,7 @@ set `DATAFORSEO_BASE_URL=https://sandbox.dataforseo.com` (remove it again for re
 | `ADMIN_API_TOKEN` | any long random string: `openssl rand -hex 32`. Used by `pnpm cli` and API calls. |
 | `CRON_SECRET` | another random string; Vercel Cron sends it. |
 | `AUTH_SECRET` | `npx auth secret` (needed only for the Google sign-in UI). |
+| `AUTH_URL` | Only for sign-in over plain http (`AUTH_DISABLED=0 pnpm dev`, `next start` locally): `http://localhost:3000`. Without it the session check in `src/proxy.ts` expects the https cookie name and redirects in a loop. Not needed on Vercel. |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | console.cloud.google.com → APIs & Services → Credentials → Create OAuth client ID → *Web application*. Authorized redirect URI: `http://localhost:3000/api/auth/callback/google` (add the production URL later). |
 | `ADMIN_EMAILS` | comma-separated Google accounts allowed to sign in. |
 | `API_URL` | where `pnpm cli` talks to, e.g. `http://localhost:3000`. |
