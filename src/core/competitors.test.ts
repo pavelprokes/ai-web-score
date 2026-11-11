@@ -28,6 +28,13 @@ describe("suggestCompetitors", () => {
     ]);
   });
 
+  it("does not suggest a removed competitor", () => {
+    const answers = [a(["Gone"]), a(["gone.cz"]), a(["GONE"])];
+    const removedCompetitors = [{ name: "Gone", aliases: [], domains: [] }];
+    expect(suggestCompetitors(answers, profile, []).length).toBeGreaterThan(0);
+    expect(suggestCompetitors(answers, { ...profile, removedCompetitors } as unknown as DomainProfile, [])).toEqual([]);
+  });
+
   it("merges hostname and noted spellings, keeps hostnames as domains, needs two questions", () => {
     const answers = [
       a(["Brzy svoji"]),

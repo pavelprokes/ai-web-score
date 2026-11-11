@@ -312,7 +312,9 @@ function citationSources({ answers, profile, hostname, ignoredCompetitors }: Dia
   const missing = answers.filter((a) => !a.signals.brandMentioned && a.signals.competitorsMentioned.length > 0);
   if (missing.length < MIN_ANSWERS) return [];
   const own = new Set([hostname, ...profile.ownedDomains].map(hostOf));
-  const competitorHosts = new Set(profile.competitors.flatMap((c) => (c.domains ?? []).map(hostOf)));
+  // A removed competitor is no longer ranked against, but it is still a rival.
+  const rivals = [...profile.competitors, ...(profile.removedCompetitors ?? [])];
+  const competitorHosts = new Set(rivals.flatMap((c) => (c.domains ?? []).map(hostOf)));
   // A competitor's own site is not a place to get listed: a host spelling a tracked or suggested competitor
   // (bridgeacademy.cz for "Bridge Academy", also blog.bridgeacademy.cz), or a business the same answer recommends
   // (petr-dolezal.cz next to "Petr Doležal"; only analysed answers name those). Directories cited for others still
@@ -320,7 +322,7 @@ function citationSources({ answers, profile, hostname, ignoredCompetitors }: Dia
   const ignored = new Set((ignoredCompetitors ?? []).map(nameKey));
   const suggested = suggestCompetitors(answers, profile, ignoredCompetitors ?? [], Infinity);
   const competitorNames = new Set(
-    [...profile.competitors, ...suggested].flatMap((c) => [c.name, ...c.aliases, ...(c.domains ?? [])]).map(nameKey),
+    [...rivals, ...suggested].flatMap((c) => [c.name, ...c.aliases, ...(c.domains ?? [])]).map(nameKey),
   );
   const domains = missing.flatMap((a) => {
     const named = new Set((a.signals.untrackedEntities ?? []).map(nameKey));

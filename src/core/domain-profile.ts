@@ -102,6 +102,11 @@ export const DomainProfile = z.object({
   topics: z.array(TopicSeed).default([]),
   localRelevance: z.number().min(0).max(1),
   competitors: z.array(Competitor).default([]),
+  /**
+   * Competitors the admin removed. Kept apart from the ignored names (directories and noise): a removed rival is
+   * still a rival, so its site is not a place to get listed, and it can be tracked again as it was.
+   */
+  removedCompetitors: z.array(Competitor).default([]),
   entities: z.array(Entity).default([]),
   authorityTopics: z.array(z.string()).default([]),
   /** Facts used to judge brandDescriptionAccuracy / productAccuracy / pricingAccuracy. */

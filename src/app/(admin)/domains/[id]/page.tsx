@@ -1,5 +1,6 @@
 import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
@@ -8,11 +9,12 @@ import type { SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
-import { competitorSuggestions } from "@/services/competitors";
+import { competitorMatchCounts, competitorSuggestions } from "@/services/competitors";
 import type { CompetitorSuggestion } from "@/core/competitors";
 import type { ActivityKind } from "@/services/activity";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { Flash } from "@/components/Flash";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ProviderErrors } from "@/components/ProviderErrors";
@@ -51,7 +53,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions, matches] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -60,6 +62,7 @@ export default async function DomainPage({
     recentProviderErrors({ domainId: id }),
     sourcesFor(id),
     competitorSuggestions(id),
+    competitorMatchCounts(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -125,7 +128,7 @@ export default async function DomainPage({
       <Sources rows={sources} />
 
       <div className="grid-2 section-gap">
-        <Profile detail={detail} now={now} suggestions={suggestions} returnTo={returnTo} />
+        <Profile detail={detail} now={now} suggestions={suggestions} matches={matches} returnTo={returnTo} />
         <Portfolio detail={detail} returnTo={returnTo} />
       </div>
 
@@ -384,7 +387,7 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
   );
 }
 
-function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; domains?: string[]; action: "track-competitor" | "ignore-competitor"; label: string; returnTo: string }) {
+function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; domains?: string[]; action: "track-competitor" | "untrack-competitor" | "ignore-competitor"; label: string; returnTo: string; confirm?: { title: string; body: ReactNode; confirmLabel: string } }) {
   return (
     <form action={domainAction} className="inline">
       <input type="hidden" name="domainId" value={props.domainId} />
@@ -393,10 +396,17 @@ function CompetitorButton(props: { domainId: string; name: string; aliases?: str
       {props.aliases?.length ? <input type="hidden" name="aliases" value={props.aliases.join("\n")} /> : null}
       {props.domains?.length ? <input type="hidden" name="domains" value={props.domains.join("\n")} /> : null}
       <input type="hidden" name="returnTo" value={props.returnTo} />
-      <SubmitButton className="hig-btn hig-btn--sm" pendingLabel="Saving…">
-        {props.label}
-        <span className="sr-only"> {props.name}</span>
-      </SubmitButton>
+      {props.confirm ? (
+        <ConfirmSubmit className="hig-btn hig-btn--sm" pendingLabel="Saving…" {...props.confirm}>
+          {props.label}
+          <span className="sr-only"> {props.name}</span>
+        </ConfirmSubmit>
+      ) : (
+        <SubmitButton className="hig-btn hig-btn--sm" pendingLabel="Saving…">
+          {props.label}
+          <span className="sr-only"> {props.name}</span>
+        </SubmitButton>
+      )}
     </form>
   );
 }
@@ -664,8 +674,10 @@ function Costs({ detail }: { detail: Detail }) {
   );
 }
 
-function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; returnTo: string }) {
+function Profile({ detail, now, suggestions, matches, returnTo }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; matches: Awaited<ReturnType<typeof competitorMatchCounts>>; returnTo: string }) {
   const p = detail.profile;
+  // While a re-extraction runs, stored answers mix the names of two profile versions.
+  const showCounts = matches.answers > 0 && !matches.pending;
   return (
     <Section title="Domain profile" id="profile-heading">
       {!p ? (
@@ -708,16 +720,70 @@ function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: 
           </dl>
           <h3 className="subhead">Competitors</h3>
           {p.competitors.length ? (
-            <ul className="chips">
-              {p.competitors.map((c) => (
-                <li key={c.name}>
-                  {c.name}
-                  {c.source === "OBSERVED_IN_ANSWERS" && <span className="muted"> · from answers</span>}
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="muted">
+                {matches.pending
+                  ? "Stored answers are being re-checked against this list; the answer counts return when that is done. "
+                  : matches.answers > 0 &&
+                    `Answers naming each competitor, of ${matches.answers} answers to questions that do not name you, last 28 days. `}
+                Your position and share among tracked rivals rank against this list. Removing one re-checks the stored answers, rebuilds the
+                score history and keeps it out of the suggestions and the next discovery; it can be tracked again from the removed list.
+              </p>
+              <ul className="proposals">
+                {p.competitors.map((c) => {
+                  const named = matches.named.get(c.name) ?? 0;
+                  return (
+                    <li key={c.name}>
+                      <span>
+                        <strong>{c.name}</strong>{" "}
+                        {showCounts &&
+                          (named > 0 ? (
+                            <span className="muted">
+                              in {named} {named === 1 ? "answer" : "answers"}
+                            </span>
+                          ) : (
+                            <Badge tone="warning">Not named by AI</Badge>
+                          ))}
+                        {c.source === "OBSERVED_IN_ANSWERS" && <span className="muted"> · from answers</span>}
+                      </span>
+                      <CompetitorButton
+                        domainId={detail.domain.id}
+                        name={c.name}
+                        action="untrack-competitor"
+                        label="Remove"
+                        returnTo={returnTo}
+                        confirm={{
+                          title: `Remove ${c.name}?`,
+                          body: (
+                            <p>
+                              {showCounts && `${c.name} is named in ${named} of ${matches.answers} answers. `}
+                              Your position and share among tracked rivals will be recomputed without it: the stored answers are re-checked
+                              and the score history is rebuilt (a few minutes). You can track it again from the removed list.
+                            </p>
+                          ),
+                          confirmLabel: "Remove",
+                        }}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : (
             <p className="muted">None identified.</p>
+          )}
+          {p.removedCompetitors.length > 0 && (
+            <details>
+              <summary>Removed competitors ({p.removedCompetitors.length})</summary>
+              <ul className="proposals">
+                {p.removedCompetitors.map((c) => (
+                  <li key={c.name}>
+                    <span>{c.name}</span>
+                    <CompetitorButton domainId={detail.domain.id} name={c.name} action="track-competitor" label="Track again" returnTo={returnTo} />
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
           {suggestions.length > 0 && (
             <>

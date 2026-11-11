@@ -374,9 +374,13 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     let asked = "";
     const RENAMED = "Alfa svatby (katalog)"; // only the domain still links it to "Svatební portál Alfa"
     let topics = (name: string) => name !== dropped.name;
-    setLlmOverride((req) => {
+    // Removed by the admin while the re-discovery is at the model; the model names it again.
+    const { untrackCompetitor } = await import("@/services/competitors");
+    const removed = world.COMPETITORS.at(-1)!.name;
+    setLlmOverride(async (req) => {
       if (req.purpose !== "discovery") return world.fakeLlm(req);
       asked = req.user;
+      await untrackCompetitor(domainId, removed);
       const profile = world.fakeDiscoveryProfile();
       // The model only sees the crawl: this time it forgets a rival it named before, re-spells another (same
       // domain) and names a new one.
@@ -391,11 +395,11 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       // The forgotten rival stays tracked, and the stored answers are re-read with the new profile.
       const { latestProfile } = await import("@/services/discovery");
       const kept = (await latestProfile(domainId))!;
-      // The re-spelled rival is tracked once, under the new spelling.
+      // The re-spelled rival is tracked once, under the new spelling without its note; the removed one stays out.
       const [, forgotten, ...same] = world.COMPETITORS.map((c) => c.name);
-      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([forgotten, RENAMED, ...same, "Novy Rival"].sort());
+      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([forgotten, "Alfa svatby", ...same.filter((n) => n !== removed), "Novy Rival"].sort());
       const jobs = await reextractJobs();
-      expect(jobs.length).toBe(jobsBefore + 1);
+      expect(jobs.length).toBe(jobsBefore + 2); // the removal's version and the discovery's
       expect(jobs.map((j) => j.dedupeKey)).toContain(`reextract:${domainId}:v${kept.version}`);
       for (const c of clusters) expect(asked).toContain(`- ${c.name}\n`);
       expect(asked).not.toContain("Half-written topic");

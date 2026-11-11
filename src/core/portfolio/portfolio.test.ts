@@ -23,6 +23,7 @@ function profile(over: Partial<DomainProfile>): DomainProfile {
     topics: [],
     localRelevance: 0.2,
     competitors: [],
+    removedCompetitors: [],
     entities: [],
     authorityTopics: [],
     factSheet: [],
