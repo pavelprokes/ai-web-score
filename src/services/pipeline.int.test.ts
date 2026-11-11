@@ -579,6 +579,24 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
+  it("syncs the provider registry on an instance's first tick only", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { schedulerTick } = await import("@/jobs/runner");
+    const db = getDb();
+    await schedulerTick();
+    // A sync would retire this configuration (it is not in code); see the registry test above.
+    await db.execute(sql`update provider_configurations set enabled = true where id = 'perplexity-api:sonar-pro'`);
+    try {
+      await schedulerTick();
+      const [row] = await db.execute(sql`select enabled from provider_configurations where id = 'perplexity-api:sonar-pro'`);
+      expect(row?.enabled).toBe(true);
+    } finally {
+      await db.execute(sql`update provider_configurations set enabled = false where id = 'perplexity-api:sonar-pro'`);
+      await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+    }
+  });
+
   it("stops a provider that rejects every request and shows the error", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
@@ -971,6 +989,48 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await db.update(s.runs).set({ status: "PARTIAL", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
     }
   }, 60_000);
+
+  it("waits for a job that becomes due within the invocation only when asked to", async () => {
+    const { getDb } = await import("@/db");
+    const { enqueue } = await import("@/jobs/queue");
+    const { processJobs } = await import("@/jobs/runner");
+    await enqueue("umami.send", { measurementId: "none", test: "due-soon" }, { runAt: new Date(Date.now() + 1_500) });
+    const opts = { deadlineMs: 70_000, types: ["umami.send" as const] };
+    expect(await processJobs(opts)).toEqual({ processed: 0 }); // a click or the local cron returns at once
+    const started = Date.now();
+    expect(await processJobs({ ...opts, waitForDue: true })).toEqual({ processed: 1 });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const [job] = await getDb().execute(sql`delete from jobs where payload->>'test' = 'due-soon' returning status`);
+    expect(job!.status).toBe("DONE");
+    // Nothing else is queued for this type, and a job that cannot finish before the deadline is not waited for.
+    await enqueue("umami.send", { test: "due-late" }, { runAt: new Date(Date.now() + 20_000) });
+    expect(await processJobs({ ...opts, waitForDue: true })).toEqual({ processed: 0 });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    await getDb().execute(sql`delete from jobs where payload->>'test' = 'due-late'`);
+  }, 30_000);
+
+  it("queues an Umami event only for a domain that has an Umami website", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { enqueueUmamiSend } = await import("@/services/umami");
+    const db = getDb();
+    const queued = async () => Number((await db.execute(sql`select count(*)::int as n from jobs where type = 'umami.send'`))[0]!.n);
+    // The measured domain of the first test has none: its answers queued nothing.
+    expect(await queued()).toBe(0);
+    const [m] = await db.select().from(s.measurements).limit(1);
+    process.env.UMAMI_URL = "https://umami.invalid";
+    try {
+      await enqueueUmamiSend(m!.id);
+      expect(await queued()).toBe(0);
+      await db.update(s.domains).set({ umamiWebsiteId: "site-1" }).where(eq(s.domains.id, m!.domainId));
+      await enqueueUmamiSend(m!.id);
+      expect(await queued()).toBe(1);
+    } finally {
+      delete process.env.UMAMI_URL;
+      await db.update(s.domains).set({ umamiWebsiteId: null }).where(eq(s.domains.id, m!.domainId));
+      await db.execute(sql`delete from jobs where type = 'umami.send'`);
+    }
+  });
 
   it("spreads the retries of jobs that failed together", async () => {
     const { getDb } = await import("@/db");

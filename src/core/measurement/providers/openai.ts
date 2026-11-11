@@ -161,7 +161,7 @@ export const openaiApi: ProviderAdapter = {
       method: "POST",
       headers: { Authorization: `Bearer ${requireEnv("OPENAI_API_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify(buildOpenAiBody(req, config)),
-      timeoutMs: 140_000, // inside the 150 s measurement job budget
+      timeoutMs: 140_000, // the 75 s measurement job budget cuts it off earlier
     });
     return { answer: parseOpenAiResponse(json), raw: json };
   },

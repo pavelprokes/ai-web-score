@@ -203,7 +203,7 @@ export const perplexityApi: ProviderAdapter = {
             method: "POST",
             headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
             body: JSON.stringify(buildPerplexityBody(req, config, { serviceTier })),
-            timeoutMs: 120_000,
+            timeoutMs: 70_000, // inside the 75 s measurement job budget; p99 is 33 s
           });
         } catch (e) {
           if (!(e instanceof ProviderError) || e.status !== 429) throw e;

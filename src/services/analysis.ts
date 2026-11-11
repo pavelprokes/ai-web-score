@@ -7,6 +7,7 @@ import type { DeterministicSignals, RawSignals } from "@/core/signals/extract";
 import { anthropicClient, generateStructured, llmModel, llmOverrideActive, noThinking, recordLlmUsage } from "@/lib/llm";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
 import { latestProfile } from "./discovery";
+import { enqueueUmamiSend } from "./umami";
 
 /**
  * Judgement signals via the Message Batches API (50 % cheaper; latency is irrelevant
@@ -83,10 +84,6 @@ async function setStatus(ids: string[], analysisStatus: string) {
   if (ids.length) await getDb().update(measurementSignals).set({ analysisStatus }).where(inArray(measurementSignals.measurementId, ids));
 }
 
-async function sendUmami(measurementId: string) {
-  await enqueue("umami.send", { measurementId }, { dedupeKey: `umami:${measurementId}` });
-}
-
 /** Store the representative's judgement and let its followers inherit it. */
 async function applyJudgement(
   rep: { measurementId: string; extractorVersion: string; signals: DeterministicSignals },
@@ -99,7 +96,7 @@ async function applyJudgement(
     .update(measurementSignals)
     .set({ signals: merged, analysisStatus: "DONE" })
     .where(and(eq(measurementSignals.measurementId, rep.measurementId), eq(measurementSignals.extractorVersion, rep.extractorVersion)));
-  await sendUmami(rep.measurementId);
+  await enqueueUmamiSend(rep.measurementId);
 
   if (followerIds.length === 0) return;
   const followers = await db.select().from(measurementSignals).where(inArray(measurementSignals.measurementId, followerIds));
@@ -110,7 +107,7 @@ async function applyJudgement(
         .update(measurementSignals)
         .set({ signals: carried, analysisStatus: "CARRIED" })
         .where(and(eq(measurementSignals.measurementId, f.measurementId), eq(measurementSignals.extractorVersion, f.extractorVersion)));
-      await sendUmami(f.measurementId);
+      await enqueueUmamiSend(f.measurementId);
     } else {
       await setStatus([f.measurementId], "PENDING");
     }
@@ -119,7 +116,7 @@ async function applyJudgement(
 
 async function failGroup(repId: string, followerIds: string[]) {
   await setStatus([repId], "FAILED");
-  await sendUmami(repId);
+  await enqueueUmamiSend(repId);
   // Followers get their own chance in the next batch.
   await setStatus(followerIds, "PENDING");
 }

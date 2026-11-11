@@ -82,7 +82,7 @@ pnpm cli action <domainId> run-now
   production stalled for 20 s.
   `pnpm db:probe` (with `DATABASE_URL` set to the pooler URL) compares both modes against the real pooler.
 - **Jobs fit the invocation.** Every job type has a time budget (discovery 200 s, prompt design 180 s,
-  one provider answer 150 s, async submit/collect 120 s, others 60–90 s). The runner only claims a job
+  one provider answer 75 s, async submit/collect 120 s, others 60–90 s). The runner only claims a job
   whose budget fits the time left, and aborts it when the budget is spent: provider HTTP calls, the
   Anthropic SDK, crawling and Umami all follow the job's deadline (`src/lib/deadline.ts`), so a hanging
   upstream can't keep the function running into its limit. A timed-out job is retried with backoff.
@@ -110,7 +110,8 @@ pnpm cli action <domainId> run-now
     collide there — merge or rebase one of them first.
 - `vercel.json` schedules `/api/cron` every 15 minutes. Vercel sends `Authorization: Bearer $CRON_SECRET`.
   Each tick plans due domains, polls async providers (DataForSEO queue, Claude batches) and drains the job
-  queue for up to ~280 s (`maxDuration = 300`).
+  queue until 280 s after the invocation started (`maxDuration = 300`), waiting for retries and follow-ups that
+  come due and still fit. A failed tick does not skip the drain.
 - Manual actions (`run-now`, `rediscover`, …) queue jobs and process them right after the response
   (`after()`), so a click does not wait for the next cron tick.
 - Google sign-in: create an OAuth client (Web), redirect URI `https://<domain>/api/auth/callback/google`;

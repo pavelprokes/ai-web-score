@@ -11,8 +11,9 @@ describe("typesThatFit", () => {
     const late = typesThatFit(160_000);
     expect(late).not.toContain("discovery.run");
     expect(late).not.toContain("portfolio.generate");
-    expect(late).toContain("measurement.execute");
-    expect(typesThatFit(100_000)).not.toContain("measurement.execute");
+    // One answer is claimable until 75 s before the deadline (p99 of a Perplexity answer is 33 s).
+    expect(typesThatFit(100_000)).toContain("measurement.execute");
+    expect(typesThatFit(70_000)).not.toContain("measurement.execute");
     expect(typesThatFit(30_000)).toEqual([]);
     expect(typesThatFit(300_000, ["scores.compute"])).toEqual(["scores.compute"]);
   });
