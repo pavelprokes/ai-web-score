@@ -53,10 +53,13 @@ export async function runDiscovery(domainId: string, trigger: string) {
       totalClusterCount: clusters.length,
     });
 
-    // Competitors the admin added (by hand or from answers) survive re-discovery; the LLM only knows the crawl.
+    // Tracked competitors survive re-discovery, the model's earlier picks too: it only knows the crawl and names a
+    // different list every run, while stored signals and the share among rivals are keyed by the tracked names.
+    // The model also re-spells a rival ("Fler/Svatební portál Beremese.cz (directory)" → "Beremese.cz"): one that
+    // shares any spelling or domain with the new list is the same rival, and tracking both would count it twice.
     const previous = await latestProfile(domainId);
     for (const c of previous?.profile.competitors ?? []) {
-      if (c.source !== "DISCOVERY" && !isKnownCompetitorName(c.name, profile, [])) profile.competitors.push(c);
+      if (![c.name, ...c.aliases, ...c.domains].some((n) => isKnownCompetitorName(n, profile, []))) profile.competitors.push(c);
     }
     const version = await nextProfileVersion(domainId);
     await db.insert(domainProfiles).values({
@@ -134,6 +137,9 @@ export async function runDiscovery(domainId: string, trigger: string) {
       { domainId, mode: version === 1 ? "INITIAL" : "REDISCOVERY" },
       { dedupeKey: `portfolio:${domainId}`, maxAttempts: 2 },
     );
+    // Stored answers were extracted with the previous profile. Every new version gets this job, whether its
+    // entities changed or not: a running re-extraction stops when it sees a newer version (`reextractSignals`).
+    if (previous) await enqueue("signals.reextract", { domainId }, { dedupeKey: `reextract:${domainId}:v${version}` });
     return { version, sizing };
   } catch (e) {
     if (e instanceof JobCancelledError) throw e; // the cancel action already closed the run and reset the domain
