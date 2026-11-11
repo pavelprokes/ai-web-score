@@ -133,7 +133,7 @@ export default async function DomainPage({
         <ClusterScores detail={detail} />
         <Schedule detail={detail} now={now} />
         <Runs detail={detail} now={now} />
-        <FailedMeasurements detail={detail} now={now} />
+        <ProviderErrors errors={detail.providerErrors} now={now} period="14 days" id="failed-heading" />
         <Prompts prompts={activePrompts} detail={detail} />
       </div>
     </>
@@ -1081,39 +1081,6 @@ function Runs({ detail, now }: { detail: Detail; now: Date }) {
           </table>
         </TableScroll>
       )}
-    </Section>
-  );
-}
-
-function FailedMeasurements({ detail, now }: { detail: Detail; now: Date }) {
-  if (detail.failedMeasurements.length === 0) return null;
-  return (
-    <Section title={`Failed measurements (${detail.failedMeasurements.length})`} id="failed-heading">
-      <TableScroll label="Failed measurements (scrollable)">
-        <table className="hig-table">
-          <thead>
-            <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">When</th>
-              <th scope="col">Last error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {detail.failedMeasurements.map((m) => {
-              const errors = (m.errors as Array<{ message?: string }> | null) ?? [];
-              return (
-                <tr key={m.id}>
-                  <th scope="row">{providerLabel(m.providerId)}</th>
-                  <td>
-                    <TimeAgo date={m.finishedAt} now={now} />
-                  </td>
-                  <td className="error-cell">{errors.at(-1)?.message?.slice(0, 200) ?? "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </TableScroll>
     </Section>
   );
 }

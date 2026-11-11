@@ -668,7 +668,10 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(finished!.failedCount).toBe(6);
 
     const errors = await recentProviderErrors({ domainId: demo!.id });
-    expect(errors.find((e) => e.providerId === "perplexity-api" && e.message.startsWith("HTTP 400"))?.count).toBe(REJECTIONS_TO_STOP);
+    // One group for the rejected and the skipped answers; the raw text is the provider's own message.
+    const group = errors.find((e) => e.providerId === "perplexity-api" && e.kind === "BAD_REQUEST");
+    expect(group?.count).toBe(6);
+    expect(group?.sample).toMatch(/^HTTP 400/);
 
     // While a run is in progress, the activity panel shows its latest error.
     await db.update(s.runs).set({ status: "RUNNING", finishedAt: null }).where(eq(s.runs.id, run!.id));

@@ -25,6 +25,7 @@ import { portfolioQuality } from "@/core/portfolio/selection";
 import { umamiDashboardUrl } from "@/core/analytics/umami";
 import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, monthStart, providerValueReport } from "./costs";
 import { latestProfile } from "./discovery";
+import { recentProviderErrors } from "./errors";
 import { promptCounts } from "./portfolio";
 import { calibrationPairKey, calibrationPairs, DEFAULT_MONTHLY_BUDGET_USD, enabledConfigurations, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
@@ -153,12 +154,7 @@ export async function domainDetail(domainId: string) {
     estimatedMonthlyCost(domainId),
     db.select().from(runs).where(eq(runs.domainId, domainId)).orderBy(desc(runs.startedAt)).limit(20),
     db.select().from(portfolioProposals).where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"))),
-    db
-      .select({ id: measurements.id, providerId: measurements.providerId, errors: measurements.errors, finishedAt: measurements.finishedAt })
-      .from(measurements)
-      .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "FAILED")))
-      .orderBy(desc(measurements.finishedAt))
-      .limit(20),
+    recentProviderErrors({ domainId, hours: 14 * 24 }),
     liveCells(domainId),
     costByProvider(new Date(0), domainId),
     promptCounts(domainId),
@@ -247,7 +243,7 @@ export async function domainDetail(domainId: string) {
     },
     schedule: { nextPlanAt: d.nextPlanAt, cyclesPerDay: d.cyclesPerDay, nextDueCells: nextDue, checkedAt: now },
     runs: recentRuns,
-    failedMeasurements: failed,
+    providerErrors: failed,
     proposals: proposals.map((p) => {
       const prompt = proposalTexts.find((x) => x.promptId === p.promptId);
       return { ...p, promptText: prompt?.text ?? null, clusterKey: prompt?.clusterKey ?? null };
