@@ -390,6 +390,10 @@ th.num {
   color: var(--muted);
   font-size: 0.85rem;
 }
+/* Links stacked under a link: keeps their centres 24 px apart (WCAG 2.5.8 target size). */
+.cell-sub--link {
+  padding-top: 0.5rem;
+}
 .domain-link {
   font-weight: 600;
 }

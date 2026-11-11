@@ -233,3 +233,100 @@ describe("topSources", () => {
     expect(rows[1]!.answers).toBe(1);
   });
 });
+
+describe("signal reports", () => {
+  const ob = (citedUrls: string[], providerId = "p1", branded = false) => ({
+    signals: sig({ citedUrls, citedDomains: citedUrls.flatMap((u) => (u.startsWith("http") ? [new URL(u).hostname.replace(/^www\./, "")] : [])) }),
+    providerId,
+    branded,
+  });
+  const obs = [
+    ob(["https://www.me.cz/faq?utm_source=chatgpt.com", "https://me.cz/faq#prices", "https://dir.cz/list/a?utm_medium=x&fbclid=1", "javascript:alert(1)"]),
+    // Not http(s), though both parse with a host.
+    ob(["javascript://me.cz/%0aalert(1)", "ftp://me.cz/x", "ftp://dir.cz/x"]),
+    ob(["http://me.cz/faq/", "https://me.cz/", "https://dir.cz/list/a", "https://dir.cz/list/b"], "p2"),
+    ob(["https://me.cz/faq", "https://dir.cz/list/c"], "p1", true), // branded question: not counted
+    ob(["https://blog.me.cz/post", "https://dir.cz/list/b", "https://dir.cz/list/c", "https://dir.cz/list/d", "https://dir.cz/"]),
+  ];
+
+  it("lists own pages cited in unbranded answers, once per answer, without tracking parameters and fragment", async () => {
+    const { ownPages } = await import("./sources");
+    expect(ownPages(obs, ["me.cz"], 1)).toMatchObject({ pages: [{ page: "me.cz/faq" }], total: 3 });
+    expect(ownPages(obs, ["me.cz"]).pages).toEqual([
+      { page: "me.cz/faq", url: "https://www.me.cz/faq", answers: 2, providers: ["p1", "p2"] },
+      { page: "blog.me.cz/post", url: "https://blog.me.cz/post", answers: 1, providers: ["p1"] },
+      { page: "me.cz/", url: "https://me.cz/", answers: 1, providers: ["p2"] },
+    ]);
+  });
+
+  it("gives each cited site its three most cited pages, http(s) only", async () => {
+    const { topSources } = await import("./sources");
+    const [dir, ...rest] = topSources(obs, ["me.cz"]);
+    expect(rest).toEqual([]);
+    expect(dir!.pages.map((p) => [p.page, p.answers])).toEqual([
+      ["dir.cz/list/a", 2],
+      ["dir.cz/list/b", 2],
+      ["dir.cz/", 1],
+    ]);
+    expect(dir!.pages.every((p) => p.url.startsWith("https://"))).toBe(true);
+  });
+
+  it("keeps pages addressed by the query string apart", async () => {
+    const { topSources } = await import("./sources");
+    const [site] = topSources(
+      [ob(["https://www.dir.cz/courses/?id=1", "https://www.dir.cz/courses/?id=2"]), ob(["https://www.dir.cz/courses/?id=1&utm_source=chatgpt.com#top"], "p2")],
+      ["me.cz"],
+    );
+    expect(site!.pages).toEqual([
+      { page: "dir.cz/courses?id=1", url: "https://www.dir.cz/courses/?id=1", answers: 2, providers: ["p1", "p2"] },
+      { page: "dir.cz/courses?id=2", url: "https://www.dir.cz/courses/?id=2", answers: 1, providers: ["p1"] },
+    ]);
+  });
+
+  it("ranks the brand among its tracked competitors by answers naming each", async () => {
+    const { competitorStandings } = await import("./sources");
+    const named = new Map([
+      ["Rival", 100],
+      ["Gone", 7], // no longer tracked
+      ["Small", 30],
+    ]);
+    expect(competitorStandings({ answers: 200, brand: 30, named }, "Me", ["Small", "Rival", "Silent"])).toEqual([
+      { name: "Rival", own: false, answers: 100, share: 0.5 },
+      { name: "Me", own: true, answers: 30, share: 0.15 },
+      { name: "Small", own: false, answers: 30, share: 0.15 },
+      { name: "Silent", own: false, answers: 0, share: 0 },
+    ]);
+    expect(competitorStandings({ answers: 0, brand: 0, named: new Map() }, "Me", ["Rival"])[0]!.share).toBe(0);
+  });
+
+  it("summarises the standings by place, so a tie at the top is not a loss", async () => {
+    const { competitorStandings, standingsSummary } = await import("./sources");
+    const summary = (brand: number, named: Record<string, number>, brandName = "Zed") =>
+      standingsSummary(competitorStandings({ answers: 10, brand, named: new Map(Object.entries(named)) }, brandName, Object.keys(named)));
+    expect(summary(5, { Alpha: 5 })).toBe("you are named most, of 2"); // Alpha sorts first by name only
+    expect(summary(0, { Alpha: 0, Beta: 0 })).toBe("no one is named yet");
+    expect(summary(3, { Alpha: 5, Beta: 7 })).toBe("you rank 3 of 3, Beta is named most");
+    expect(summary(3, {})).toBe("no competitors tracked");
+  });
+
+  it("groups search queries per topic, leaving out the prompt itself", async () => {
+    const { topSearchQueries } = await import("./sources");
+    const row = (queries: string[], providerId = "p1", clusterKey = "t1", prompt = "Who is the best wedding photographer?") => ({ queries, providerId, clusterKey, prompt });
+    const topics = topSearchQueries(
+      [
+        row(["who is the best  wedding photographer", "Wedding photographer reviews", "wedding photographer reviews"]),
+        row(["wedding photographer reviews", "prague wedding photos"], "p2"),
+        row(["Who is the best wedding photographer?"]), // only the prompt: no search of its own
+        row(["kde najdu kurz"], "p1", "t3", "Kde najdu kurz ?"), // space before the question mark
+        row(["a", "b"], "p1", "t2", "x"),
+        row(["b"], "p1", "t2", "x"),
+        row(["b"], "p2", "t2", "x"),
+      ],
+      1,
+    );
+    expect(topics).toEqual([
+      { clusterKey: "t2", answers: 3, queries: [{ query: "b", answers: 3, providers: ["p1", "p2"] }] },
+      { clusterKey: "t1", answers: 2, queries: [{ query: "Wedding photographer reviews", answers: 2, providers: ["p1", "p2"] }] },
+    ]);
+  });
+});

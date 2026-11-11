@@ -29,6 +29,8 @@ import { recentProviderErrors } from "./errors";
 import { promptCounts } from "./portfolio";
 import { calibrationPairKey, calibrationPairs, DEFAULT_MONTHLY_BUDGET_USD, enabledConfigurations, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
+import { activeTopic, inScoringWindow } from "./competitors";
+import { topSearchQueries } from "@/core/scoring/sources";
 import type { Citation } from "@/core/measurement/types";
 import type { RawSignals } from "@/core/signals/extract";
 
@@ -459,6 +461,8 @@ export interface AnswerFilters {
   topic?: string;
   result?: keyof typeof ANSWER_RESULTS;
   question?: keyof typeof ANSWER_QUESTIONS;
+  /** Prompt id ("P-…"): the answers to one question over time. */
+  prompt?: string;
   page?: number;
 }
 export const ANSWERS_PER_PAGE = 50;
@@ -501,6 +505,7 @@ export async function listAnswers(domainId: string, f: AnswerFilters) {
         eq(measurements.purpose, "STANDARD"),
         f.provider ? eq(measurements.providerId, f.provider) : undefined,
         f.topic ? eq(prompts.clusterKey, f.topic) : undefined,
+        f.prompt ? eq(prompts.id, f.prompt) : undefined,
         f.result ? result[f.result] : undefined,
         question === "all" ? undefined : question === "branded" ? branded : sql`not (${branded})`,
       ),
@@ -513,7 +518,16 @@ export async function listAnswers(domainId: string, f: AnswerFilters) {
     .from(topicClusters)
     .where(eq(topicClusters.domainId, domainId))
     .orderBy(desc(topicClusters.active), topicClusters.name);
+  const [prompt] = f.prompt
+    ? await db
+        .select({ text: promptVersions.text, language: promptVersions.language })
+        .from(prompts)
+        .innerJoin(promptVersions, and(eq(promptVersions.promptId, prompts.id), eq(promptVersions.version, prompts.currentVersion)))
+        .where(and(eq(prompts.id, f.prompt), eq(prompts.domainId, domainId)))
+    : [];
   return {
+    /** The prompt the list is narrowed to (current wording), null without the filter or for an unknown id. */
+    prompt: prompt ?? null,
     answers: rows.slice(0, ANSWERS_PER_PAGE).map((r) => ({
       ...r,
       citations: (Array.isArray(r.citations) ? r.citations : []) as Citation[],
@@ -524,4 +538,16 @@ export async function listAnswers(domainId: string, f: AnswerFilters) {
     page,
     topics,
   };
+}
+
+/** Web searches the assistants ran for the answers the score reads, per topic (see `topSearchQueries`). */
+export async function searchQueriesFor(domainId: string) {
+  const rows = await getDb()
+    .select({ providerId: measurements.providerId, clusterKey: prompts.clusterKey, prompt: promptVersions.text, queries: measurements.searchQueries })
+    .from(measurements)
+    .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
+    .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    .innerJoin(topicClusters, activeTopic)
+    .where(and(inScoringWindow(domainId), sql`case when jsonb_typeof(${measurements.searchQueries}) = 'array' then jsonb_array_length(${measurements.searchQueries}) > 0 else false end`));
+  return topSearchQueries(rows.map((r) => ({ ...r, queries: r.queries as string[] })));
 }
