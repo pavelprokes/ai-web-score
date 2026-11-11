@@ -1343,9 +1343,15 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(topic.queries).toContainEqual({ query: "kurzy programovani recenze", answers: 1, providers: [answer!.providerId] });
     expect(topic.queries.map((q) => q.query)).not.toContain(answer!.prompt);
 
+    // The brand count follows the stored signal: flipping it on one scored answer moves the count by exactly one.
     const counts = await competitorMatchCounts(demo!.id);
-    expect(counts.brand).toBeGreaterThanOrEqual(0);
-    expect(counts.brand).toBeLessThanOrEqual(counts.answers);
+    const named = Boolean(answer!.signals!.brandMentioned);
+    const setNamed = (v: boolean) =>
+      db.execute(sql`update measurement_signals set signals = jsonb_set(signals, '{brandMentioned}', ${JSON.stringify(v)}::jsonb) where measurement_id = ${answer!.id}`);
+    await setNamed(!named);
+    expect((await competitorMatchCounts(demo!.id)).brand).toBe(counts.brand + (named ? -1 : 1));
+    await setNamed(named);
+    expect(await competitorMatchCounts(demo!.id)).toMatchObject({ brand: counts.brand, answers: counts.answers });
     expect(await sourcesFor(demo!.id)).toMatchObject({ sources: expect.any(Array), ownPages: expect.any(Array) });
   });
 

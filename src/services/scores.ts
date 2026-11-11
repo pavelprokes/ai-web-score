@@ -199,10 +199,11 @@ export async function latestScores(domainId: string, scoringVersion: string) {
 /** Sites AI cites for the domain's unbranded questions over the scoring window, and its own cited pages (see `topSources`, `ownPages`). */
 export async function sourcesFor(domainId: string) {
   const [domain] = await getDb().select().from(domains).where(eq(domains.id, domainId));
-  if (!domain) return { sources: [], ownPages: [] };
+  if (!domain) return { sources: [], ownPages: [], ownPagesTotal: 0 };
   const profile = await latestProfile(domainId);
   const end = new Date();
   const obs = await loadObservations(domainId, new Date(end.getTime() - DEFAULT_WINDOW_DAYS * 86_400_000), end, domain.scoringVersion);
   const own = [domain.hostname, ...(profile?.profile.ownedDomains ?? [])];
-  return { sources: topSources(obs, own), ownPages: ownPages(obs, own) };
+  const { pages, total } = ownPages(obs, own);
+  return { sources: topSources(obs, own), ownPages: pages, ownPagesTotal: total };
 }

@@ -4,9 +4,9 @@ import type { ScoringObservation } from "./scoring";
 type Observation = Pick<ScoringObservation, "signals" | "providerId" | "branded">;
 
 export interface PageRow {
-  /** Host without "www." plus path, as shown. */
+  /** Host without "www." plus path and query string (tracking parameters removed), as shown. */
   page: string;
-  /** http(s) link without query string and fragment (the first spelling seen). */
+  /** http(s) link without tracking parameters and fragment (the first spelling seen). */
   url: string;
   answers: number;
   providers: string[];
@@ -25,13 +25,17 @@ export interface SourceRow {
 }
 
 const SOURCE_PAGES = 3;
+const OWN_PAGES = 15;
+/** Query parameters that say who sent the visitor, not which page it is. */
+const TRACKING_PARAM = /^(utm_|srsltid$|fbclid$|gclid$)/;
 
 /** Answers the visibility metrics read: unbranded questions that got an answer. */
 const unbranded = <T extends Observation>(obs: T[]) => obs.filter((o) => !o.branded && !o.signals.noAnswer);
 
 /**
  * Cited pages of the hosts `keep` accepts, most cited first; an answer counts a page once. Citations are
- * untrusted: only http(s) URLs pass, and query string and fragment (tracking parameters, text anchors) are cut.
+ * untrusted: only http(s) URLs pass. Tracking parameters and the fragment are cut; the rest of the query string
+ * stays, because many sites address their pages by it (`?id=4959`).
  */
 function citedPages(answers: Observation[], keep: (host: string) => boolean): Array<PageRow & { host: string }> {
   const by = new Map<string, { url: string; host: string; answers: number; providers: Set<string> }>();
@@ -42,10 +46,11 @@ function citedPages(answers: Observation[], keep: (host: string) => boolean): Ar
       if (!host || !keep(host)) continue;
       const u = new URL(raw);
       if (u.protocol !== "http:" && u.protocol !== "https:") continue;
-      const page = host + (u.pathname.replace(/\/+$/, "") || "/");
+      for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
+      const page = host + (u.pathname.replace(/\/+$/, "") || "/") + u.search;
       if (seen.has(page)) continue;
       seen.add(page);
-      const row = by.get(page) ?? { url: u.origin + u.pathname, host, answers: 0, providers: new Set<string>() };
+      const row = by.get(page) ?? { url: u.origin + u.pathname + u.search, host, answers: 0, providers: new Set<string>() };
       row.answers++;
       row.providers.add(o.providerId);
       by.set(page, row);
@@ -87,11 +92,10 @@ export function topSources(obs: Observation[], ownDomains: string[], limit = 15)
   }));
 }
 
-/** "Your pages AI cites": pages of the own domains cited in answers to unbranded questions, most cited first. */
-export function ownPages(obs: Observation[], ownDomains: string[], limit = 15): PageRow[] {
-  return citedPages(unbranded(obs), (h) => ownDomains.some((o) => hostMatches(h, o)))
-    .slice(0, limit)
-    .map(({ host: _host, ...p }) => p);
+/** "Your pages AI cites": pages of the own domains cited in answers to unbranded questions, most cited first; `total` counts them all. */
+export function ownPages(obs: Observation[], ownDomains: string[], limit = OWN_PAGES): { pages: PageRow[]; total: number } {
+  const all = citedPages(unbranded(obs), (h) => ownDomains.some((o) => hostMatches(h, o)));
+  return { pages: all.slice(0, limit).map(({ host: _host, ...p }) => p), total: all.length };
 }
 
 export interface StandingRow {
@@ -114,6 +118,15 @@ export function competitorStandings(counts: { answers: number; brand: number; na
   );
 }
 
+/** One line for the standings: the brand's place counts only competitors named in more answers, so a tie is not a loss. */
+export function standingsSummary(rows: StandingRow[]): string {
+  const brand = rows.find((r) => r.own)?.answers ?? 0;
+  const ahead = rows.filter((r) => !r.own && r.answers > brand);
+  if (rows.length < 2) return "no competitors tracked";
+  if (rows.every((r) => r.answers === 0)) return "no one is named yet";
+  return ahead.length === 0 ? `you are named most, of ${rows.length}` : `you rank ${ahead.length + 1} of ${rows.length}, ${ahead[0]!.name} is named most`;
+}
+
 export interface SearchQueryTopic {
   clusterKey: string;
   /** Answers of the topic with at least one search other than the prompt itself. */
@@ -126,7 +139,7 @@ export interface SearchQueryTopic {
  * providers report the prompt itself as the search, which says nothing new, so those are left out.
  */
 export function topSearchQueries(rows: Array<{ providerId: string; clusterKey: string; prompt: string; queries: string[] }>, perTopic = 5): SearchQueryTopic[] {
-  const key = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().replace(/[?.!]+$/, "");
+  const key = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim().replace(/[?.!\s]+$/, "");
   const topics = new Map<string, { answers: number; queries: Map<string, { query: string; answers: number; providers: Set<string> }> }>();
   for (const r of rows) {
     const prompt = key(r.prompt);

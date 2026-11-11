@@ -5,7 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
-import { competitorStandings, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
+import { competitorStandings, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
@@ -54,7 +54,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, ownPages }, suggestions, matches, searches] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, ownPages, ownPagesTotal }, suggestions, matches, searches] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -150,7 +150,7 @@ export default async function DomainPage({
       </div>
 
       <Standings detail={detail} matches={matches} />
-      <Sources rows={sources} ownPages={ownPages} />
+      <Sources rows={sources} ownPages={ownPages} ownPagesTotal={ownPagesTotal} />
       <Searches topics={searches} detail={detail} />
       <ClusterScores detail={detail} />
       <Schedule detail={detail} now={now} open={open("schedule-heading")} />
@@ -579,12 +579,11 @@ function Standings({ detail, matches }: { detail: Detail; matches: Matches }) {
   const rows = competitorStandings(matches, p.brandName, p.competitors.map((c) => c.name));
   // While a re-extraction runs, stored answers mix the names of two profile versions.
   const ready = matches.answers > 0 && !matches.pending;
-  const place = 1 + rows.filter((r) => !r.own && r.answers > rows.find((x) => x.own)!.answers).length;
   return (
     <Section
       title="Who AI names instead"
       id="standings-heading"
-      fold={{ summary: matches.pending ? "being re-checked" : !ready ? "no answers yet" : rows[0]!.own ? `you are named most, of ${rows.length}` : `you rank ${place} of ${rows.length}, ${rows[0]!.name} is named most` }}
+      fold={{ summary: matches.pending ? "being re-checked" : !ready ? "no answers yet" : standingsSummary(rows) }}
     >
       <p className="note">
         Answers naming you and each tracked competitor, of {num(matches.answers)} answers to the questions that do not name you, last 28 days.
@@ -689,12 +688,12 @@ function Searches({ topics, detail }: { topics: SearchQueryTopic[]; detail: Deta
   );
 }
 
-function Sources({ rows, ownPages }: { rows: SourceRow[]; ownPages: PageRow[] }) {
+function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPages: PageRow[]; ownPagesTotal: number }) {
   return (
     <Section
       title="Where AI looks"
       id="sources-heading"
-      fold={{ summary: `${num(rows.length)} ${rows.length === 1 ? "site" : "sites"} cited, ${num(ownPages.length)} of your pages` }}
+      fold={{ summary: `${num(rows.length)} ${rows.length === 1 ? "site" : "sites"} cited, ${num(ownPagesTotal)} of your pages` }}
     >
       <h3 className="subhead" id="own-pages-heading">Your pages AI cites</h3>
       {ownPages.length === 0 ? (
@@ -724,6 +723,11 @@ function Sources({ rows, ownPages }: { rows: SourceRow[]; ownPages: PageRow[] })
             </tbody>
           </table>
         </TableScroll>
+      )}
+      {ownPagesTotal > ownPages.length && (
+        <p className="note">
+          The {num(ownPages.length)} most cited of {num(ownPagesTotal)} pages.
+        </p>
       )}
       <h3 className="subhead">Other sites</h3>
       <p className="note">
