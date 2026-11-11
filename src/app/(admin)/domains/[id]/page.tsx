@@ -21,8 +21,9 @@ import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
+import { attentionItems, type AttentionItem } from "@/components/attention";
 import { num, pct, usd } from "@/components/format";
-import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo } from "@/components/ui";
+import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo, type Tone } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,25 @@ export default async function DomainPage({
   const returnTo = `/domains/${d.id}`;
   const addedMessage =
     added && (d.status === "NEW" ? "Domain added. Run the discovery when you are ready." : "Domain added. Discovery is running — this page shows the progress.");
+  const attention = attentionItems({
+    now,
+    status: d.status,
+    lastMeasuredAt: d.lastMeasuredAt,
+    errors,
+    runs: detail.runs,
+    trend: history,
+    forecastUsd: detail.costs.estimatedMonthlyUsd,
+    budgetUsd: detail.costs.monthlyBudgetUsd,
+    proposals: detail.proposals.length,
+    autoApply: d.autoApprovePortfolioChanges,
+    recommendationsOutOfDate: !!recs && recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now),
+    suggestions: suggestions.map((c) => c.name),
+    unnamedCompetitors:
+      matches.answers > 0 && !matches.pending ? (detail.profile?.competitors ?? []).filter((c) => !matches.named.get(c.name)).map((c) => c.name) : [],
+    providerLabel,
+  });
+  // A collapsed section opens when the attention block points into it.
+  const open = (section: string) => attention.some((i) => i.section === section);
 
   return (
     <>
@@ -97,7 +117,7 @@ export default async function DomainPage({
 
       <Flash message={done ?? addedMessage} error={error} />
 
-      <ProviderErrors errors={errors} now={now} />
+      <Attention items={attention} />
 
       <ScoreTiles detail={detail} />
 
@@ -106,8 +126,6 @@ export default async function DomainPage({
           <Link prefetch={false} href={`/domains/${d.id}/answers`}>Read the AI answers behind these numbers</Link>
         </p>
       )}
-
-      <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {history && history.domain.length > 0 && (
         <Section title="Score over time" id="trend-heading">
@@ -120,26 +138,68 @@ export default async function DomainPage({
         </Section>
       )}
 
+      <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
+
+      {/* From here on: reference. Collapsed unless the attention block points into the section. */}
+      <div className="grid-2">
+        <Portfolio detail={detail} returnTo={returnTo} open={open("portfolio-heading")} />
+        <Profile detail={detail} now={now} suggestions={suggestions} matches={matches} returnTo={returnTo} open={open("profile-heading")} />
+      </div>
+
       <div className="grid-2">
         <ProviderScores detail={detail} />
-        <Costs detail={detail} />
+        <Costs detail={detail} open={open("costs-heading")} />
       </div>
 
       <Sources rows={sources} />
-
-      <div className="grid-2 section-gap">
-        <Profile detail={detail} now={now} suggestions={suggestions} matches={matches} returnTo={returnTo} />
-        <Portfolio detail={detail} returnTo={returnTo} />
-      </div>
-
-      <div className="section-gap">
-        <ClusterScores detail={detail} />
-        <Schedule detail={detail} now={now} />
-        <Runs detail={detail} now={now} />
-        <ProviderErrors errors={detail.providerErrors} now={now} period="14 days" id="failed-heading" />
-        <Prompts prompts={activePrompts} detail={detail} />
-      </div>
+      <ClusterScores detail={detail} />
+      <Schedule detail={detail} now={now} open={open("schedule-heading")} />
+      <Runs detail={detail} now={now} open={open("runs-heading")} />
+      <ProviderErrors errors={detail.providerErrors} now={now} period="14 days" id="failed-heading" fold={{ open: open("failed-heading") }} />
+      <Prompts prompts={activePrompts} detail={detail} />
     </>
+  );
+}
+
+const ATTENTION_KIND: Record<AttentionItem["kind"], { tone: Tone; label: string }> = {
+  fix: { tone: "critical", label: "Fix" },
+  down: { tone: "warning", label: "Down" },
+  up: { tone: "good", label: "Up" },
+  budget: { tone: "warning", label: "Budget" },
+  decide: { tone: "info", label: "Decide" },
+};
+const ATTENTION_SHOWN = 5;
+
+/** What changed and what to do, before any numbers; each line links to the section it is about. */
+function Attention({ items }: { items: AttentionItem[] }) {
+  const list = (rows: AttentionItem[]) => (
+    <ul className="attention">
+      {rows.map((i) => (
+        <li key={i.text}>
+          <Badge tone={ATTENTION_KIND[i.kind].tone}>{ATTENTION_KIND[i.kind].label}</Badge>
+          <span>
+            {i.text} <a href={`#${i.anchor ?? i.section}`}>{i.link}</a>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <Section title="Needs your attention" id="attention-heading">
+      {items.length === 0 ? (
+        <p>Nothing needs your attention.</p>
+      ) : (
+        <>
+          {list(items.slice(0, ATTENTION_SHOWN))}
+          {items.length > ATTENTION_SHOWN && (
+            <details className="notes">
+              <summary>{items.length - ATTENTION_SHOWN} more</summary>
+              {list(items.slice(ATTENTION_SHOWN))}
+            </details>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -512,7 +572,7 @@ function ScoreTiles({ detail }: { detail: Detail }) {
 
 function Sources({ rows }: { rows: SourceRow[] }) {
   return (
-    <Section title="Where AI looks" id="sources-heading">
+    <Section title="Where AI looks" id="sources-heading" fold={{ summary: `${num(rows.length)} ${rows.length === 1 ? "site" : "sites"} cited` }}>
       <p className="note">
         Sites the assistants cite when answering the questions that do not name you, last 28 days. A directory or portal high on this list where
         you are rarely named is a place to get listed; a brand site is a competitor. Your own site is the Cited metric.
@@ -563,7 +623,7 @@ function Sources({ rows }: { rows: SourceRow[] }) {
 function ProviderScores({ detail }: { detail: Detail }) {
   const rows = [...detail.scores.providers].sort((a, b) => (b.overall ?? 0) - (a.overall ?? 0));
   return (
-    <Section title="Visibility by AI provider" id="providers-heading">
+    <Section title="Visibility by AI provider" id="providers-heading" fold={{ summary: `${rows.length} ${rows.length === 1 ? "provider" : "providers"}` }}>
       {rows.length === 0 ? (
         <p className="muted">No provider scores yet.</p>
       ) : (
@@ -616,12 +676,12 @@ function ProviderScores({ detail }: { detail: Detail }) {
   );
 }
 
-function Costs({ detail }: { detail: Detail }) {
+function Costs({ detail, open }: { detail: Detail; open: boolean }) {
   const c = detail.costs;
   const month = (c.monthUsd?.measurementCost ?? 0) + (c.monthUsd?.llmCost ?? 0);
   const total = c.byProvider.reduce((a, p) => a + p.cost, 0);
   return (
-    <Section title="Costs" id="costs-heading">
+    <Section title="Costs" id="costs-heading" fold={{ summary: `${usd(month)} of ${usd(c.monthlyBudgetUsd)} this month`, open }}>
       <BudgetMeter spent={month} budget={c.monthlyBudgetUsd} estimate={c.estimatedMonthlyUsd} />
       <dl className="kv kv--compact">
         <dt>Measurements this month</dt>
@@ -674,12 +734,19 @@ function Costs({ detail }: { detail: Detail }) {
   );
 }
 
-function Profile({ detail, now, suggestions, matches, returnTo }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; matches: Awaited<ReturnType<typeof competitorMatchCounts>>; returnTo: string }) {
+function Profile({ detail, now, suggestions, matches, returnTo, open }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; matches: Awaited<ReturnType<typeof competitorMatchCounts>>; returnTo: string; open: boolean }) {
   const p = detail.profile;
   // While a re-extraction runs, stored answers mix the names of two profile versions.
   const showCounts = matches.answers > 0 && !matches.pending;
   return (
-    <Section title="Domain profile" id="profile-heading">
+    <Section
+      title="Domain profile"
+      id="profile-heading"
+      fold={{
+        summary: p && `${p.competitors.length} ${p.competitors.length === 1 ? "competitor" : "competitors"} tracked${suggestions.length ? `, ${suggestions.length} suggested` : ""}`,
+        open,
+      }}
+    >
       {!p ? (
         <p className="muted">The discovery has not finished yet.</p>
       ) : (
@@ -718,7 +785,7 @@ function Profile({ detail, now, suggestions, matches, returnTo }: { detail: Deta
               v{p.version} · discovered <TimeAgo date={detail.domain.lastDiscoveryAt} now={now} />
             </dd>
           </dl>
-          <h3 className="subhead">Competitors</h3>
+          <h3 className="subhead" id="competitors-heading">Competitors</h3>
           {p.competitors.length ? (
             <>
               <p className="muted">
@@ -787,7 +854,7 @@ function Profile({ detail, now, suggestions, matches, returnTo }: { detail: Deta
           )}
           {suggestions.length > 0 && (
             <>
-              <h3 className="subhead">Named by AI, not tracked</h3>
+              <h3 className="subhead" id="suggestions-heading">Named by AI, not tracked</h3>
               <p className="muted">
                 Brands named in AI-analysed answers to questions that do not name you, last 28 days. The analysis reads answers that name you or a
                 tracked rival (and a sample of the rest), so brands that win where neither appears are under-counted. Tracking one re-checks the
@@ -852,7 +919,7 @@ const PROPOSAL_KIND: Record<string, string> = {
   PROMOTE_CORE: "Promote to core",
 };
 
-function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
+function Portfolio({ detail, returnTo, open }: { detail: Detail; returnTo: string; open: boolean }) {
   const { portfolio, sizing, proposals } = detail;
   const q = portfolio.quality;
   const d = detail.domain;
@@ -862,7 +929,7 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
   const waiting = `${proposals.length} ${proposals.length === 1 ? "proposal" : "proposals"}`;
   const budget = `Spending stays within the monthly budget of ${usd(detail.costs.monthlyBudgetUsd)}: the planner caps every measurement cycle.`;
   return (
-    <Section title="Prompt portfolio" id="portfolio-heading">
+    <Section title="Prompt portfolio" id="portfolio-heading" fold={{ summary: `${portfolio.active} active, ${proposals.length ? `${waiting} waiting` : "no proposals waiting"}`, open }}>
       <dl className="tiles tiles--inner" aria-label="Prompt counts">
         <StatTile label={<>Active <MetricInfo id="active-prompts" /></>} value={portfolio.active} detail={`${portfolio.core} core · ${portfolio.exploration} exploration`} />
         <StatTile label={<>Candidate pool <MetricInfo id="candidate-pool" /></>} value={portfolio.candidate} detail={sizing ? `target ${whole(sizing.candidatePoolTarget)}` : undefined} />
@@ -931,7 +998,7 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
               <li key={p.id}>
                 <div>
                   <strong>{PROPOSAL_KIND[p.kind] ?? p.kind}</strong>
-                  {p.promptText && <q className="prompt-text">{p.promptText}</q>}
+                  {p.promptText && <q className="prompt-text" lang={p.promptLanguage ?? undefined}>{p.promptText}</q>}
                   <span className="cell-sub">{p.reason}</span>
                 </div>
                 <div className="btn-row">
@@ -983,7 +1050,7 @@ function ClusterScores({ detail }: { detail: Detail }) {
   const rows = [...detail.scores.clusters].sort((a, b) => weight(b.cluster) - weight(a.cluster));
   if (rows.length === 0) return null;
   return (
-    <Section title="Visibility by topic" id="clusters-heading">
+    <Section title="Visibility by topic" id="clusters-heading" fold={{ summary: `${rows.length} ${rows.length === 1 ? "topic" : "topics"}` }}>
       <TableScroll label="Visibility by topic (scrollable)">
         <table className="hig-table">
           <thead>
@@ -1036,10 +1103,10 @@ function ClusterScores({ detail }: { detail: Detail }) {
   );
 }
 
-function Schedule({ detail, now }: { detail: Detail; now: Date }) {
+function Schedule({ detail, now, open }: { detail: Detail; now: Date; open: boolean }) {
   const s = detail.schedule;
   return (
-    <Section title="Schedule" id="schedule-heading">
+    <Section title="Schedule" id="schedule-heading" fold={{ summary: <>next planning cycle <TimeAgo date={s.nextPlanAt} now={now} /></>, open }}>
       <dl className="kv kv--compact">
         <dt>Next planning cycle</dt>
         <dd>
@@ -1072,7 +1139,7 @@ function Schedule({ detail, now }: { detail: Detail; now: Date }) {
             <tbody>
               {s.nextDueCells.map((c) => (
                 <tr key={`${c.promptVersionId}:${c.configurationId}`}>
-                  <th scope="row" className="prompt-cell">
+                  <th scope="row" className="prompt-cell" lang={c.promptLanguage ?? undefined}>
                     {c.promptText ?? c.promptVersionId}
                   </th>
                   <td>
@@ -1099,7 +1166,7 @@ const ROLE_TONE: Record<string, "good" | "info" | "neutral"> = { CORE: "good", R
 function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) {
   const name = (key: string) => detail.clusters.find((c) => c.key === key)?.name ?? key;
   return (
-    <Section title={`Active prompts (${prompts.length})`} id="prompts-heading">
+    <Section title={`Active prompts (${prompts.length})`} id="prompts-heading" fold={{}}>
       {prompts.length === 0 ? (
         <p className="muted">No active prompts yet.</p>
       ) : (
@@ -1151,9 +1218,9 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
 
 const RUN_KIND: Record<string, string> = { DISCOVERY: "Discovery", PORTFOLIO: "Prompt design", MEASUREMENT: "Measurement", SCORING: "Scoring" };
 
-function Runs({ detail, now }: { detail: Detail; now: Date }) {
+function Runs({ detail, now, open }: { detail: Detail; now: Date; open: boolean }) {
   return (
-    <Section title="Recent runs" id="runs-heading">
+    <Section title="Recent runs" id="runs-heading" fold={{ summary: detail.runs[0] && <>last started <TimeAgo date={detail.runs[0].startedAt} now={now} /></>, open }}>
       {detail.runs.length === 0 ? (
         <p className="muted">No runs yet.</p>
       ) : (

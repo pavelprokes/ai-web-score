@@ -201,12 +201,12 @@ export async function domainDetail(domainId: string) {
     .slice(0, 10);
   const [dueTexts, configRows, proposalTexts] = await Promise.all([
     due.length
-      ? db.select({ id: promptVersions.id, text: promptVersions.text }).from(promptVersions).where(inArray(promptVersions.id, due.map((c) => c.promptVersionId)))
+      ? db.select({ id: promptVersions.id, text: promptVersions.text, language: promptVersions.language }).from(promptVersions).where(inArray(promptVersions.id, due.map((c) => c.promptVersionId)))
       : [],
     db.select({ id: providerConfigurations.id, providerId: providerConfigurations.providerId, model: providerConfigurations.model }).from(providerConfigurations),
     proposals.some((p) => p.promptId)
       ? db
-          .select({ promptId: prompts.id, text: promptVersions.text, clusterKey: prompts.clusterKey })
+          .select({ promptId: prompts.id, text: promptVersions.text, language: promptVersions.language, clusterKey: prompts.clusterKey })
           .from(prompts)
           .innerJoin(promptVersions, and(eq(promptVersions.promptId, prompts.id), eq(promptVersions.version, prompts.currentVersion)))
           .where(inArray(prompts.id, proposals.flatMap((p) => (p.promptId ? [p.promptId] : []))))
@@ -214,9 +214,11 @@ export async function domainDetail(domainId: string) {
   ]);
   const nextDue = due.map((c) => {
     const config = configRows.find((x) => x.id === c.configurationId);
+    const prompt = dueTexts.find((x) => x.id === c.promptVersionId);
     return {
       promptVersionId: c.promptVersionId,
-      promptText: dueTexts.find((x) => x.id === c.promptVersionId)?.text ?? null,
+      promptText: prompt?.text ?? null,
+      promptLanguage: prompt?.language ?? null,
       configurationId: c.configurationId,
       providerId: config?.providerId ?? null,
       model: config?.model ?? null,
@@ -246,7 +248,7 @@ export async function domainDetail(domainId: string) {
     providerErrors: failed,
     proposals: proposals.map((p) => {
       const prompt = proposalTexts.find((x) => x.promptId === p.promptId);
-      return { ...p, promptText: prompt?.text ?? null, clusterKey: prompt?.clusterKey ?? null };
+      return { ...p, promptText: prompt?.text ?? null, promptLanguage: prompt?.language ?? null, clusterKey: prompt?.clusterKey ?? null };
     }),
     clusters: clusterRows.map((r) => r.data),
     costs: {

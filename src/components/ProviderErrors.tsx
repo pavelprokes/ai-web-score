@@ -53,17 +53,20 @@ export function ProviderErrors({
   now,
   period = "24 h",
   id = "provider-errors-heading",
+  fold,
 }: {
   errors: ProviderErrorGroup[];
   now: Date;
   period?: string;
   /** Heading id; must differ when the page shows the block twice. */
   id?: string;
+  /** Collapses the block behind its heading. */
+  fold?: { open?: boolean };
 }) {
   if (errors.length === 0) return null;
   const total = errors.reduce((a, e) => a + e.count, 0);
   return (
-    <Section title={`Provider errors in the last ${period} (${total})`} id={id}>
+    <Section title={`Provider errors in the last ${period} (${total})`} id={id} fold={fold}>
       <TableScroll label={`Provider errors in the last ${period} (scrollable)`}>
         <table className="hig-table">
           <thead>

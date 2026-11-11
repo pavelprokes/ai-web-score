@@ -348,17 +348,18 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
         <Link prefetch={false} href="/metrics">What do the metrics mean?</Link>
       </p>
       {mixChanges.length > 0 && (
-        <ul className="note trend__note trend__mixnotes">
-          {mixChanges.map((c) => (
-            <li key={c.day}>
-              <span aria-hidden="true">┆ </span>
-              {dateFmt.format(new Date(c.day))}: providers changed
-              {c.added.length > 0 && <> (added {c.added.map(labelOf).join(", ")})</>}
-              {c.removed.length > 0 && <> (removed {c.removed.map(labelOf).join(", ")})</>}. The combined line before and after is not
-              directly comparable; compare each provider&apos;s own line. A new provider phases in over 7 days.
-            </li>
-          ))}
-        </ul>
+        <p className="note trend__note">
+          <span aria-hidden="true">┆ </span>Providers changed:{" "}
+          {mixChanges
+            .map((c) =>
+              [dateFmt.format(new Date(c.day)), c.added.length && `added ${c.added.map(labelOf).join(", ")}`, c.removed.length && `removed ${c.removed.map(labelOf).join(", ")}`]
+                .filter(Boolean)
+                .join(" "),
+            )
+            .join("; ")}
+          . The combined line is not directly comparable across these dates; compare each provider&apos;s own line. A new provider phases in
+          over 7 days.
+        </p>
       )}
 
       <details className="trend__table">
