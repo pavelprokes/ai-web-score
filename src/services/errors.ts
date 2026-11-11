@@ -8,13 +8,17 @@ export interface ProviderErrorGroup {
   kind: ProviderErrorClass;
   count: number;
   lastAt: Date;
-  /** Raw text of the group's latest error, for debugging. */
-  sample: string;
+  /** Raw text of the group's distinct errors, newest first (at most 3), for debugging. */
+  samples: string[];
 }
+
+const MAX_SAMPLES = 3;
+const isSkipNote = (message: string) => message.startsWith("Skipped: ");
 
 /**
  * Folds rows (newest first) into one group per provider and error class. Answers skipped after a provider
- * was stopped count in the class of the error they quote; the sample prefers the provider's own message.
+ * was stopped count in the class of the error they quote; the samples are the provider's
+ * own distinct messages, and the skip note only when there is nothing else.
  */
 export function groupProviderErrors(rows: Array<{ providerId: string; message: string; count: number; lastAt: Date }>): ProviderErrorGroup[] {
   const groups = new Map<string, ProviderErrorGroup>();
@@ -22,10 +26,12 @@ export function groupProviderErrors(rows: Array<{ providerId: string; message: s
     const kind = classifyProviderError(r.message);
     const key = `${r.providerId}:${kind}`;
     const g = groups.get(key);
-    if (!g) groups.set(key, { providerId: r.providerId, kind, count: r.count, lastAt: r.lastAt, sample: r.message });
+    if (!g) groups.set(key, { providerId: r.providerId, kind, count: r.count, lastAt: r.lastAt, samples: [r.message] });
     else {
       g.count += r.count;
-      if (g.sample.startsWith("Skipped: ") && !r.message.startsWith("Skipped: ")) g.sample = r.message;
+      if (isSkipNote(r.message)) continue;
+      if (isSkipNote(g.samples[0]!)) g.samples = [r.message];
+      else if (g.samples.length < MAX_SAMPLES && !g.samples.includes(r.message)) g.samples.push(r.message);
     }
   }
   return [...groups.values()];

@@ -5,17 +5,20 @@ import { Badge, Section, TableScroll, TimeAgo, type Tone } from "./ui";
 
 const label = (id: string) => listProviders().find((p) => p.id === id)?.label ?? id;
 
-/** What happened and what the owner should do, per error class. */
+/**
+ * What happened and what the owner should do, per error class. The block covers up to 14 days, so the texts
+ * speak of the past and make the action depend on whether the error is still recent.
+ */
 const KINDS: Record<ProviderErrorClass, { tone: Tone; label: string; text: string }> = {
   QUOTA: {
     tone: "critical",
     label: "Out of credit",
-    text: "The provider account has no credit left, so these answers were not collected. Top up the account; measuring resumes with the next run.",
+    text: "The provider account had no credit left, so these answers were not collected. If the last one is recent, top up the account; measuring resumes with the next run.",
   },
   AUTH: {
     tone: "critical",
     label: "API key rejected",
-    text: "The provider refused the API key, or the key is missing. Check the provider's key in Vercel (Environment Variables) and redeploy.",
+    text: "The provider refused the API key, or the key was missing. If the last one is recent, check the provider's key in Vercel (Environment Variables) and redeploy.",
   },
   BAD_REQUEST: {
     tone: "serious",
@@ -84,7 +87,11 @@ export function ProviderErrors({
                     <div>{kind.text}</div>
                     <details className="notes">
                       <summary>Provider&apos;s message</summary>
-                      <code>{e.sample}</code>
+                      {e.samples.map((s) => (
+                        <div key={s}>
+                          <code>{s}</code>
+                        </div>
+                      ))}
                     </details>
                   </td>
                   <td className="num">{e.count}</td>
