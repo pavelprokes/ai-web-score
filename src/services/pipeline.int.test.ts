@@ -540,6 +540,256 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
 
+  it("counts each answer of a rejected async batch once, and migration 0012 repairs older counters", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { submitAsync } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
+    const [provider] = await db.select().from(s.providers).where(eq(s.providers.id, "chatgpt-ui"));
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "chatgpt-ui"));
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 40 }).returning();
+    await db.insert(s.measurements).values(
+      Array.from({ length: 40 }, (_, i) => ({
+        id: `batch-reject-${i}`,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "chatgpt-ui",
+        model: config!.model,
+        sampleIndex: 200 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    process.env.DATAFORSEO_LOGIN = "l";
+    process.env.DATAFORSEO_PASSWORD = "p";
+    const realFetch = globalThis.fetch;
+    // What production got for a country outside the location table: every task of the batch rejected alike.
+    globalThis.fetch = (async (_url: string, init: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          status_code: 20000,
+          status_message: "Ok.",
+          tasks: (JSON.parse(String(init.body)) as Array<{ tag: string }>).map((t) => ({ id: "t", status_code: 40501, status_message: "Invalid Field: 'location_name'.", data: { tag: t.tag }, result: null })),
+        }),
+      )) as typeof fetch;
+    try {
+      await submitAsync(run!.id, config!.id);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DATAFORSEO_LOGIN;
+      delete process.env.DATAFORSEO_PASSWORD;
+      await db.update(s.providers).set({ enabled: provider!.enabled }).where(eq(s.providers.id, "chatgpt-ui"));
+    }
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(rows.every((r) => r.status === "FAILED")).toBe(true);
+    const finishedRun = async () => (await db.select().from(s.runs).where(eq(s.runs.id, run!.id)))[0]!;
+    expect(await finishedRun()).toMatchObject({ status: "FAILED", completedCount: 0, failedCount: 40 });
+
+    // Runs finished before the fix carry 3 + 37 + 37 failures for 40 answers; the migration recounts them from the rows.
+    await db.update(s.runs).set({ failedCount: 77 }).where(eq(s.runs.id, run!.id));
+    const migration = readFileSync("./drizzle/0012_recount_run_failures.sql", "utf8");
+    for (let i = 0; i < 2; i++) {
+      await db.execute(sql.raw(migration));
+      expect(await finishedRun()).toMatchObject({ status: "FAILED", completedCount: 0, failedCount: 40 });
+    }
+  });
+
+  it("stops a provider for the run after one out-of-credit rejection, even after earlier answers", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { executeMeasurement } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "perplexity-api")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 4 }).returning();
+    const ids = Array.from({ length: 4 }, (_, i) => `quota-${i}`);
+    await db.insert(s.measurements).values(
+      ids.map((id, i) => ({
+        id,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "perplexity-api",
+        model: config!.model,
+        sampleIndex: 300 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    const saved = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    const answer = () => new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
+    let sent = () => {};
+    let release = () => {};
+    const inFlight = new Promise<void>((r) => (sent = r));
+    const generating = new Promise<void>((r) => (release = r));
+    // The balance runs out during the run (production, 2026-10-29): the first answer arrives, the second
+    // is still being generated when the third request is rejected.
+    globalThis.fetch = (async () => {
+      const call = ++calls;
+      if (call === 1) return answer();
+      if (call === 2) {
+        sent();
+        await generating;
+        return answer();
+      }
+      return new Response('{"error":{"message":"You exceeded your current quota, add credits at https://console.perplexity.ai/project/billing.","type":"insufficient_quota","code":401}}\n', { status: 401 });
+    }) as typeof fetch;
+    try {
+      await executeMeasurement(ids[0]!);
+      const second = executeMeasurement(ids[1]!);
+      await inFlight;
+      await executeMeasurement(ids[2]!);
+      // The second answer was skipped with the rest while its request was out; it then arrives.
+      expect((await db.select().from(s.runs).where(eq(s.runs.id, run!.id)))[0]).toMatchObject({ status: "PARTIAL", completedCount: 1, failedCount: 3 });
+      release();
+      await second;
+      await executeMeasurement(ids[3]!);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;
+      else process.env.PERPLEXITY_API_KEY = saved;
+    }
+    expect(calls).toBe(3);
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.status]))).toEqual({ "quota-0": "SUCCEEDED", "quota-1": "SUCCEEDED", "quota-2": "FAILED", "quota-3": "FAILED" });
+    expect(rows.filter((r) => JSON.stringify(r.errors).includes("Skipped: perplexity-api rejected 1 request in this run")).length).toBe(2);
+    // An answer that arrives after being skipped is counted as completed only: completed + failed = planned.
+    const [finished] = await db.select().from(s.runs).where(eq(s.runs.id, run!.id));
+    expect(finished).toMatchObject({ status: "PARTIAL", plannedCount: 4, completedCount: 2, failedCount: 2 });
+  });
+
+  it("treats a retryable-looking out-of-credit answer (OpenAI 429 insufficient_quota) as final", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { executeMeasurement } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "openai-api")).limit(1);
+    const [provider] = await db.select().from(s.providers).where(eq(s.providers.id, "openai-api"));
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "openai-api"));
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 3 }).returning();
+    const ids = Array.from({ length: 3 }, (_, i) => `openai-quota-${i}`);
+    await db.insert(s.measurements).values(
+      ids.map((id, i) => ({
+        id,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "openai-api",
+        model: config!.model,
+        sampleIndex: 400 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    const saved = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "test";
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    let sent = () => {};
+    let release = () => {};
+    const inFlight = new Promise<void>((r) => (sent = r));
+    const generating = new Promise<void>((r) => (release = r));
+    globalThis.fetch = (async () => {
+      if (++calls > 1) return new Response('{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}', { status: 429 });
+      sent();
+      await generating;
+      return new Response(JSON.stringify({ status: "completed", model: config!.model, output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
+    }) as typeof fetch;
+    const theRun = async () => (await db.select().from(s.runs).where(eq(s.runs.id, run!.id)))[0]!;
+    try {
+      const first = executeMeasurement(ids[0]!);
+      await inFlight;
+      // Not thrown back to the job queue for a retry, not rescheduled as a rate limit: failed at the first request.
+      await executeMeasurement(ids[1]!);
+      expect(await theRun()).toMatchObject({ status: "FAILED", completedCount: 0, failedCount: 3 });
+      release();
+      await first;
+      await executeMeasurement(ids[2]!);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (saved === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = saved;
+      await db.update(s.providers).set({ enabled: provider!.enabled }).where(eq(s.providers.id, "openai-api"));
+    }
+    expect(calls).toBe(2);
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(Object.fromEntries(rows.map((r) => [r.id, [r.status, r.attempts]]))).toEqual({
+      "openai-quota-0": ["SUCCEEDED", 1],
+      "openai-quota-1": ["FAILED", 1],
+      "openai-quota-2": ["FAILED", 0],
+    });
+    // The run was closed as FAILED while the first answer was out; with that answer it is PARTIAL.
+    expect(await theRun()).toMatchObject({ status: "PARTIAL", completedCount: 1, failedCount: 2 });
+  });
+
+  it("keeps the accepted tasks of a partly rejected async batch in flight", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { submitAsync } = await import("@/services/measure");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
+    const [provider] = await db.select().from(s.providers).where(eq(s.providers.id, "chatgpt-ui"));
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "chatgpt-ui"));
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 10 }).returning();
+    await db.insert(s.measurements).values(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: `batch-mixed-${i}`,
+        runId: run!.id,
+        domainId: demo!.id,
+        promptVersionId: version!.id,
+        configurationId: config!.id,
+        providerId: "chatgpt-ui",
+        model: config!.model,
+        sampleIndex: 500 + i,
+        configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      })),
+    );
+    process.env.DATAFORSEO_LOGIN = "l";
+    process.env.DATAFORSEO_PASSWORD = "p";
+    const realFetch = globalThis.fetch;
+    // The first three tasks are rejected alike (enough to stop the provider), the other seven are accepted.
+    globalThis.fetch = (async (_url: string, init: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          status_code: 20000,
+          status_message: "Ok.",
+          tasks: (JSON.parse(String(init.body)) as Array<{ tag: string }>).map((t, i) =>
+            i < 3
+              ? { id: `r${i}`, status_code: 40501, status_message: "Invalid Field: 'keyword'.", data: { tag: t.tag }, result: null }
+              : { id: `t${i}`, status_code: 20100, status_message: "Task Created.", data: { tag: t.tag }, result: null },
+          ),
+        }),
+      )) as typeof fetch;
+    try {
+      await submitAsync(run!.id, config!.id);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.DATAFORSEO_LOGIN;
+      delete process.env.DATAFORSEO_PASSWORD;
+      await db.update(s.providers).set({ enabled: provider!.enabled }).where(eq(s.providers.id, "chatgpt-ui"));
+    }
+    const rows = await db.select().from(s.measurements).where(eq(s.measurements.runId, run!.id));
+    expect(rows.map((r) => r.status).sort()).toEqual([...Array(3).fill("FAILED"), ...Array(7).fill("SUBMITTED")]);
+    const [after] = await db.select().from(s.runs).where(eq(s.runs.id, run!.id));
+    expect(after).toMatchObject({ status: "RUNNING", completedCount: 0, failedCount: 3 });
+    // Close what this test left open: later tests start runs and poll the provider.
+    await db.update(s.measurements).set({ status: "CANCELLED", finishedAt: new Date() }).where(and(eq(s.measurements.runId, run!.id), eq(s.measurements.status, "SUBMITTED")));
+    await db.update(s.runs).set({ status: "CANCELLED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+  });
+
   it("puts a rate-limited answer back in the queue without spending an attempt, until it is too old", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
@@ -591,13 +841,6 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(JSON.stringify(m!.errors)).toContain("HTTP 429");
       expect(await cellStates()).toBe(before);
 
-      // An exhausted balance is not "not now": it spends the attempt like any retryable failure.
-      errorType = "insufficient_quota";
-      await expect(executeMeasurement("limited-quota")).rejects.toBeInstanceOf(ProviderError);
-      const [quota] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-quota"));
-      expect(quota!.attempts).toBe(1);
-      errorType = "request_rate_limit_exceeded";
-
       // Past the patience bound a 429 is an ordinary retryable failure again.
       await expect(executeMeasurement("limited-old")).rejects.toBeInstanceOf(ProviderError);
       const [old] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-old"));
@@ -609,6 +852,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       [m] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-fresh"));
       expect(m).toMatchObject({ status: "SUCCEEDED", attempts: 1 });
       expect(m!.errors).toHaveLength(2);
+
+      // An exhausted balance is not "not now" and does not clear by retrying: failed at once, no job retry.
+      // Last here, because it stops the provider for the rest of the run.
+      limited = true;
+      errorType = "insufficient_quota";
+      await executeMeasurement("limited-quota");
+      const [quota] = await db.select().from(s.measurements).where(eq(s.measurements.id, "limited-quota"));
+      expect(quota).toMatchObject({ status: "FAILED", attempts: 1 });
     } finally {
       globalThis.fetch = realFetch;
       if (saved === undefined) delete process.env.PERPLEXITY_API_KEY;

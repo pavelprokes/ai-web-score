@@ -6,7 +6,7 @@ import { buildPerplexityBody, parsePerplexityResponse, perplexityApi } from "./p
 import { parseGeminiResponse } from "./gemini";
 import { listProviders } from "./index";
 import { computeCost, selectPrice, type PriceEntry } from "../../pricing/cost";
-import { httpJson, ProviderError } from "../provider";
+import { classifyProviderError, httpJson, ProviderError } from "../provider";
 
 process.env.PERPLEXITY_MIN_INTERVAL_MS = "0"; // no pacing between the stubbed Perplexity calls below
 const req = { measurementId: "m1", promptText: "Kde v Brně koupit kolo pro dítě?", language: "cs", country: "cz", location: "Brno" };
@@ -231,6 +231,36 @@ describe("provider response parsers", () => {
     });
     expect(a.search.billableUnits).toBe(2);
     expect(a.citations[0]!.title).toBe("kolabrno.cz");
+  });
+});
+
+describe("classifyProviderError", () => {
+  it("classifies the messages stored in production", () => {
+    const cases: Array<[string, string]> = [
+      ['HTTP 429: {"error":{"message":"Request rate limit exceeded, please try again later.","type":"request_rate_limit_exceeded","code":429}}', "RATE_LIMIT"],
+      // Out of credit, whatever the status says.
+      ['HTTP 401: {"error":{"message":"You exceeded your current quota, add credits at https://console.perplexity.ai/project/billing.","type":"insufficient_quota","code":401}}\n', "QUOTA"],
+      ['HTTP 402: {"error":{"message":"Your API Project has insufficient API credits. Add API credits at https://www.perplexity.ai/account/api/billing","type":"payment_required","code":402}}\n', "QUOTA"],
+      ['HTTP 429: {"error":{"message":"You exceeded your current quota","type":"insufficient_quota"}}', "QUOTA"],
+      ['400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}', "QUOTA"],
+      ['HTTP 400: {"error":{"message":"validation failed: language preference must be a valid ISO 639-1 language code","type":"invalid_request","code":400}}\n', "BAD_REQUEST"],
+      ["40501 Invalid Field: 'location_name'.", "BAD_REQUEST"],
+      ["40102 No Search Results.", "OTHER"],
+      ['HTTP 401: {"error":{"message":"Invalid API key","type":"invalid_api_key","code":401}}', "AUTH"],
+      ["Missing environment variable PERPLEXITY_API_KEY", "AUTH"],
+      ["DataForSEO 50000 Internal Error.", "UPSTREAM"],
+      // DataForSEO collect stores String(e).
+      ['ProviderError: HTTP 401: {"status_code":40100,"status_message":"You are not authorized."}', "AUTH"],
+      ["ProviderError: DataForSEO 40200: Payment Required.", "QUOTA"],
+      ["HTTP 503: upstream connect error", "UPSTREAM"],
+      ["batch result errored: overloaded_error: Overloaded", "UPSTREAM"],
+      ["Async result timed out", "TIMEOUT"],
+      ["The operation was aborted due to timeout", "TIMEOUT"],
+      ["missing in batch results", "OTHER"],
+      // A skipped answer is in the class of the error that stopped the provider.
+      ['Skipped: perplexity-api rejected 3 requests in this run with the same error (HTTP 401: {"error":{"message":"You exceeded your current quota, add credits at https://console.perplexity.ai/project/billing.","type":"insufficient_quota","code":401}}', "QUOTA"],
+    ];
+    for (const [message, kind] of cases) expect([message, classifyProviderError(message)]).toEqual([message, kind]);
   });
 });
 

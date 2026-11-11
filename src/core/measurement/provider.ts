@@ -117,6 +117,28 @@ export class ProviderError extends Error {
   }
 }
 
+export type ProviderErrorClass = "RATE_LIMIT" | "QUOTA" | "AUTH" | "BAD_REQUEST" | "UPSTREAM" | "TIMEOUT" | "OTHER";
+
+/**
+ * What a stored provider error message means, from its HTTP status ("HTTP 401: {…}", see httpJson), the
+ * provider's error type in the body, or DataForSEO's five-digit task code ("40501 Invalid Field…"); a leading "ProviderError: " (String(e)) is ignored.
+ * Out of credit comes first: Perplexity answers it with 401 `insufficient_quota` or 402, OpenAI with 429
+ * `insufficient_quota`, Anthropic with 400 "credit balance is too low" — none of them is what the status says.
+ */
+export function classifyProviderError(message: string): ProviderErrorClass {
+  // "Skipped: <provider> rejected N requests … (<the error>)" belongs to the class of the error it quotes.
+  const text = message.replace(/^Skipped: [^(]*\(/, "");
+  const code = Number(/^(?:\w*Error: )?(?:HTTP |DataForSEO )?(\d{3,5})\b/.exec(text)?.[1] ?? NaN);
+  if (/insufficient_quota|payment_required|credit balance is too low/i.test(text) || [402, 40200, 40203, 40210].includes(code)) return "QUOTA";
+  if (/rate_limit/i.test(text) || [429, 40202, 40209].includes(code)) return "RATE_LIMIT";
+  if (/authentication_error|permission_error|^Missing environment variable/.test(text) || [401, 403, 40100, 40104, 40207].includes(code)) return "AUTH";
+  if (/timed? ?out|aborted/i.test(text) || [408, 504].includes(code)) return "TIMEOUT";
+  // 40102 is DataForSEO's "No Search Results": an empty answer, not a rejected request.
+  if (/invalid_request/.test(text) || (code >= 400 && code < 500) || (code >= 40400 && code < 50000)) return "BAD_REQUEST";
+  if (/overloaded|api_error|fetch failed|ECONNRESET/i.test(text) || (code >= 500 && code < 600) || code >= 50000) return "UPSTREAM";
+  return "OTHER";
+}
+
 /** fetch wrapper with timeout (capped by the current job's deadline) and normalised errors. */
 export async function httpJson<T = unknown>(
   url: string,

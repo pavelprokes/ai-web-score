@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { cellStates, domains, measurementSignals, measurements, promptVersions, providers, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
-import { ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
+import { classifyProviderError, ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
 import type { MeasurementRequest } from "@/core/measurement/types";
 import { computeCost, selectPrice } from "@/core/pricing/cost";
 import { type CellState, confidence, initialCellState, recommendedIntervalDays, recommendedSampleCount, updateCell } from "@/core/sampling/cell-state";
@@ -82,7 +82,7 @@ export async function executeMeasurement(measurementId: string) {
   } catch (e) {
     // HTTP 429 means "not now", not a failed answer: nothing was sent or billed. Give the attempt back
     // and let the job return later; the age bound ends it if the limit never clears. An exhausted
-    // balance (OpenAI answers it with 429 `insufficient_quota`) does not clear by waiting and fails as before.
+    // balance (OpenAI answers it with 429 `insufficient_quota`) does not clear by waiting and fails at once (recordFailure).
     const rateLimited = e instanceof ProviderError && e.status === 429 && !/insufficient_quota/.test(e.message);
     if (rateLimited && Date.now() - m.scheduledAt.getTime() < RATE_LIMIT_PATIENCE_MS) {
       // Kept in `errors` (last 20) so that rate limiting stays measurable on answers that succeed later.
@@ -91,8 +91,8 @@ export async function executeMeasurement(measurementId: string) {
       console.warn(`[measure] ${m.providerId} rate limited, rescheduled: ${e.message.slice(0, 200)}`);
       throw new RescheduleJob((e.retryAfterSeconds ?? 5) + Math.random() * 30);
     }
-    await recordFailure(m, e, m.attempts + 1);
-    if (e instanceof ProviderError && e.retryable && m.attempts + 1 < MAX_ATTEMPTS) throw e;
+    const final = await recordFailure(m, e, m.attempts + 1);
+    if (!final && e instanceof ProviderError && e.retryable && m.attempts + 1 < MAX_ATTEMPTS) throw e;
   }
 }
 
@@ -109,7 +109,9 @@ export async function submitAsync(runId: string, configurationId: string) {
   const reqs = await Promise.all(rows.map(loadRequest));
   const results = await adapter.submit!(reqs, rows[0]!.configuration as ProviderConfigurationSeed);
   const now = new Date();
-  for (const r of results) {
+  // Accepted tasks first: a rejection can stop the provider, which fails every answer still SCHEDULED —
+  // an accepted task not yet marked SUBMITTED would be counted as failed and later as completed.
+  for (const r of [...results].sort((a, b) => Number(!a.externalTaskId) - Number(!b.externalTaskId))) {
     const row = rows.find((x) => x.id === r.measurementId);
     if (!row) continue;
     if (r.externalTaskId) {
@@ -166,22 +168,29 @@ export async function collectAsync(providerId: string) {
   if (stillPending > 0 || pending.length === 200) throw new RescheduleJob(stillPending > 0 ? 300 : 5);
 }
 
-async function recordFailure(m: MeasurementRow, error: unknown, attempts: number) {
+/** Returns whether the answer is finished (failed for good, or no longer in flight). */
+async function recordFailure(m: MeasurementRow, error: unknown, attempts: number): Promise<boolean> {
   const db = getDb();
   const message = error instanceof Error ? error.message : String(error);
-  const retryable = error instanceof ProviderError ? error.retryable : true;
+  // Out of credit does not clear by retrying, whatever the status says (OpenAI: 429 `insufficient_quota`).
+  const retryable = (error instanceof ProviderError ? error.retryable : true) && classifyProviderError(message) !== "QUOTA";
   const final = !retryable || attempts >= MAX_ATTEMPTS;
   const errors = [...((m.errors as unknown[]) ?? []), { at: new Date().toISOString(), message: message.slice(0, 1000) }];
-  await db
+  // Only an answer still in flight can fail. A whole rejected batch reaches this once per answer after
+  // stopRejectedProvider has already failed (and counted) the rest of it; those were counted twice.
+  const changed = await db
     .update(measurements)
     .set({ errors, attempts, ...(final ? { status: "FAILED", finishedAt: new Date() } : {}) })
-    .where(sql`${measurements.id} = ${m.id} and ${measurements.status} <> 'CANCELLED'`);
+    .where(and(eq(measurements.id, m.id), inArray(measurements.status, ["SCHEDULED", "SUBMITTED"])))
+    .returning({ id: measurements.id });
+  if (changed.length === 0) return true;
   console.warn(`[measure] ${m.providerId} ${final ? "failed" : `attempt ${attempts} failed`}: ${message.slice(0, 300)}`);
   if (final) {
     await db.update(runs).set({ failedCount: sql`${runs.failedCount} + 1` }).where(eq(runs.id, m.runId));
     if (!retryable) await stopRejectedProvider(m, message);
     await maybeFinishRun(m.runId);
   }
+  return final;
 }
 
 /** Identical rejections (4xx, bad configuration) after which a provider's remaining answers in a run are skipped. */
@@ -191,6 +200,8 @@ export const REJECTIONS_TO_STOP = 3;
  * Runtime check: a provider that rejects every request the same way (bad request, auth, quota) would
  * otherwise fail each remaining prompt one by one. After REJECTIONS_TO_STOP identical rejections and no
  * success in the run, its still-scheduled measurements are marked failed with an explanation.
+ * An exhausted balance or a rejected key stops it at the first rejection, also after earlier answers
+ * (credit runs out mid-run): the next request cannot go better. The next run probes with one request.
  */
 async function stopRejectedProvider(m: MeasurementRow, message: string) {
   const db = getDb();
@@ -200,8 +211,10 @@ async function stopRejectedProvider(m: MeasurementRow, message: string) {
            count(*) filter (where status = 'SUCCEEDED')::int as ok
     from measurements where run_id = ${m.runId} and provider_id = ${m.providerId}`);
   const same = Number(row?.same ?? 0);
-  if (same < REJECTIONS_TO_STOP || Number(row?.ok ?? 0) > 0) return;
-  const note = `Skipped: ${m.providerId} rejected ${same} requests in this run with the same error (${message.slice(0, 300)})`;
+  const kind = classifyProviderError(message);
+  const hopeless = kind === "QUOTA" || kind === "AUTH";
+  if (!hopeless && (same < REJECTIONS_TO_STOP || Number(row?.ok ?? 0) > 0)) return;
+  const note = `Skipped: ${m.providerId} rejected ${same} request${same === 1 ? "" : "s"} in this run with the same error (${message.slice(0, 300)})`;
   const skipped = await db
     .update(measurements)
     .set({
@@ -253,23 +266,29 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
     }
   }
 
-  await db
-    .update(measurements)
-    .set({
-      status: "SUCCEEDED",
-      finishedAt,
-      durationMs: finishedAt.getTime() - startedAt.getTime(),
-      rawResponse: result.raw as object,
-      answerText: result.answer.answerText,
-      citations: result.answer.citations,
-      sources: result.answer.sources,
-      searchQueries: result.answer.search.queries,
-      tokenUsage: result.answer.usage,
-      searchUsage: { ...result.answer.search, searchWasUsed: result.answer.searchWasUsed, servedModel: result.answer.servedModel },
-      ...cost,
-      priceEntryId: price?.id ?? null,
-    })
-    .where(eq(measurements.id, id));
+  // An answer whose request was out when the provider was stopped has been skipped (FAILED, counted) in
+  // the meantime, possibly since the read above: lock the row to learn it, and give that failure back below.
+  const wasFailed = await db.transaction(async (tx) => {
+    const [prev] = await tx.execute(sql`select status from measurements where id = ${id} for update`);
+    await tx
+      .update(measurements)
+      .set({
+        status: "SUCCEEDED",
+        finishedAt,
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        rawResponse: result.raw as object,
+        answerText: result.answer.answerText,
+        citations: result.answer.citations,
+        sources: result.answer.sources,
+        searchQueries: result.answer.search.queries,
+        tokenUsage: result.answer.usage,
+        searchUsage: { ...result.answer.search, searchWasUsed: result.answer.searchWasUsed, servedModel: result.answer.servedModel },
+        ...cost,
+        priceEntryId: price?.id ?? null,
+      })
+      .where(eq(measurements.id, id));
+    return prev?.status === "FAILED";
+  });
 
   await db
     .insert(measurementSignals)
@@ -287,7 +306,14 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
 
   await updateCellState(m.domainId, m.promptVersionId, m.configurationId, presence, finishedAt);
 
-  await db.update(runs).set({ completedCount: sql`${runs.completedCount} + 1` }).where(eq(runs.id, m.runId));
+  await db
+    .update(runs)
+    .set({
+      completedCount: sql`${runs.completedCount} + 1`,
+      // The skip may have closed the run as FAILED (nothing completed); with this answer it is PARTIAL.
+      ...(wasFailed ? { failedCount: sql`${runs.failedCount} - 1`, status: sql`case when ${runs.status} = 'FAILED' then 'PARTIAL' else ${runs.status} end` } : {}),
+    })
+    .where(eq(runs.id, m.runId));
   await maybeFinishRun(m.runId);
   await db.update(domains).set({ lastMeasuredAt: finishedAt }).where(eq(domains.id, m.domainId));
 
