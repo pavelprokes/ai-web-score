@@ -1316,6 +1316,39 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect((await competitorMatchCounts(demo!.id)).named.get("Nova Akademie")).toBe(1);
   });
 
+  it("narrows the answer viewer to one prompt and reports the searches behind scored answers", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { competitorMatchCounts } = await import("@/services/competitors");
+    const { listAnswers, searchQueriesFor } = await import("@/services/overview");
+    const { sourcesFor } = await import("@/services/scores");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    // An answer the score reads (unbranded question, active topic).
+    const [answer] = (await listAnswers(demo!.id, {})).answers.filter((a) => a.signals && !a.branded);
+    const [version] = await db
+      .select({ promptId: s.promptVersions.promptId })
+      .from(s.measurements)
+      .innerJoin(s.promptVersions, eq(s.promptVersions.id, s.measurements.promptVersionId))
+      .where(eq(s.measurements.id, answer!.id));
+
+    const one = await listAnswers(demo!.id, { prompt: version!.promptId });
+    expect(one.answers.map((a) => a.id)).toContain(answer!.id);
+    expect(new Set(one.answers.map((a) => a.prompt))).toEqual(new Set([answer!.prompt]));
+    expect(one.prompt?.text).toBe(answer!.prompt);
+    expect(await listAnswers(demo!.id, { prompt: "P-unknown" })).toMatchObject({ answers: [], prompt: null });
+
+    await db.update(s.measurements).set({ searchQueries: [answer!.prompt, "kurzy programovani recenze"] }).where(eq(s.measurements.id, answer!.id));
+    const topic = (await searchQueriesFor(demo!.id)).find((t) => t.clusterKey === answer!.clusterKey)!;
+    expect(topic.queries).toContainEqual({ query: "kurzy programovani recenze", answers: 1, providers: [answer!.providerId] });
+    expect(topic.queries.map((q) => q.query)).not.toContain(answer!.prompt);
+
+    const counts = await competitorMatchCounts(demo!.id);
+    expect(counts.brand).toBeGreaterThanOrEqual(0);
+    expect(counts.brand).toBeLessThanOrEqual(counts.answers);
+    expect(await sourcesFor(demo!.id)).toMatchObject({ sources: expect.any(Array), ownPages: expect.any(Array) });
+  });
+
   it("reads only cells the planner can still measure in the schedule, confidence and prompt columns", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

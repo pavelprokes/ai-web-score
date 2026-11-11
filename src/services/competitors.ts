@@ -12,8 +12,8 @@ import { BACKFILL_WEEKS, DEFAULT_WINDOW_DAYS, recomputeHistory } from "./scores"
 import { currentSignals } from "./signals";
 
 // Answers the score reads: unbranded questions of active topics, measured in the scoring window.
-const activeTopic = and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true));
-const inScoringWindow = (domainId: string) =>
+export const activeTopic = and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true));
+export const inScoringWindow = (domainId: string) =>
   and(
     eq(measurements.domainId, domainId),
     eq(measurements.status, "SUCCEEDED"),
@@ -23,7 +23,8 @@ const inScoringWindow = (domainId: string) =>
   );
 
 /**
- * How many answers of the scoring window name each tracked competitor (`named`, by competitor name), out of `answers`.
+ * How many answers of the scoring window name each tracked competitor (`named`, by competitor name) and the brand
+ * itself (`brand`), out of `answers`.
  * Names are the ones tracked when the answer was last extracted; a profile change re-extracts, and until that
  * job is through the counts mix two profiles (`pending`: do not show them).
  */
@@ -36,7 +37,11 @@ export async function competitorMatchCounts(domainId: string) {
     .where(and(eq(jobs.type, "signals.reextract"), inArray(jobs.status, ["QUEUED", "RUNNING"]), sql`${jobs.payload}->>'domainId' = ${domainId}`))
     .limit(1);
   const rows = await db
-    .select({ names, answers: sql<number>`count(*)::int` })
+    .select({
+      names,
+      answers: sql<number>`count(*)::int`,
+      brand: sql<number>`(count(*) filter (where ${measurementSignals.signals}->>'brandMentioned' = 'true'))::int`,
+    })
     .from(measurements)
     .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
@@ -46,7 +51,8 @@ export async function competitorMatchCounts(domainId: string) {
     .groupBy(names);
   const named = new Map<string, number>();
   for (const r of rows) for (const n of new Set(r.names)) named.set(n, (named.get(n) ?? 0) + r.answers);
-  return { answers: rows.reduce((sum, r) => sum + r.answers, 0), named, pending: (await reextracting).length > 0 };
+  const total = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((sum, r) => sum + pick(r), 0);
+  return { answers: total((r) => r.answers), brand: total((r) => r.brand), named, pending: (await reextracting).length > 0 };
 }
 
 /** Brands the assistants recommend for unbranded questions (scoring window, active topics) that are not tracked yet. */

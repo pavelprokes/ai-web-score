@@ -32,7 +32,7 @@ export interface AgentBriefInput {
   findings: Finding[];
   /** Days of answers the findings were computed from (all answers, branded included). */
   findingsWindowDays: number;
-  sources: SourceRow[];
+  sources: Omit<SourceRow, "pages">[];
   examples: BriefExample[];
 }
 

@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { domainDetail, listPrompts, scoreHistory } from "@/services/overview";
+import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
-import type { SourceRow } from "@/core/scoring/sources";
+import { competitorStandings, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
@@ -54,7 +54,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions, matches] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, ownPages }, suggestions, matches, searches] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -64,6 +64,7 @@ export default async function DomainPage({
     sourcesFor(id),
     competitorSuggestions(id),
     competitorMatchCounts(id),
+    searchQueriesFor(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -148,7 +149,9 @@ export default async function DomainPage({
         <Costs detail={detail} open={open("costs-heading")} />
       </div>
 
-      <Sources rows={sources} />
+      <Standings detail={detail} matches={matches} />
+      <Sources rows={sources} ownPages={ownPages} />
+      <Searches topics={searches} detail={detail} />
       <ClusterScores detail={detail} />
       <Schedule detail={detail} now={now} open={open("schedule-heading")} />
       <Runs detail={detail} now={now} open={open("runs-heading")} />
@@ -567,12 +570,166 @@ function ScoreTiles({ detail }: { detail: Detail }) {
   );
 }
 
-function Sources({ rows }: { rows: SourceRow[] }) {
+type Matches = Awaited<ReturnType<typeof competitorMatchCounts>>;
+
+/** The brand among its tracked competitors, by answers naming each (the list behind "Share among tracked rivals"). */
+function Standings({ detail, matches }: { detail: Detail; matches: Matches }) {
+  const p = detail.profile;
+  if (!p) return null;
+  const rows = competitorStandings(matches, p.brandName, p.competitors.map((c) => c.name));
+  // While a re-extraction runs, stored answers mix the names of two profile versions.
+  const ready = matches.answers > 0 && !matches.pending;
+  const place = 1 + rows.filter((r) => !r.own && r.answers > rows.find((x) => x.own)!.answers).length;
   return (
-    <Section title="Where AI looks" id="sources-heading" fold={{ summary: `${num(rows.length)} ${rows.length === 1 ? "site" : "sites"} cited` }}>
+    <Section
+      title="Who AI names instead"
+      id="standings-heading"
+      fold={{ summary: matches.pending ? "being re-checked" : !ready ? "no answers yet" : rows[0]!.own ? `you are named most, of ${rows.length}` : `you rank ${place} of ${rows.length}, ${rows[0]!.name} is named most` }}
+    >
+      <p className="note">
+        Answers naming you and each tracked competitor, of {num(matches.answers)} answers to the questions that do not name you, last 28 days.
+        Tracked competitors only: a rival missing from the list in the domain profile is not counted here.
+      </p>
+      {!ready ? (
+        <p className="muted">{matches.pending ? "Stored answers are being re-checked against the competitor list; the counts return when that is done." : "No answers yet."}</p>
+      ) : (
+        <TableScroll label="Who AI names instead (scrollable)">
+          <table className="hig-table">
+            <thead>
+              <tr>
+                <th scope="col">Brand</th>
+                <th scope="col" className="num">
+                  Named in
+                </th>
+                <th scope="col" className="num">
+                  Answers
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.own}:${r.name}`}>
+                  <th scope="row">
+                    {r.name} {r.own && <Badge tone="info">You</Badge>}
+                  </th>
+                  <td className="num">{pct(r.share)}</td>
+                  <td className="num">{num(r.answers)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
+    </Section>
+  );
+}
+
+/** Citation URLs come from the assistants: shown as text, linked only as the http(s) address `citedPages` kept. */
+function PageLink({ page, strip = "" }: { page: PageRow; strip?: string }) {
+  let text = page.page.slice(strip.length);
+  if (text === "/") text = "home page";
+  try {
+    text = decodeURI(text);
+  } catch {}
+  return (
+    <a href={page.url} rel="noreferrer" target="_blank">
+      {text}
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
+function Searches({ topics, detail }: { topics: SearchQueryTopic[]; detail: Detail }) {
+  const name = (key: string) => detail.clusters.find((c) => c.key === key)?.name ?? key;
+  const answers = topics.reduce((sum, t) => sum + t.answers, 0);
+  return (
+    <Section
+      title="What assistants search for"
+      id="searches-heading"
+      fold={{ summary: topics.length ? `searches behind ${num(answers)} answers, ${topics.length} ${topics.length === 1 ? "topic" : "topics"}` : "no searches recorded" }}
+    >
+      <p className="note">
+        The web searches assistants ran to answer the questions that do not name you, last 28 days: the most frequent per topic. These are the
+        phrases your pages and listings have to be found for. Searches that only repeat the question are left out, and assistants that do not
+        report their searches are missing.
+      </p>
+      {topics.length === 0 ? (
+        <p className="muted">No searches recorded yet.</p>
+      ) : (
+        <TableScroll label="What assistants search for (scrollable)">
+          <table className="hig-table">
+            <thead>
+              <tr>
+                <th scope="col">Search</th>
+                <th scope="col">Topic</th>
+                <th scope="col" className="num">
+                  Answers
+                </th>
+                <th scope="col">Assistants</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topics.flatMap((t) =>
+                t.queries.map((q) => (
+                  <tr key={`${t.clusterKey}:${q.query}`}>
+                    <th scope="row" className="prompt-cell">
+                      {q.query}
+                    </th>
+                    <td>{name(t.clusterKey)}</td>
+                    <td className="num">{num(q.answers)}</td>
+                    <td>{q.providers.map(providerLabel).join(", ")}</td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
+    </Section>
+  );
+}
+
+function Sources({ rows, ownPages }: { rows: SourceRow[]; ownPages: PageRow[] }) {
+  return (
+    <Section
+      title="Where AI looks"
+      id="sources-heading"
+      fold={{ summary: `${num(rows.length)} ${rows.length === 1 ? "site" : "sites"} cited, ${num(ownPages.length)} of your pages` }}
+    >
+      <h3 className="subhead" id="own-pages-heading">Your pages AI cites</h3>
+      {ownPages.length === 0 ? (
+        <p className="muted">None of your pages is cited in answers to the questions that do not name you, last 28 days.</p>
+      ) : (
+        <TableScroll label="Your pages AI cites (scrollable)">
+          <table className="hig-table" aria-labelledby="own-pages-heading">
+            <thead>
+              <tr>
+                <th scope="col">Page</th>
+                <th scope="col" className="num">
+                  Answers
+                </th>
+                <th scope="col">Assistants</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ownPages.map((p) => (
+                <tr key={p.page}>
+                  <th scope="row" className="prompt-cell">
+                    <PageLink page={p} />
+                  </th>
+                  <td className="num">{num(p.answers)}</td>
+                  <td>{p.providers.map(providerLabel).join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
+      <h3 className="subhead">Other sites</h3>
       <p className="note">
         Sites the assistants cite when answering the questions that do not name you, last 28 days. A directory or portal high on this list where
-        you are rarely named is a place to get listed; a brand site is a competitor. Your own site is the Cited metric.
+        you are rarely named is a place to get listed; a brand site is a competitor. Under each site: its most cited pages and the answers
+        citing each.
       </p>
       {rows.length === 0 ? (
         <p className="muted">No cited sites yet.</p>
@@ -602,6 +759,11 @@ function Sources({ rows }: { rows: SourceRow[] }) {
                       {r.domain}
                       <span className="sr-only"> (opens in a new tab)</span>
                     </a>
+                    {r.pages.map((p) => (
+                      <span className="cell-sub cell-sub--link" key={p.page}>
+                        <PageLink page={p} strip={r.domain} /> · {num(p.answers)}
+                      </span>
+                    ))}
                   </th>
                   <td className="num">{pct(r.share)}</td>
                   <td className="num">{num(r.answers)}</td>
@@ -1170,7 +1332,8 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
         <TableScroll label="Active prompts (scrollable)">
           <table className="hig-table">
             <caption className="sr-only">
-              Active prompts with their topic, intent, role, how often the brand appears in answers and how certain that estimate is.
+              Active prompts with their topic, intent, role, how often the brand appears in answers and how certain that estimate is. Each
+              prompt links to its answers.
             </caption>
             <thead>
               <tr>
@@ -1190,7 +1353,9 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
               {prompts.map((p) => (
                 <tr key={p.id}>
                   <th scope="row" className="prompt-cell" lang={p.language}>
-                    {p.text}
+                    <Link prefetch={false} href={`/domains/${detail.domain.id}/answers?prompt=${encodeURIComponent(p.id)}`}>
+                      {p.text}
+                    </Link>
                     <span className="cell-sub">
                       {p.country}
                       {p.location ? ` · ${p.location}` : ""} · v{p.version}

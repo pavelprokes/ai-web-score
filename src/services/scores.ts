@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { domains, measurementSignals, measurements, prompts, promptVersions, providers, scoreSnapshots, topicClusters } from "@/db/schema";
 import { throwIfJobCancelled } from "@/jobs/queue";
-import { topSources } from "@/core/scoring/sources";
+import { ownPages, topSources } from "@/core/scoring/sources";
 import { latestProfile } from "./discovery";
 import { computeMetrics, getScoringVersion, type ScoringObservation } from "@/core/scoring/scoring";
 import type { RawSignals } from "@/core/signals/extract";
@@ -196,12 +196,13 @@ export async function latestScores(domainId: string, scoringVersion: string) {
     .where(and(eq(scoreSnapshots.domainId, domainId), eq(scoreSnapshots.scoringVersion, scoringVersion), eq(scoreSnapshots.windowEnd, latest.end)));
 }
 
-/** Sites AI cites for the domain's unbranded questions over the scoring window (see `topSources`). */
+/** Sites AI cites for the domain's unbranded questions over the scoring window, and its own cited pages (see `topSources`, `ownPages`). */
 export async function sourcesFor(domainId: string) {
   const [domain] = await getDb().select().from(domains).where(eq(domains.id, domainId));
-  if (!domain) return [];
+  if (!domain) return { sources: [], ownPages: [] };
   const profile = await latestProfile(domainId);
   const end = new Date();
   const obs = await loadObservations(domainId, new Date(end.getTime() - DEFAULT_WINDOW_DAYS * 86_400_000), end, domain.scoringVersion);
-  return topSources(obs, [domain.hostname, ...(profile?.profile.ownedDomains ?? [])]);
+  const own = [domain.hostname, ...(profile?.profile.ownedDomains ?? [])];
+  return { sources: topSources(obs, own), ownPages: ownPages(obs, own) };
 }

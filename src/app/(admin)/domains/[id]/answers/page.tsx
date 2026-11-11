@@ -19,6 +19,7 @@ type Params = {
   topic?: string;
   result?: string;
   question?: string;
+  prompt?: string;
   page?: string;
 };
 
@@ -28,11 +29,15 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
   await requireAdminPage();
   const { id } = await params;
   const q = await searchParams;
+  // A repeated parameter arrives as an array: not a prompt id.
+  const prompt = typeof q.prompt === "string" && q.prompt ? q.prompt : undefined;
   const filters: AnswerFilters = {
     provider: q.provider || undefined,
     topic: q.topic || undefined,
     result: pick(ANSWER_RESULTS, q.result),
-    question: pick(ANSWER_QUESTIONS, q.question),
+    // One prompt is one question type: the default "unbranded" would hide a branded prompt's answers.
+    question: pick(ANSWER_QUESTIONS, q.question) ?? (prompt ? "all" : undefined),
+    prompt,
     page: Number(q.page) || 1,
   };
   const [detail, data] = await Promise.all([domainDetail(id), listAnswers(id, filters)]);
@@ -61,7 +66,14 @@ export default async function AnswersPage({ params, searchParams }: { params: Pr
       </div>
 
       <Section title="Filter" id="filter-heading">
+        {prompt && (
+          <p>
+            Answers to one prompt. <Link prefetch={false} href={`/domains/${d.id}/answers`}>Show all prompts</Link>
+            {data.prompt && <q className="prompt-text" lang={data.prompt.language}>{data.prompt.text}</q>}
+          </p>
+        )}
         <form method="get" className="filters">
+          {prompt && <input type="hidden" name="prompt" value={prompt} />}
           <label>
             Assistant
             <select name="provider" defaultValue={filters.provider ?? ""}>

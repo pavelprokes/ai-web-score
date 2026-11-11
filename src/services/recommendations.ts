@@ -301,7 +301,7 @@ export async function setRecommendationStatus(id: string, status: "OPEN" | "DONE
 /** Markdown brief for a coding agent working in the website's repository (see `renderAgentBrief`). */
 export async function agentBrief(domainId: string): Promise<{ hostname: string; markdown: string }> {
   const { domain, profile, findings, clusters } = await collectFindings(domainId);
-  const [snapshots, sources, rows] = await Promise.all([latestScores(domainId, domain.scoringVersion), sourcesFor(domainId), loadExampleRows(domainId)]);
+  const [snapshots, { sources }, rows] = await Promise.all([latestScores(domainId, domain.scoringVersion), sourcesFor(domainId), loadExampleRows(domainId)]);
   const scope = (s: string) => snapshots.filter((x) => x.scope === s).map((x) => ({ providerId: x.scopeKey, metrics: x.metrics as VisibilityMetrics }));
   const markdown = renderAgentBrief({
     hostname: domain.hostname,

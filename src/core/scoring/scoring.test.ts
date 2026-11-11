@@ -233,3 +233,74 @@ describe("topSources", () => {
     expect(rows[1]!.answers).toBe(1);
   });
 });
+
+describe("signal reports", () => {
+  const ob = (citedUrls: string[], providerId = "p1", branded = false) => ({
+    signals: sig({ citedUrls, citedDomains: citedUrls.flatMap((u) => (u.startsWith("http") ? [new URL(u).hostname.replace(/^www\./, "")] : [])) }),
+    providerId,
+    branded,
+  });
+  const obs = [
+    ob(["https://www.me.cz/faq?utm_source=chatgpt.com", "https://me.cz/faq#prices", "https://dir.cz/list/a?x=1", "javascript:alert(1)"]),
+    ob(["http://me.cz/faq/", "https://me.cz/", "https://dir.cz/list/a", "https://dir.cz/list/b"], "p2"),
+    ob(["https://me.cz/faq", "https://dir.cz/list/c"], "p1", true), // branded question: not counted
+    ob(["https://blog.me.cz/post", "https://dir.cz/list/b", "https://dir.cz/list/c", "https://dir.cz/list/d", "https://dir.cz/"]),
+  ];
+
+  it("lists own pages cited in unbranded answers, once per answer, without query and fragment", async () => {
+    const { ownPages } = await import("./sources");
+    expect(ownPages(obs, ["me.cz"])).toEqual([
+      { page: "me.cz/faq", url: "https://www.me.cz/faq", answers: 2, providers: ["p1", "p2"] },
+      { page: "blog.me.cz/post", url: "https://blog.me.cz/post", answers: 1, providers: ["p1"] },
+      { page: "me.cz/", url: "https://me.cz/", answers: 1, providers: ["p2"] },
+    ]);
+  });
+
+  it("gives each cited site its three most cited pages, http(s) only", async () => {
+    const { topSources } = await import("./sources");
+    const [dir, ...rest] = topSources(obs, ["me.cz"]);
+    expect(rest).toEqual([]);
+    expect(dir!.pages.map((p) => [p.page, p.answers])).toEqual([
+      ["dir.cz/list/a", 2],
+      ["dir.cz/list/b", 2],
+      ["dir.cz/", 1],
+    ]);
+    expect(dir!.pages.every((p) => p.url.startsWith("https://"))).toBe(true);
+  });
+
+  it("ranks the brand among its tracked competitors by answers naming each", async () => {
+    const { competitorStandings } = await import("./sources");
+    const named = new Map([
+      ["Rival", 100],
+      ["Gone", 7], // no longer tracked
+      ["Small", 30],
+    ]);
+    expect(competitorStandings({ answers: 200, brand: 30, named }, "Me", ["Small", "Rival", "Silent"])).toEqual([
+      { name: "Rival", own: false, answers: 100, share: 0.5 },
+      { name: "Me", own: true, answers: 30, share: 0.15 },
+      { name: "Small", own: false, answers: 30, share: 0.15 },
+      { name: "Silent", own: false, answers: 0, share: 0 },
+    ]);
+    expect(competitorStandings({ answers: 0, brand: 0, named: new Map() }, "Me", ["Rival"])[0]!.share).toBe(0);
+  });
+
+  it("groups search queries per topic, leaving out the prompt itself", async () => {
+    const { topSearchQueries } = await import("./sources");
+    const row = (queries: string[], providerId = "p1", clusterKey = "t1", prompt = "Who is the best wedding photographer?") => ({ queries, providerId, clusterKey, prompt });
+    const topics = topSearchQueries(
+      [
+        row(["who is the best  wedding photographer", "Wedding photographer reviews", "wedding photographer reviews"]),
+        row(["wedding photographer reviews", "prague wedding photos"], "p2"),
+        row(["Who is the best wedding photographer?"]), // only the prompt: no search of its own
+        row(["a", "b"], "p1", "t2", "x"),
+        row(["b"], "p1", "t2", "x"),
+        row(["b"], "p2", "t2", "x"),
+      ],
+      1,
+    );
+    expect(topics).toEqual([
+      { clusterKey: "t2", answers: 3, queries: [{ query: "b", answers: 3, providers: ["p1", "p2"] }] },
+      { clusterKey: "t1", answers: 2, queries: [{ query: "Wedding photographer reviews", answers: 2, providers: ["p1", "p2"] }] },
+    ]);
+  });
+});
