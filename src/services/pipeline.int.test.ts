@@ -412,6 +412,23 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const [portfolioRun] = await db.select().from(s.runs).where(eq(s.runs.kind, "PORTFOLIO")).orderBy(desc(s.runs.startedAt)).limit(1);
     expect(portfolioRun!.status).toBe("SUCCEEDED");
     expect(portfolioRun!.completedCount).toBeGreaterThan(0);
+    expect(portfolioRun!.estimatedCostUsd).toBeGreaterThan(0);
+
+    // Stopped after the LLM answered (while the prompts are stored): the run stays stopped and still shows what it cost.
+    const { fakeLlm } = await import("@/e2e/fake-world");
+    setLlmOverride(async (args) => {
+      await db.update(s.runs).set({ status: "CANCELLED", finishedAt: new Date() }).where(and(eq(s.runs.kind, "PORTFOLIO"), eq(s.runs.status, "RUNNING")));
+      return fakeLlm(args);
+    });
+    try {
+      await generatePortfolio(demo!.id, "REGENERATE");
+    } finally {
+      setLlmOverride(null);
+    }
+    const [stoppedRun] = await db.select().from(s.runs).where(eq(s.runs.kind, "PORTFOLIO")).orderBy(desc(s.runs.startedAt)).limit(1);
+    expect(stoppedRun!.id).not.toBe(portfolioRun!.id);
+    expect(stoppedRun!.status).toBe("CANCELLED");
+    expect(stoppedRun!.estimatedCostUsd).toBeGreaterThan(0);
   });
 
   it("writes recommendations from the diagnostics, grounded in real findings", async () => {

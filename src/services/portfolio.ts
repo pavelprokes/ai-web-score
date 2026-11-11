@@ -11,6 +11,7 @@ import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
 import { deadlinePassed } from "@/lib/deadline";
+import { llmCostOfRun } from "./costs";
 import { latestProfile } from "./discovery";
 import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
@@ -27,6 +28,8 @@ const MAX_PROMPTS_PER_CLUSTER = 12;
 const MAX_NEW_CANDIDATES = Number(process.env.MAX_CANDIDATE_PROMPTS ?? 600);
 
 export type GenerationMode = "INITIAL" | "REDISCOVERY" | "REGENERATE" | "EXPLORATION";
+
+const llmPurpose = (mode: GenerationMode) => `portfolio.${mode.toLowerCase()}`;
 
 function newPromptId() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -77,6 +80,9 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
         .where(and(eq(domains.id, domainId), inArray(domains.status, ["READY", "ERROR"])));
     }
     throw e;
+  } finally {
+    // Whatever closed the run — success, failure, or the cancel action while this was still working — it was paid for.
+    await db.update(runs).set({ estimatedCostUsd: llmCostOfRun(llmPurpose(mode)) }).where(eq(runs.id, run!.id));
   }
 }
 
@@ -125,7 +131,7 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
         schema: LlmPromptSet,
         system: PROMPT_SYSTEM,
         user: promptGenerationUser({ profile, clusters: chunk, promptsPerCluster: allocation, exploratory }),
-        purpose: `portfolio.${mode.toLowerCase()}`,
+        purpose: llmPurpose(mode),
         domainId,
         effort: "medium",
       }),
