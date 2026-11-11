@@ -11,7 +11,7 @@ import { kickJobs } from "@/lib/kick";
 import { measurementBlocker } from "@/services/planning";
 import { enqueue } from "@/jobs/queue";
 import { createDomain, InvalidDomainError, runMeasurementNow, setDomainPaused, startDiscovery } from "@/services/domains";
-import { decideProposals } from "@/services/portfolio";
+import { decideProposals, setAutoApprove } from "@/services/portfolio";
 import { recomputeHistory } from "@/services/scores";
 import { actionBlockedReason } from "@/services/action-guards";
 import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/services/registry";
@@ -65,6 +65,8 @@ export type DomainActionName =
   | "recalculate-scores"
   | "approve-proposals"
   | "reject-proposals"
+  | "auto-apply-on"
+  | "auto-apply-off"
   | "generate-recommendations"
   | "track-competitor"
   | "ignore-competitor";
@@ -80,6 +82,8 @@ const MESSAGES: Record<DomainActionName, string> = {
   "recalculate-scores": "Scores recalculated for the last 12 weeks.",
   "approve-proposals": "Approved.",
   "reject-proposals": "Rejected.",
+  "auto-apply-on": "Portfolio changes now apply automatically. Waiting proposals were approved.",
+  "auto-apply-off": "Portfolio changes wait for your approval again.",
   "generate-recommendations": "Writing recommendations (about a minute).",
   "track-competitor": "Competitor added. Stored answers are re-checked for it and the score history is rebuilt (a few minutes).",
   "ignore-competitor": "Hidden from the suggestions.",
@@ -133,8 +137,15 @@ export async function domainAction(formData: FormData) {
     case "reject-proposals": {
       const proposalId = formData.get("proposalId");
       await decideProposals(id, proposalId ? [String(proposalId)] : "ALL", action === "approve-proposals", actor);
+      // Approved prompts enter the selection now, not at the next cron tick.
+      if (action === "approve-proposals") kickJobs();
       break;
     }
+    case "auto-apply-on":
+    case "auto-apply-off":
+      await setAutoApprove(id, action === "auto-apply-on", actor);
+      kickJobs();
+      break;
     case "generate-recommendations": {
       const [profile] = await getDb().select({ id: domainProfiles.id }).from(domainProfiles).where(eq(domainProfiles.domainId, id)).limit(1);
       if (!profile) redirect(`${back}?error=${encodeURIComponent("Run the discovery first — recommendations need the domain profile.")}`);

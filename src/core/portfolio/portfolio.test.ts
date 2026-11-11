@@ -78,6 +78,23 @@ describe("portfolio sizing", () => {
     expect(b.minimumPromptCount).toBeLessThanOrEqual(b.recommendedPromptCount);
     expect(b.maximumPromptCount).toBeGreaterThan(b.recommendedPromptCount);
   });
+
+  it("returns whole prompt counts when the per-cluster cap binds for a fractional second market", () => {
+    const p = profile({
+      businessModels: ["ECOMMERCE"],
+      markets: [
+        { country: "CZ", language: "cs", locations: [], importance: 1 },
+        { country: "SK", language: "sk", locations: [], importance: 0.4 },
+      ],
+      size: { sitemapUrlCount: 80_000, crawledPageCount: 14, productCount: 50_000, serviceCount: 5, categoryCount: 400 },
+      topics: topics(13),
+    });
+    // 13 clusters × 8 per cluster × 1.4 markets = 145.6 before rounding.
+    const size = estimatePortfolioSize({ profile: p, importantClusterCount: 5, totalClusterCount: 13 });
+    expect(size.recommendedPromptCount).toBe(145);
+    expect(Number.isInteger(size.candidatePoolTarget)).toBe(true);
+    expect(Number.isInteger(size.maximumPromptCount)).toBe(true);
+  });
 });
 
 describe("cluster allocation & selection", () => {

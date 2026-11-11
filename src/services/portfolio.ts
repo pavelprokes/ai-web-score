@@ -192,6 +192,9 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
     await optimizePortfolio(domainId, { applyDirectly: true });
     await db.update(domains).set({ status: "ACTIVE", lastError: null, nextPlanAt: new Date() }).where(eq(domains.id, domainId));
     await enqueue("measurement.plan", { domainId, trigger: "SYSTEM" }, { dedupeKey: `plan:${domainId}` });
+  } else if (created > 0 && status === "CANDIDATE") {
+    // New candidates need no approval: select them now, not at the next daily optimisation.
+    await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
   }
   return { created };
 }
@@ -276,14 +279,15 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
   const apply = opts.applyDirectly || domain.autoApprovePortfolioChanges;
   const roleOf = new Map(result.active.map((a) => [a.promptId, a.role]));
 
+  // Either way this selection supersedes the rotations proposed by an earlier one.
+  await db
+    .delete(portfolioProposals)
+    .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
   if (apply) {
     await applySelection(domainId, result.activated, result.deactivated, roleOf);
   } else {
     // Role changes of already-active prompts are bookkeeping, not a change of the measured set.
     await setRoles(result.active.filter((a) => !result.activated.includes(a.promptId)));
-    await db
-      .delete(portfolioProposals)
-      .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
     const proposals: Array<typeof portfolioProposals.$inferInsert> = [
       ...result.activated.map((id) => ({
         domainId,
@@ -357,9 +361,21 @@ export async function decideProposals(domainId: string, ids: string[] | "ALL", a
   }
   // Approved new prompts are candidates only; let the selection rotate them in now rather than tomorrow.
   if (approve && list.some((p) => p.status === "PROPOSED" && p.kind === "ADD_PROMPT")) {
-    await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
+    // "Approve all" is the whole decision: the selection is applied instead of coming back as ACTIVATE
+    // proposals. Its own dedupe key, so a queued plain optimisation cannot swallow the apply.
+    if (ids === "ALL") await enqueue("portfolio.optimize", { domainId, apply: true }, { dedupeKey: `optimize:${domainId}:apply` });
+    else await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
   }
   return list.length;
+}
+
+/** Opt a domain in or out of applying portfolio changes without approval (off by default). */
+export async function setAutoApprove(domainId: string, on: boolean, decidedBy: string) {
+  await getDb().update(domains).set({ autoApprovePortfolioChanges: on }).where(eq(domains.id, domainId));
+  if (!on) return;
+  // Opting in decides what is waiting, then selects now rather than at the next daily optimisation.
+  await decideProposals(domainId, "ALL", true, decidedBy);
+  await enqueue("portfolio.optimize", { domainId, apply: true }, { dedupeKey: `optimize:${domainId}:apply` });
 }
 
 export async function promptCounts(domainId: string) {
