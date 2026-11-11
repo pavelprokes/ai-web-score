@@ -668,6 +668,14 @@ td .meter {
 .attention li + li {
   border-top: 1px solid var(--border);
 }
+.attention-more {
+  border-top: 1px solid var(--border);
+}
+.attention-more > summary {
+  cursor: pointer;
+  padding: 0.45rem 0;
+  color: var(--link);
+}
 /* Collapsible section (native <details>): the heading is the toggle and its state stays readable when closed. */
 .fold > summary {
   display: flex;
@@ -709,9 +717,6 @@ td .meter {
 h2[id],
 h3[id] {
   scroll-margin-top: 5.5rem;
-}
-.section-gap {
-  margin-top: 1.25rem;
 }
 .note {
   margin: -0.5rem 0 1.25rem;

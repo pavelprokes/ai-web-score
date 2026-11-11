@@ -6,10 +6,8 @@ import { pct, relativeTime, usd } from "./format";
 export interface AttentionItem {
   kind: "fix" | "down" | "up" | "budget" | "decide";
   text: string;
-  /** Heading id of the page section the item is about; that section is rendered open. */
+  /** Heading id of the page section the item is about. */
   section: string;
-  /** Heading id inside that section to jump to, when it is not the section's own. */
-  anchor?: string;
   /** Link text. */
   link: string;
 }
@@ -28,10 +26,8 @@ export interface AttentionInput {
   proposals: number;
   autoApply: boolean;
   recommendationsOutOfDate: boolean;
-  /** Brands named by AI that are not tracked. */
+  /** Brands named by AI that are not tracked (the service caps the list, so its length is not a count). */
   suggestions: string[];
-  /** Tracked competitors no answer of the scoring window names. */
-  unnamedCompetitors: string[];
   providerLabel: (id: string) => string;
 }
 
@@ -79,22 +75,33 @@ function scoreChanges(input: AttentionInput): AttentionItem[] {
   if (!trend) return [];
   for (const days of [7, 28]) {
     const pair = reference(trend.domain, days);
-    // The combined rate is comparable only between days with the same providers in it; otherwise each provider on its own.
-    const sameMix = !pair || String(pair.last.providers) === String(pair.ref.providers);
+    // The combined rate is comparable only between days with the same providers at settled weights: a provider
+    // phases in over 7 days, so the set must be unchanged from 7 days before the reference. Otherwise each
+    // provider still measured is compared on its own.
+    const mix = String(pair?.last.providers);
+    const from = pair ? Date.parse(pair.ref.t) - 7 * DAY : 0;
+    const sameMix = !pair || trend.domain.every((p) => Date.parse(p.t) < from || String(p.providers) === mix);
     const found = sameMix
       ? [mentionChange("AI names you", trend.domain, days)]
-      : trend.providers.map((p) => mentionChange(`${input.providerLabel(p.id)} names you`, p.points, days));
+      : trend.providers
+          .filter((p) => pair.last.providers?.includes(p.id) ?? true)
+          .map((p) => mentionChange(`${input.providerLabel(p.id)} names you`, p.points, days));
     const items = found.filter((i) => i !== null);
     if (items.length) return [...items.filter((i) => i.kind === "down"), ...items.filter((i) => i.kind === "up")].slice(0, 3);
   }
   return [];
 }
 
+/** A folded section is rendered open when something to fix or a change points into it; standing decisions do not open it. */
+export const opensSection = (items: AttentionItem[] | null, section: string) => !!items?.some((i) => i.kind !== "decide" && i.section === section);
+
 /**
  * What the owner should look at on a domain, most urgent first: things to fix, significant changes of the
- * mention rate, budget, decisions waiting. Empty when nothing needs attention.
+ * mention rate, budget, decisions waiting. Empty when nothing needs attention; null for a domain that is not
+ * monitored yet (the header's status, last error and action say what to do there).
  */
-export function attentionItems(input: AttentionInput): AttentionItem[] {
+export function attentionItems(input: AttentionInput): AttentionItem[] | null {
+  if (input.status !== "ACTIVE" && input.status !== "PAUSED") return null;
   const items: AttentionItem[] = [];
   for (const e of input.errors) {
     const text = ERROR_TEXT[e.kind]?.(input.providerLabel(e.providerId), e.count);
@@ -102,7 +109,8 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
   }
   const run = input.runs.find((r) => r.kind === "MEASUREMENT" && r.status !== "RUNNING");
   // Most runs lose a few answers and end as "Partial"; only a fifth or more is worth a look.
-  if (run && run.plannedCount > 0 && run.failedCount / run.plannedCount >= 0.2) {
+  // A paused domain has no later run to supersede a bad one.
+  if (input.status === "ACTIVE" && run && run.plannedCount > 0 && run.failedCount / run.plannedCount >= 0.2) {
     items.push({
       kind: "fix",
       text: `The last measurement collected ${run.completedCount} of ${count(run.plannedCount, "answer")} (${run.failedCount} failed).`,
@@ -132,8 +140,7 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
       kind: "decide",
       text: `${count(input.proposals, "prompt change waits", "prompt changes wait")} for your approval.`,
       section: "portfolio-heading",
-      anchor: "proposals-heading",
-      link: "Review proposals",
+      link: "Prompt portfolio",
     });
   }
   if (input.recommendationsOutOfDate) {
@@ -147,20 +154,9 @@ export function attentionItems(input: AttentionInput): AttentionItem[] {
   if (input.suggestions.length > 0) {
     items.push({
       kind: "decide",
-      text: `AI names ${count(input.suggestions.length, "brand")} you do not track, e.g. ${input.suggestions.slice(0, 2).join(", ")}. Decide whether to track them.`,
+      text: `AI names brands you do not track, e.g. ${input.suggestions.slice(0, 2).join(", ")}. Decide whether to track them.`,
       section: "profile-heading",
-      anchor: "suggestions-heading",
-      link: "Named by AI, not tracked",
-    });
-  }
-  if (input.unnamedCompetitors.length > 0) {
-    const n = input.unnamedCompetitors.length;
-    items.push({
-      kind: "decide",
-      text: `${count(n, "tracked competitor was", "tracked competitors were")} not named by AI in 28 days: ${input.unnamedCompetitors.join(", ")}. Remove ${n === 1 ? "it if it does" : "them if they do"} not matter.`,
-      section: "profile-heading",
-      anchor: "competitors-heading",
-      link: "Competitors",
+      link: "Domain profile",
     });
   }
   return items;

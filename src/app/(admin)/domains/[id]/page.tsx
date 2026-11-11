@@ -21,7 +21,7 @@ import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
-import { attentionItems, type AttentionItem } from "@/components/attention";
+import { attentionItems, opensSection, type AttentionItem } from "@/components/attention";
 import { num, pct, usd } from "@/components/format";
 import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo, type Tone } from "@/components/ui";
 
@@ -84,12 +84,9 @@ export default async function DomainPage({
     autoApply: d.autoApprovePortfolioChanges,
     recommendationsOutOfDate: !!recs && recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now),
     suggestions: suggestions.map((c) => c.name),
-    unnamedCompetitors:
-      matches.answers > 0 && !matches.pending ? (detail.profile?.competitors ?? []).filter((c) => !matches.named.get(c.name)).map((c) => c.name) : [],
     providerLabel,
   });
-  // A collapsed section opens when the attention block points into it.
-  const open = (section: string) => attention.some((i) => i.section === section);
+  const open = (section: string) => opensSection(attention, section);
 
   return (
     <>
@@ -117,7 +114,7 @@ export default async function DomainPage({
 
       <Flash message={done ?? addedMessage} error={error} />
 
-      <Attention items={attention} />
+      {attention && <Attention items={attention} />}
 
       <ScoreTiles detail={detail} />
 
@@ -140,7 +137,7 @@ export default async function DomainPage({
 
       <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
-      {/* From here on: reference. Collapsed unless the attention block points into the section. */}
+      {/* From here on: reference. Collapsed unless something to fix or a change points into the section. */}
       <div className="grid-2">
         <Portfolio detail={detail} returnTo={returnTo} open={open("portfolio-heading")} />
         <Profile detail={detail} now={now} suggestions={suggestions} matches={matches} returnTo={returnTo} open={open("profile-heading")} />
@@ -178,7 +175,7 @@ function Attention({ items }: { items: AttentionItem[] }) {
         <li key={i.text}>
           <Badge tone={ATTENTION_KIND[i.kind].tone}>{ATTENTION_KIND[i.kind].label}</Badge>
           <span>
-            {i.text} <a href={`#${i.anchor ?? i.section}`}>{i.link}</a>
+            {i.text} <a href={`#${i.section}`}>{i.link}</a>
           </span>
         </li>
       ))}
@@ -192,7 +189,7 @@ function Attention({ items }: { items: AttentionItem[] }) {
         <>
           {list(items.slice(0, ATTENTION_SHOWN))}
           {items.length > ATTENTION_SHOWN && (
-            <details className="notes">
+            <details className="attention-more">
               <summary>{items.length - ATTENTION_SHOWN} more</summary>
               {list(items.slice(ATTENTION_SHOWN))}
             </details>
