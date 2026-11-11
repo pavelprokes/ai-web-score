@@ -587,6 +587,18 @@ td .meter {
   white-space: nowrap;
 }
 
+/* The domain table fits a 1280 px window: headings wrap and cells sit closer than in the kit's table. */
+.only-wide .hig-table thead th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.only-wide .hig-table :is(th, td) {
+  padding-inline: 8px;
+}
+.only-wide td .meter {
+  min-width: 140px;
+}
+
 /* Narrow screens: the domain table becomes a list of cards (same data, no horizontal scrolling). */
 .only-narrow {
   display: none;
@@ -614,6 +626,7 @@ td .meter {
 }
 .domain-card__head {
   display: flex;
+  flex-wrap: wrap; /* a long hostname pushes the status below instead of off the 320 px screen */
   justify-content: space-between;
   align-items: flex-start;
   gap: 0.75rem;
@@ -640,8 +653,70 @@ td .meter {
 .error-text {
   color: var(--text);
 }
-.section-gap {
-  margin-top: 1.25rem;
+/* "Needs your attention": one line per item, the kind as a badge (icon + word), then the sentence and its link. */
+.attention {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.attention li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.attention li + li {
+  border-top: 1px solid var(--border);
+}
+.attention-more {
+  border-top: 1px solid var(--border);
+}
+.attention-more > summary {
+  cursor: pointer;
+  padding: 0.45rem 0;
+  color: var(--link);
+}
+/* Collapsible section (native <details>): the heading is the toggle and its state stays readable when closed. */
+.fold > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  min-height: 24px;
+  cursor: pointer;
+  list-style: none;
+}
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+.fold > summary::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--text-2);
+  border-bottom: 2px solid var(--text-2);
+  transform: rotate(-45deg);
+}
+.fold[open] > summary::before {
+  transform: translateY(-2px) rotate(45deg);
+}
+.fold[open] > summary {
+  margin-bottom: 0.85rem;
+}
+.fold__state {
+  color: var(--text-2);
+  font-size: 0.9rem;
+}
+/* A closed card must not stretch to the height of an open neighbour. */
+.grid-2:has(.fold) {
+  align-items: start;
+}
+/* Targets of in-page links clear the sticky top bar. */
+h2[id],
+h3[id] {
+  scroll-margin-top: 5.5rem;
 }
 .note {
   margin: -0.5rem 0 1.25rem;
@@ -983,10 +1058,6 @@ code {
   stroke: var(--text-2);
   stroke-width: 1.5;
   stroke-dasharray: 4 4;
-}
-.trend__mixnotes {
-  padding-left: 0;
-  list-style: none;
 }
 .trend__crosshair {
   stroke: var(--text-2);

@@ -145,7 +145,34 @@ export function BudgetMeter({ spent, budget, estimate }: { spent: number; budget
   );
 }
 
-export function Section({ title, id, actions, children }: { title: string; id: string; actions?: ReactNode; children: ReactNode }) {
+export function Section({
+  title,
+  id,
+  actions,
+  fold,
+  children,
+}: {
+  title: string;
+  id: string;
+  actions?: ReactNode;
+  /** Collapses the section behind its heading (native details): `summary` is its state in a few words, `open` shows the content. */
+  fold?: { summary?: ReactNode; open?: boolean };
+  children: ReactNode;
+}) {
+  if (fold) {
+    return (
+      <section className="card" aria-labelledby={id}>
+        <details className="fold" open={fold.open}>
+          <summary>
+            <h2 id={id}>{title}</h2>
+            {fold.summary && <span className="fold__state">{fold.summary}</span>}
+          </summary>
+          {actions}
+          {children}
+        </details>
+      </section>
+    );
+  }
   return (
     <section className="card" aria-labelledby={id}>
       <div className="card__head">

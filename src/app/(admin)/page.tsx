@@ -100,7 +100,6 @@ export default async function DomainsPage({
                   <thead>
                     <tr>
                       <th scope="col">Domain</th>
-                      <th scope="col">Status</th>
                       <th scope="col" className="num">
                         Overall <MetricInfo id="overall-score" />
                       </th>
@@ -116,7 +115,6 @@ export default async function DomainsPage({
                       <th scope="col" className="num">
                         Share among rivals <MetricInfo id="share-of-voice" />
                       </th>
-                      <th scope="col">Last discovery <MetricInfo id="last-discovery" /></th>
                       <th scope="col">Last measurement <MetricInfo id="last-measurement" /></th>
                       <th scope="col">Budget this month <MetricInfo id="budget" /></th>
                       <th scope="col">
@@ -143,15 +141,15 @@ export default async function DomainsPage({
                             <span className="cell-sub">
                               {d.brandName ?? "—"} · {d.prompts.active} prompts
                             </span>
-                          </th>
-                          <td>
-                            <DomainStatus status={d.status} />
+                            <span className="cell-sub">
+                              <DomainStatus status={d.status} />
+                            </span>
                             {d.lastError && (
                               <span className="cell-sub">
                                 {d.lastError.slice(0, 80)}
                               </span>
                             )}
-                          </td>
+                          </th>
                           <td className="num">
                             {d.scores?.insufficientData ? <span className="muted">Not enough data</span> : <Score value={d.scores?.overall} />}
                           </td>
@@ -176,9 +174,6 @@ export default async function DomainsPage({
                             <Rate value={d.scores?.shareOfVoice} />
                           </td>
                           <td>
-                            <TimeAgo date={d.lastDiscoveryAt} now={now} />
-                          </td>
-                          <td>
                             <TimeAgo date={d.lastMeasuredAt} now={now} />
                             {measurement && (
                               <span className="cell-sub">
@@ -189,6 +184,9 @@ export default async function DomainsPage({
                             )}
                             <span className="cell-sub">
                               Next: <TimeAgo date={d.nextPlanAt} now={now} />
+                            </span>
+                            <span className="cell-sub">
+                              Discovery: <TimeAgo date={d.lastDiscoveryAt} now={now} />
                             </span>
                           </td>
                           <td>
