@@ -78,25 +78,31 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #57 | Recommendations refresh on their own: an ACTIVE domain whose latest set is 7 days old gets a new one (job keyed by day). Done / Dismissed carry over by finding key: Dismissed holds while the finding recurs; Done on a finding measured from answers reopens 28 days after it was marked if it still fires; Done on a website finding holds until reopened. "Out of date" badge (set older than 14 days, or scored answers doubled) |
 | #58 | Sonnet 5.5 cache-read price corrected (new price entry), Perplexity `service_tier` fallback no longer sticky, calibration label while a provider is off, database size on /providers |
 | #59 | Crawler requests only the crawled site and public addresses (checked in the connection's own DNS lookup via undici, so DNS rebinding cannot reach a private address), bodies capped at 2 MB, tolerant link / JSON-LD parsing; agent brief escapes profile text; security headers |
+| #61 | Cron: deadline counted from the start of the invocation, a tick error no longer skips the drain, retries due soon are awaited; `umami.send` is queued only for domains with an Umami website (it was half of all jobs) |
+| #62 | Discovery and prompt-design runs record their LLM cost (older runs show a dash); the overview budget total excludes paused domains |
+| #63 | Provider errors grouped by class (`classifyProviderError`) with a plain sentence and the action; raw message behind details; replaces the 20-row "Failed measurements" list |
+| #64 | "Apply changes automatically" switch per domain in the Prompt portfolio (off by default, off on every production domain); bulk approve / reject confirm; integer portfolio sizes |
+| #65 | Competitors: discovery emits brand names only; each tracked competitor shows "in N answers" or "Not named by AI"; Remove (new profile version, re-extraction, kept in `removedCompetitors` so discovery and the suggestions skip it; Track again restores it) |
+| #66 | `docs/RESEARCH.md` §7 "Measured on production (2026-10-07 … 2026-11-11)": 21,483 answers against the assumptions of RESEARCH / METHODOLOGY / COSTS, with nine recommendations under "Decisions this supports" |
+| #67 | Domain page: "Needs your attention" first (fixes, significant mention-rate changes, budget, decisions), reference sections folded into `<details>` with a one-line summary (12 550 px → ~3 500 px); overview table fits 1280 px |
+| #68 | Reports from stored signals: "Who AI names instead" (brand among tracked competitors), "Your pages AI cites" and the top pages per third-party site, "What assistants search for" (fan-out queries per topic), answer viewer filtered by prompt |
 
 ## Next task
 
 Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`.
 
-The audit of 2026-11-10 (production data, code, provider docs, comparable tools) produced the sequence below;
-#48–#59 are merged. Continue in this order — each is one small PR:
+The audit of 2026-11-10 (production data, code, provider docs, comparable tools) produced a sequence of small PRs;
+#48–#68 are merged and verified on production. What is left needs an owner decision first:
 
-1. Competitor hygiene: discovery emits brand names only, "named in N answers" per tracked competitor, Remove
-   (5 of 12 tracked on the photographer and 6 of 9 on vzdelanibudoucnosti.cz matched no answer in 28 days).
-2. Discovery / prompt-design runs show their LLM cost; the overview budget total excludes paused domains.
-3. Portfolio changes can apply automatically — opt-in per domain, default off; bulk approve / reject confirm.
-4. Cron: deadline from the start of the invocation, a tick error does not skip the drain, retries due soon are
-   awaited; `umami.send` is not queued for domains without an Umami website (half of all jobs).
-5. Provider errors grouped by class with the action to take, raw text behind details.
-6. Domain page answers "what changed, what to do" first (it is 12 500 px of equal cards); overview table fits 1280 px.
-7. Internal LLM prompts mark third-party text as data (needs the seo-geo role: analyzer drift vs version bump).
-8. Reports from stored signals: competitor ranking, own pages cited, fan-out queries, answers by prompt.
-9. "What changed this week" on the overview and a weekly e-mail (convene `/team`; needs a mail account).
+1. Internal LLM prompts mark third-party text (answers, crawled pages) as data, and "competitor" is defined for
+   untracked brands (Scratch, code.org and directories are suggested today). Needs the seo-geo role and a decision:
+   accept a small drift under the current `ANALYZER_VERSION` or bump it and re-grade history (≈ $4). Re-grade ~40
+   stored answers first (≈ $0.05) and compare |Δ sentiment| and |Δ accuracy|, as was done for the Haiku check.
+2. "What changed this week" on the overview and one weekly e-mail (convene `/team`; needs a mail account / API key
+   and a recipient set in Vercel). `attentionItems()` (src/components/attention.ts) already holds the rules.
+3. Next scoring version (`docs/RESEARCH.md` §7, decision 5): one weight per prompt, intervals from prompts — named
+   rates are ≈ 7 pp too high on two domains and their intervals 4–5× too narrow. A methodology change: `/team`.
+4. Map the 203 paused, measured prompts of renamed topics on the photographer onto current topics, or leave them.
 
 ### Checks after the next measurement waves (domains plan at ~12:55 and ~21:15 UTC)
 
@@ -106,8 +112,9 @@ The audit of 2026-11-10 (production data, code, provider docs, comparable tools)
   `PERPLEXITY_MIN_INTERVAL_MS` higher or check the account tier in the Perplexity console.
 - First discovery after #59: the crawl must still succeed on Vercel (undici is bundled into the function for the
   first time). First weekly `recommendations.generate` per ACTIVE domain.
-- HANDOFF task of 2026-10-19 is still open: validate `docs/RESEARCH.md` against production (APIs ≠ UI, variance,
-  cost per useful data point, Perplexity repeat samples, reach weights).
+- Jobs: no `Job did not finish` on `measurement.execute` after #61 (sync answers now time out at 70 s); if it
+  appears, lower `SYNC_ANSWER_TIMEOUT_MS` to 60 s.
+- Local UI checks on macOS: `CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" pnpm a11y …`.
 
 ### Owner actions
 
@@ -115,12 +122,16 @@ The audit of 2026-11-10 (production data, code, provider docs, comparable tools)
   `RAW_RESPONSE_RETENTION_DAYS=30` in Vercel: raw provider JSON older than that is cleared nightly (irreversible;
   answers, citations and signals stay; only the optional `raw` flag of the measurements API reads it), then run
   `VACUUM FULL measurements` once. Approving the proposal backlog multiplies answers per day 3–5×, so do this first.
-- Approve or reject the waiting proposals (photographer 113, vzdelanibudoucnosti.cz 138, photos 49) — or switch on
-  auto-apply once item 3 is merged. The measured set grew smaller since October, so scores moved without any change
-  on the websites; they will move again when it is restored.
-- Track the rivals AI actually names (vzdelanibudoucnosti.cz: Bridge Academy, CODE Rebels, WeCanCode, Make It Today,
-  Logiscool — its "share among rivals 87 %" is measured against competitors AI never names).
-- The 203 paused, measured prompts of renamed topics on the photographer are not re-mapped to current topics.
+- Approve or reject the waiting proposals (photographer 122, vzdelanibudoucnosti.cz 138, photos 49), or switch on
+  "Apply changes automatically" in the Prompt portfolio. More prompts are the only lever that narrows the scores
+  (±9–15 pp today, RESEARCH §7.3); spend stays inside the budgets except vzdelanibudoucnosti.cz, which would need
+  ≈ $15–17 against $10. The measured set shrank since October, so scores moved without any change on the websites
+  and will move again when it is restored.
+- Competitors (Domain profile): remove the ones marked "Not named by AI" and track the rivals AI names. On
+  vzdelanibudoucnosti.cz the brand is named in 902 answers and the nine tracked competitors in 15 together, while
+  Bridge Academy, CODE Rebels, WeCanCode, Make It Today and Logiscool are untracked — "share among rivals 87 %" says
+  nothing until that is fixed. Re-discover deliberately: each new profile orphans history (RESEARCH §7, decision 9).
+- Read `docs/RESEARCH.md` §7 "Decisions this supports" (Perplexity repeats, reach weights, Kalman constants).
 - boatiquesydneyboathire.com.au is PAUSED and never had a ChatGPT / AI Mode answer; #52 is verified against the
   DataForSEO docs only, so watch its first run if it is resumed.
 - Perplexity ran out of credit on 2026-10-29…11-02 (no answers for 4 days); enter the balances on /providers.
@@ -149,7 +160,5 @@ The audit of 2026-11-10 (production data, code, provider docs, comparable tools)
 - Answer analysis covers competitor-only answers in a 10 % sample (`COMPETITOR_DISCOVERY_SAMPLE`), so
   `untrackedEntities` is missing on most of them; anything built on it (competitor suggestions, listing sources)
   under-counts until the "broader answer analysis" decision above.
-- Tracked competitors are append-only until the Remove action ships (next task 1): do not press re-discovery on a
-  monitored domain unless the profile really changed.
 - Accounts: Anthropic/Perplexity balances are estimates — re-enter the console balance after top-ups.
 - Gemini UI provider is disabled in the DB; Gemini API stays off until its grounding terms are reviewed.
