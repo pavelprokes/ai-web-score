@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { domainProfiles, domains, portfolioProposals, prompts, runs, topicClusters } from "@/db/schema";
 import type { DomainProfile } from "@/core/domain-profile";
 import { DomainProfile as DomainProfileSchema } from "@/core/domain-profile";
-import { isKnownCompetitorName, nameKey } from "@/core/competitors";
+import { isKnownCompetitorName, nameKey, spellings } from "@/core/competitors";
 import { crawlDomain } from "@/core/discovery/crawl";
 import { DISCOVERY_SYSTEM, discoveryUserPrompt, LlmProfile, toDomainProfile } from "@/core/discovery/profile-llm";
 import { buildClusters, IMPORTANT_CLUSTER_WEIGHT } from "@/core/portfolio/clusters";
@@ -47,9 +47,13 @@ export async function runDiscovery(domainId: string, trigger: string) {
     });
     await throwIfJobCancelled();
     const profile = toDomainProfile(llm, digest);
-    // A competitor the admin removed or ignored stays out, however the model spells it this time.
-    const ignored = new Set(domain.ignoredCompetitors.map(nameKey));
-    profile.competitors = profile.competitors.filter((c) => ![c.name, ...c.aliases, ...c.domains].some((n) => ignored.has(nameKey(n))));
+    // A competitor the admin removed or ignored stays out, however the model spells it this time. Both lists are
+    // read here, after the crawl and the model call: they take minutes, and the admin may have used them meanwhile.
+    const previous = await latestProfile(domainId);
+    const [now] = await db.select({ ignored: domains.ignoredCompetitors }).from(domains).where(eq(domains.id, domainId));
+    profile.removedCompetitors = previous?.profile.removedCompetitors ?? [];
+    const out = new Set([...(now?.ignored ?? []), ...profile.removedCompetitors.flatMap(spellings)].map(nameKey));
+    profile.competitors = profile.competitors.filter((c) => !spellings(c).some((n) => out.has(nameKey(n))));
     const clusters = buildClusters(profile);
     const sizing = estimatePortfolioSize({
       profile,
@@ -61,9 +65,8 @@ export async function runDiscovery(domainId: string, trigger: string) {
     // different list every run, while stored signals and the share among rivals are keyed by the tracked names.
     // The model also re-spells a rival ("Fler/Svatební portál Beremese.cz (directory)" → "Beremese.cz"): one that
     // shares any spelling or domain with the new list is the same rival, and tracking both would count it twice.
-    const previous = await latestProfile(domainId);
     for (const c of previous?.profile.competitors ?? []) {
-      if (![c.name, ...c.aliases, ...c.domains].some((n) => isKnownCompetitorName(n, profile, []))) profile.competitors.push(c);
+      if (!spellings(c).some((n) => isKnownCompetitorName(n, profile, []))) profile.competitors.push(c);
     }
     const version = await nextProfileVersion(domainId);
     await db.insert(domainProfiles).values({

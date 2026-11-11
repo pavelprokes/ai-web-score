@@ -17,8 +17,9 @@ describe("discoveryUserPrompt", () => {
 });
 
 describe("brandNamesOnly", () => {
+  const c = (name: string, aliases: string[] = [], domains: string[] = []) => ({ name, aliases, domains });
+
   it("keeps brand names, replaces a label by its alias and drops a label without one", () => {
-    const c = (name: string, aliases: string[] = []) => ({ name, aliases, domains: [] });
     // Competitors the discovery wrote on production; none of the labels matched an answer in 28 days.
     const out = brandNamesOnly([
       c("Svatební fotograf Praha – ostatní fotografové (např. Jiří Šmíd)"),
@@ -38,5 +39,17 @@ describe("brandNamesOnly", () => {
       ["Svatební košile", ["Svatební košile Svatební fotografové"]],
       ["Peter Rigo Photography", []],
     ]);
+  });
+
+  it("falls back to the domain, does not count & as a word, keeps hyphenated names and drops a repeated name", () => {
+    const out = brandNamesOnly([
+      c("Svatební web Svatebnipripravy / Svatební plánovač", [], ["svatebniweb.cz"]),
+      c("Sydney Harbour Boat Hire & Charters", [], ["boathire.com.au"]),
+      c("Salt & Pepper Boat Hire"),
+      c("Pic-Time"),
+      c("Joy", ["withjoy"]),
+      c("Joy (withjoy)"),
+    ]);
+    expect(out.map((e) => e.name)).toEqual(["svatebniweb.cz", "boathire.com.au", "Salt & Pepper Boat Hire", "Pic-Time", "Joy"]);
   });
 });

@@ -38,9 +38,13 @@ export const nameKey = (s: string) =>
     .replace(/(?:\.(?:com|co|org|net|edu|gov|ac))?\.[a-z]{2,}$/, "")
     .replace(/[^\p{L}\p{N}]+/gu, "");
 
-type ProfileNames = Pick<DomainProfile, "brandName" | "brand" | "ownedDomains" | "domain" | "competitors">;
+type ProfileNames = Pick<DomainProfile, "brandName" | "brand" | "ownedDomains" | "domain" | "competitors"> &
+  Partial<Pick<DomainProfile, "removedCompetitors">>;
 
-/** Matching keys of the brand, the tracked competitors and the ignored names. */
+/** Every spelling of a competitor: its name, aliases and domains. */
+export const spellings = (c: { name: string; aliases?: string[]; domains?: string[] }) => [c.name, ...(c.aliases ?? []), ...(c.domains ?? [])];
+
+/** Matching keys of the brand, the tracked and the removed competitors and the ignored names. */
 function knownKeys(profile: ProfileNames, ignored: string[]) {
   return new Set(
     [
@@ -48,13 +52,13 @@ function knownKeys(profile: ProfileNames, ignored: string[]) {
       profile.domain,
       ...profile.brand.aliases,
       ...profile.ownedDomains,
-      ...profile.competitors.flatMap((c) => [c.name, ...c.aliases, ...c.domains]),
+      ...[...profile.competitors, ...(profile.removedCompetitors ?? [])].flatMap(spellings),
       ...ignored,
     ].map(nameKey),
   );
 }
 
-/** Is `name` already the brand, a tracked competitor or ignored? */
+/** Is `name` already the brand, a tracked or removed competitor or ignored? */
 export function isKnownCompetitorName(name: string, profile: ProfileNames, ignored: string[]) {
   return knownKeys(profile, ignored).has(nameKey(name));
 }

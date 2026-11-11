@@ -124,6 +124,18 @@ describe("diagnose", () => {
     ]);
   });
 
+  it("does not name the site of a removed competitor as a place to get listed", () => {
+    const answers = Array.from({ length: 6 }, () => answer({ competitorsMentioned: ["rival"], citedDomains: ["harbour-escapes.com.au", "blog.gone.cz", "yogadir.com"] }));
+    const removedCompetitors = [
+      { name: "Cruise Harbour", aliases: [], domains: ["harbour-escapes.com.au"] },
+      { name: "Gone", aliases: [], domains: [] },
+    ];
+    const sources = (p: object) =>
+      diagnose(input({ answers, profile: { ...profile, ...p } as unknown as DomainProfile })).find((f) => f.key === "authority:third-party-sources")!.evidence.sources;
+    expect(sources({ removedCompetitors })).toEqual([{ value: "yogadir.com", count: 6 }]);
+    expect(sources({})).toHaveLength(3);
+  });
+
   it("flags a brand that is mentioned but never cited", () => {
     const answers = Array.from({ length: 5 }, () => answer({ brandMentioned: true, domainCited: false }));
     expect(diagnose(input({ answers })).map((f) => f.key)).toContain("citation:own-pages");

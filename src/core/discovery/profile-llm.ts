@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BusinessModel, DomainProfile, IntentType } from "../domain-profile";
+import { nameKey } from "../competitors";
 import { isoLanguage } from "../language";
 import type { CrawlDigest } from "./crawl";
 
@@ -77,7 +78,7 @@ Rules:
 - Competitors: real, named companies that a customer would consider instead (with their domains). Prefer
   same-market competitors; include large platforms/marketplaces only when they genuinely compete.
   The name is the brand or person name exactly as an assistant would write it in a list: 1–4 words, one business
-  per entry, no descriptions, categories, examples, slashes, dashes or parentheses. The website goes in domains.
+  per entry, no descriptions, categories, examples or parentheses, no " / " or " – " separators. The website goes in domains.
   Leave a competitor out rather than describe a group ("other local studios").
 - brandAliases: spelling variants, the domain as written in text, and common inflected forms in the site's language.
 - factSheet: 5–20 verifiable facts (what they offer, prices, locations, founding, unique claims) used later to
@@ -109,18 +110,23 @@ export function discoveryUserPrompt(digest: CrawlDigest, brandHint?: string | nu
 
 const c01 = (x: number) => Math.min(1, Math.max(0, Number.isFinite(x) ? x : 0.5));
 
-/** A brand as it is written in a list: no "A / B", no "description – Brand", at most four words. */
-const isBrandName = (name: string) => name !== "" && !/\/|\s[-–—]\s/.test(name) && name.split(/\s+/).length <= 4;
+/** A brand as it is written in a list: no "A / B", no "description – Brand", at most four words ("&" is not one). */
+const isBrandName = (name: string) =>
+  name !== "" && !/\/|\s[-–—]\s/.test(name) && name.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length <= 4;
 
 /**
  * Competitor names are matched in answers as written, so a label ("Svatební.cz / Svatební portály", "Kódování pro
  * děti – CodeKids") never matches. Parenthesised notes go; a label is replaced by its first alias that is a
- * name, and dropped when it has none.
+ * name, else by its first domain (answers do write that), and dropped when it has neither. A second entry of
+ * the same name is dropped.
  */
-export function brandNamesOnly<T extends { name: string; aliases: string[] }>(entries: T[]): T[] {
+export function brandNamesOnly<T extends { name: string; aliases: string[]; domains: string[] }>(entries: T[]): T[] {
+  const seen = new Set<string>();
   return entries.flatMap((e) => {
-    const name = [e.name, ...e.aliases].map((n) => n.replace(/\s*\([^)]*\)/g, "").trim()).find(isBrandName);
-    return name ? [{ ...e, name, aliases: e.aliases.filter((a) => a !== name) }] : [];
+    const name = [e.name, ...e.aliases].map((n) => n.replace(/\s*\([^)]*\)/g, "").trim()).find(isBrandName) ?? e.domains[0];
+    if (!name || seen.has(nameKey(name))) return [];
+    seen.add(nameKey(name));
+    return [{ ...e, name, aliases: e.aliases.filter((a) => a !== name) }];
   });
 }
 

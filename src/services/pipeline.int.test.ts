@@ -1272,10 +1272,10 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(await stored()).toEqual(["Nova Akademie", "Druha Skola"]);
   });
 
-  it("counts the answers naming each competitor; Remove untracks it, ignores its spellings and re-checks the answers", async () => {
+  it("counts the answers naming each competitor; Remove untracks it apart from the ignored names, re-checks the answers, and Track restores it", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
-    const { competitorMatchCounts, untrackCompetitor } = await import("@/services/competitors");
+    const { competitorMatchCounts, competitorSuggestions, trackCompetitor, untrackCompetitor } = await import("@/services/competitors");
     const { latestProfile } = await import("@/services/discovery");
     const { processJobs } = await import("@/jobs/runner");
     const db = getDb();
@@ -1283,6 +1283,8 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const before = (await latestProfile(demo!.id))!;
     const counts = await competitorMatchCounts(demo!.id);
     expect(counts.answers).toBeGreaterThan(1);
+    expect(counts.pending).toBe(false);
+    const tracked = before.profile.competitors.find((c) => c.name === "Nova Akademie")!;
     expect([counts.named.get("Nova Akademie"), counts.named.get("Druha Skola")]).toEqual([1, 1]);
 
     await untrackCompetitor(demo!.id, "Nova Akademie");
@@ -1290,12 +1292,28 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const after = (await latestProfile(demo!.id))!;
     expect(after.version).toBe(before.version + 1);
     expect(after.profile.competitors.map((c) => c.name)).toEqual(before.profile.competitors.map((c) => c.name).filter((n) => n !== "Nova Akademie"));
-    const [domain] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
-    expect(domain!.ignoredCompetitors).toEqual(expect.arrayContaining(["Nova Akademie", "NovaAkademie"]));
+    // Removed is not ignored (an ignored name's site counts as a listing source); the profile remembers it.
+    expect(after.profile.removedCompetitors).toEqual([tracked]);
+    const ignored = async () => (await db.select().from(s.domains).where(eq(s.domains.id, demo!.id)))[0]!.ignoredCompetitors;
+    const ignoredBefore = await ignored();
+    expect(ignoredBefore).not.toContain("Nova Akademie");
+    expect((await competitorSuggestions(demo!.id)).map((c) => c.name)).not.toContain("Nova Akademie");
+    // The counts mix two profiles until the re-extraction is through.
+    expect((await competitorMatchCounts(demo!.id)).pending).toBe(true);
 
     await processJobs({ deadlineMs: 600_000, types: ["signals.reextract"] });
     const recounted = await competitorMatchCounts(demo!.id);
-    expect([recounted.answers, recounted.named.get("Nova Akademie"), recounted.named.get("Druha Skola")]).toEqual([counts.answers, undefined, 1]);
+    expect([recounted.answers, recounted.named.get("Nova Akademie"), recounted.named.get("Druha Skola"), recounted.pending]).toEqual([counts.answers, undefined, 1, false]);
+
+    // Track again, by any of its spellings: the competitor returns as it was.
+    await trackCompetitor(demo!.id, tracked.aliases[0] ?? tracked.name);
+    const restored = (await latestProfile(demo!.id))!;
+    expect(restored.version).toBe(after.version + 1);
+    expect(restored.profile.competitors).toEqual(before.profile.competitors.filter((c) => c !== tracked).concat(tracked));
+    expect(restored.profile.removedCompetitors).toEqual([]);
+    expect(await ignored()).toEqual(ignoredBefore);
+    await processJobs({ deadlineMs: 600_000, types: ["signals.reextract"] });
+    expect((await competitorMatchCounts(demo!.id)).named.get("Nova Akademie")).toBe(1);
   });
 
   it("reads only cells the planner can still measure in the schedule, confidence and prompt columns", async () => {
