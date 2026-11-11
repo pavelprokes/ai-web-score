@@ -87,7 +87,7 @@ Issues found by the simulation and fixed:
 
 | Lever | Expected effect | Prerequisite |
 |---|---|---|
-| OpenAI `service_tier: "flex"` for the calibration configurations | tokens −50 % (search fee unchanged) | live check that `web_search` works under flex and fits the 150 s job budget |
+| OpenAI `service_tier: "flex"` for the calibration configurations | tokens −50 % (search fee unchanged) | live check that `web_search` works under flex and answers within the 70 s provider timeout (75 s job budget) |
 | Gemini API Batch mode for scheduled runs | tokens −50 % (grounding fee most likely not) | `gemini-api` enabled; prices double on 2027-01-01 |
 | Measure the API arms (Claude, OpenAI, Gemini) weekly or on a rotating subset | proportional | product decision — the consumer-UI capture stays the primary instrument (API ≠ UI answers) |
 | Cheaper analyzer model (e.g. a nano/luna-class model), adopted via the same calibration logic against Sonnet | analysis −80–90 % | OpenAI structured-output path in `lib/llm.ts`, pilot comparison |

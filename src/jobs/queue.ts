@@ -130,6 +130,16 @@ export async function claim(limit: number, leaseSeconds = 300, types?: JobType[]
   }));
 }
 
+/** Milliseconds until the next queued job of each of `types` becomes due (jobs due now are `claim`'s). */
+export async function nextDue(types: JobType[]): Promise<Array<{ type: JobType; ms: number }>> {
+  if (types.length === 0) return [];
+  const rows = await getDb().execute(sql`
+    select type, extract(epoch from min(run_at) - now()) * 1000 as ms from jobs
+    where status = 'QUEUED' and run_at > now() and type in (${sql.join(types.map((t) => sql`${t}`), sql`, `)})
+    group by type`);
+  return rows.map((r) => ({ type: r.type as JobType, ms: Number(r.ms) }));
+}
+
 export async function complete(id: string) {
   await getDb().execute(sql`update jobs set status = 'DONE', finished_at = now(), locked_until = null where id = ${id} and status = 'RUNNING'`);
 }

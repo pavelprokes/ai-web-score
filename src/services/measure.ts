@@ -16,6 +16,7 @@ import { enqueue, RescheduleJob } from "@/jobs/queue";
 import { latestProfile } from "./discovery";
 import { llmAvailable } from "@/lib/llm";
 import { loadPriceBook, priceModelKey } from "./registry";
+import { enqueueUmamiSend } from "./umami";
 
 /**
  * MEASUREMENT — "Does an AI engine currently surface this domain?"
@@ -320,7 +321,7 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
   if (needsAnalysis) {
     await enqueue("analysis.submit", {}, { dedupeKey: "analysis-submit", runAt: new Date(Date.now() + 60_000) });
   } else {
-    await enqueue("umami.send", { measurementId: id }, { dedupeKey: `umami:${id}` });
+    await enqueueUmamiSend(id);
   }
   await enqueue("scores.compute", { domainId: m.domainId }, { dedupeKey: `scores:${m.domainId}`, runAt: new Date(Date.now() + 120_000) });
 }

@@ -14,7 +14,7 @@ import { runOptimizer } from "@/services/optimizer";
 import { generateRecommendations } from "@/services/recommendations";
 import { reextractSignals } from "@/services/competitors";
 import { syncProviderRegistry } from "@/services/registry";
-import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
+import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
 
 type Handler = (payload: Record<string, unknown>) => Promise<unknown>;
 
@@ -50,7 +50,9 @@ const LEASE_SECONDS: Partial<Record<JobType, number>> = { "discovery.run": 600, 
 const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
   "discovery.run": 200, // crawl + one long LLM call
   "portfolio.generate": 180, // parallel LLM calls
-  "measurement.execute": 150, // one provider answer; web-search APIs can take two minutes
+  // One provider answer. Perplexity, the only provider answering synchronously in production, takes 8 s (p50) /
+  // 33 s (p99); at 150 s answers could only be claimed in the first half of a cron invocation.
+  "measurement.execute": 75,
   "measurement.submit": 120, // DataForSEO task_post in chunks of 100 / one Claude batch
   "measurement.collect": 120, // up to 200 results, fetched in parallel
   "analysis.submit": 90,
@@ -82,16 +84,28 @@ async function runJob(job: Job) {
   }
 }
 
+interface DrainOptions {
+  deadlineMs: number;
+  concurrency?: number;
+  types?: JobType[];
+  /**
+   * Cron only: when nothing is due, wait for the next job that becomes due and can still finish before the
+   * deadline (a retry after its backoff or Retry-After, a delayed follow-up) rather than leave it to the next
+   * tick 15 minutes later. Other callers return as soon as the queue has nothing due.
+   */
+  waitForDue?: boolean;
+}
+
 /**
  * Drain due jobs until the deadline. Concurrency is I/O-bound (LLM/API latency),
  * so a single serverless invocation handles many parallel provider calls.
  */
-export async function processJobs(opts: { deadlineMs: number; concurrency?: number; types?: JobType[] }) {
+export async function processJobs(opts: DrainOptions) {
   // Background work uses its own connection pool so pages stay responsive while the queue is busy.
   return runInJobScope(() => drainQueue(opts));
 }
 
-async function drainQueue(opts: { deadlineMs: number; concurrency?: number; types?: JobType[] }) {
+async function drainQueue(opts: DrainOptions) {
   const deadline = Date.now() + opts.deadlineMs;
   const concurrency = opts.concurrency ?? Number(process.env.JOB_CONCURRENCY ?? 8);
   let processed = 0;
@@ -112,7 +126,13 @@ async function drainQueue(opts: { deadlineMs: number; concurrency?: number; type
         inFlight.add(p);
         processed++;
       }
-      if (jobs.length === 0 && inFlight.size === 0) break;
+      if (jobs.length === 0 && inFlight.size === 0) {
+        if (!opts.waitForDue) break;
+        const waits = (await nextDue(fitting)).filter((d) => typesThatFit(deadline - Date.now() - d.ms, [d.type]).length > 0);
+        if (waits.length === 0) break;
+        // A little past the due time: run_at is compared with the database's clock, not this one.
+        nextClaimAt = Date.now() + Math.min(...waits.map((d) => d.ms)) + 100;
+      }
     }
     if (inFlight.size > 0) await Promise.race([...inFlight, sleep(250)]);
     else if (Date.now() < nextClaimAt) await sleep(nextClaimAt - Date.now());
@@ -130,9 +150,15 @@ export function schedulerTick() {
   return runInJobScope(tick);
 }
 
+/** Providers are registered in code, so the database can only fall behind it on a deploy, which starts a new instance. */
+let registrySynced = false;
+
 async function tick() {
   const db = getDb();
-  await syncProviderRegistry();
+  if (!registrySynced) {
+    await syncProviderRegistry();
+    registrySynced = true;
+  }
   // Close or resume runs a deploy/timeout interrupted before planning new work (which they would block).
   await recoverInterruptedRuns();
   const now = new Date();

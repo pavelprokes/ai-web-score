@@ -139,6 +139,13 @@ export function classifyProviderError(message: string): ProviderErrorClass {
   return "OTHER";
 }
 
+/**
+ * HTTP timeout of one synchronous provider answer. It must stay inside the `measurement.execute` job budget
+ * (75 s, `MAX_JOB_SECONDS` in `src/jobs/runner.ts`), so a slow answer ends as a provider timeout the handler
+ * records, not as a job the runner aborts mid-request.
+ */
+export const SYNC_ANSWER_TIMEOUT_MS = 70_000;
+
 /** fetch wrapper with timeout (capped by the current job's deadline) and normalised errors. */
 export async function httpJson<T = unknown>(
   url: string,

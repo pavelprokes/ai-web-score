@@ -1,5 +1,5 @@
 import type { NormalizedAnswer } from "../types";
-import { httpJson, type ProviderAdapter, requireEnv } from "../provider";
+import { httpJson, SYNC_ANSWER_TIMEOUT_MS, type ProviderAdapter, requireEnv } from "../provider";
 
 /**
  * Gemini API with Grounding with Google Search.
@@ -120,7 +120,7 @@ export const geminiApi: ProviderAdapter = {
         contents: [{ role: "user", parts: [{ text: req.promptText }] }],
         tools: [{ google_search: {} }],
       }),
-      timeoutMs: 120_000,
+      timeoutMs: SYNC_ANSWER_TIMEOUT_MS,
     });
     return { answer: parseGeminiResponse(json), raw: json };
   },

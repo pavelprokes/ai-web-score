@@ -6,6 +6,21 @@ import { sendMeasurementEvent, umamiConfigured } from "@/core/analytics/umami";
 import { measurementScore } from "@/core/scoring/scoring";
 import type { RawSignals } from "@/core/signals/extract";
 import type { TokenUsage } from "@/core/measurement/types";
+import { enqueue } from "@/jobs/queue";
+
+/**
+ * Queues the event of an analysed answer. Only for a domain that has an Umami website: without one the job
+ * does nothing, and such jobs were half of the production queue.
+ */
+export async function enqueueUmamiSend(measurementId: string) {
+  if (!umamiConfigured()) return;
+  const [row] = await getDb()
+    .select({ websiteId: domains.umamiWebsiteId })
+    .from(measurements)
+    .innerJoin(domains, eq(domains.id, measurements.domainId))
+    .where(eq(measurements.id, measurementId));
+  if (row?.websiteId) await enqueue("umami.send", { measurementId }, { dedupeKey: `umami:${measurementId}` });
+}
 
 export async function sendMeasurementToUmami(measurementId: string) {
   if (!umamiConfigured()) return;
