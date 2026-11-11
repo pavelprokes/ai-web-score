@@ -384,6 +384,10 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       const competitors = [{ ...renamed!, name: RENAMED }, ...rest, { name: "Novy Rival", aliases: [], domains: [], overlap: 0.5 }];
       return { ...profile, competitors, topics: profile.topics.filter((t) => topics(t.name)) };
     });
+    // Removed by the admin before the re-discovery; the model names it again.
+    const { untrackCompetitor } = await import("@/services/competitors");
+    const removed = world.COMPETITORS.at(-1)!.name;
+    await untrackCompetitor(domainId, removed);
     const reextractJobs = () => db.select().from(s.jobs).where(and(eq(s.jobs.type, "signals.reextract"), sql`${s.jobs.payload}->>'domainId' = ${domainId}`));
     const jobsBefore = (await reextractJobs()).length;
     try {
@@ -391,9 +395,9 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       // The forgotten rival stays tracked, and the stored answers are re-read with the new profile.
       const { latestProfile } = await import("@/services/discovery");
       const kept = (await latestProfile(domainId))!;
-      // The re-spelled rival is tracked once, under the new spelling.
+      // The re-spelled rival is tracked once, under the new spelling without its note; the removed one stays out.
       const [, forgotten, ...same] = world.COMPETITORS.map((c) => c.name);
-      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([forgotten, RENAMED, ...same, "Novy Rival"].sort());
+      expect(kept.profile.competitors.map((c) => c.name).sort()).toEqual([forgotten, "Alfa svatby", ...same.filter((n) => n !== removed), "Novy Rival"].sort());
       const jobs = await reextractJobs();
       expect(jobs.length).toBe(jobsBefore + 1);
       expect(jobs.map((j) => j.dedupeKey)).toContain(`reextract:${domainId}:v${kept.version}`);

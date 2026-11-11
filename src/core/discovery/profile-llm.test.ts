@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CrawlDigest } from "./crawl";
-import { discoveryUserPrompt } from "./profile-llm";
+import { brandNamesOnly, discoveryUserPrompt } from "./profile-llm";
 
 describe("discoveryUserPrompt", () => {
   const digest = { domain: "example.cz", pages: [] } as unknown as CrawlDigest;
@@ -13,5 +13,30 @@ describe("discoveryUserPrompt", () => {
 
   it("says nothing about existing topics on the first discovery", () => {
     expect(discoveryUserPrompt(digest, "Example")).not.toContain("reuse the exact name");
+  });
+});
+
+describe("brandNamesOnly", () => {
+  it("keeps brand names, replaces a label by its alias and drops a label without one", () => {
+    const c = (name: string, aliases: string[] = []) => ({ name, aliases, domains: [] });
+    // Competitors the discovery wrote on production; none of the labels matched an answer in 28 days.
+    const out = brandNamesOnly([
+      c("Svatební fotograf Praha – ostatní fotografové (např. Jiří Šmíd)"),
+      c("Svatební.cz / Svatební portály", ["Svatebni.cz"]),
+      c("Fotograf Jan Kopecký (svatební fotograf Praha)"),
+      c("Kódování pro děti – CodeKids", ["CodeKids"]),
+      c("Technická akademie pro děti"),
+      c("Svatební košile", ["Svatební košile Svatební fotografové"]),
+      c("Kroužky programování pro děti v Praze"),
+      c("Peter Rigo Photography"),
+    ]);
+    expect(out.map((e) => [e.name, e.aliases])).toEqual([
+      ["Svatebni.cz", []],
+      ["Fotograf Jan Kopecký", []],
+      ["CodeKids", []],
+      ["Technická akademie pro děti", []],
+      ["Svatební košile", ["Svatební košile Svatební fotografové"]],
+      ["Peter Rigo Photography", []],
+    ]);
   });
 });

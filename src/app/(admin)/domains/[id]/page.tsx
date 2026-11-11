@@ -8,7 +8,7 @@ import type { SourceRow } from "@/core/scoring/sources";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
-import { competitorSuggestions } from "@/services/competitors";
+import { competitorMatchCounts, competitorSuggestions } from "@/services/competitors";
 import type { CompetitorSuggestion } from "@/core/competitors";
 import type { ActivityKind } from "@/services/activity";
 import { listProviders } from "@/core/measurement/providers";
@@ -51,7 +51,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, sources, suggestions, matches] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -60,6 +60,7 @@ export default async function DomainPage({
     recentProviderErrors({ domainId: id }),
     sourcesFor(id),
     competitorSuggestions(id),
+    competitorMatchCounts(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -125,7 +126,7 @@ export default async function DomainPage({
       <Sources rows={sources} />
 
       <div className="grid-2 section-gap">
-        <Profile detail={detail} now={now} suggestions={suggestions} returnTo={returnTo} />
+        <Profile detail={detail} now={now} suggestions={suggestions} matches={matches} returnTo={returnTo} />
         <Portfolio detail={detail} returnTo={returnTo} />
       </div>
 
@@ -384,7 +385,7 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
   );
 }
 
-function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; domains?: string[]; action: "track-competitor" | "ignore-competitor"; label: string; returnTo: string }) {
+function CompetitorButton(props: { domainId: string; name: string; aliases?: string[]; domains?: string[]; action: "track-competitor" | "untrack-competitor" | "ignore-competitor"; label: string; returnTo: string }) {
   return (
     <form action={domainAction} className="inline">
       <input type="hidden" name="domainId" value={props.domainId} />
@@ -664,7 +665,7 @@ function Costs({ detail }: { detail: Detail }) {
   );
 }
 
-function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; returnTo: string }) {
+function Profile({ detail, now, suggestions, matches, returnTo }: { detail: Detail; now: Date; suggestions: CompetitorSuggestion[]; matches: Awaited<ReturnType<typeof competitorMatchCounts>>; returnTo: string }) {
   const p = detail.profile;
   return (
     <Section title="Domain profile" id="profile-heading">
@@ -708,14 +709,36 @@ function Profile({ detail, now, suggestions, returnTo }: { detail: Detail; now: 
           </dl>
           <h3 className="subhead">Competitors</h3>
           {p.competitors.length ? (
-            <ul className="chips">
-              {p.competitors.map((c) => (
-                <li key={c.name}>
-                  {c.name}
-                  {c.source === "OBSERVED_IN_ANSWERS" && <span className="muted"> · from answers</span>}
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="muted">
+                {matches.answers > 0 &&
+                  `Answers naming each competitor, of ${matches.answers} answers to questions that do not name you, last 28 days. `}
+                Your position and share among tracked rivals rank against this list. Removing one re-checks the stored answers, rebuilds the
+                score history and keeps it out of the suggestions and the next discovery.
+              </p>
+              <ul className="proposals">
+                {p.competitors.map((c) => {
+                  const named = matches.named.get(c.name) ?? 0;
+                  return (
+                    <li key={c.name}>
+                      <span>
+                        <strong>{c.name}</strong>{" "}
+                        {matches.answers > 0 &&
+                          (named > 0 ? (
+                            <span className="muted">
+                              in {named} {named === 1 ? "answer" : "answers"}
+                            </span>
+                          ) : (
+                            <Badge tone="warning">Not named by AI</Badge>
+                          ))}
+                        {c.source === "OBSERVED_IN_ANSWERS" && <span className="muted"> · from answers</span>}
+                      </span>
+                      <CompetitorButton domainId={detail.domain.id} name={c.name} action="untrack-competitor" label="Remove" returnTo={returnTo} />
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : (
             <p className="muted">None identified.</p>
           )}

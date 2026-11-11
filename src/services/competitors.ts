@@ -11,6 +11,37 @@ import { latestProfile } from "./discovery";
 import { BACKFILL_WEEKS, DEFAULT_WINDOW_DAYS, recomputeHistory } from "./scores";
 import { currentSignals } from "./signals";
 
+// Answers the score reads: unbranded questions of active topics, measured in the scoring window.
+const activeTopic = and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true));
+const inScoringWindow = (domainId: string) =>
+  and(
+    eq(measurements.domainId, domainId),
+    eq(measurements.status, "SUCCEEDED"),
+    eq(measurements.purpose, "STANDARD"),
+    gte(measurements.finishedAt, new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86_400_000)),
+    sql`${promptVersions.category} <> 'BRAND_VALIDATION'`,
+  );
+
+/**
+ * How many answers of the scoring window name each tracked competitor (`named`, by competitor name), out of `answers`.
+ * Names are the ones tracked when the answer was last extracted; a profile change re-extracts.
+ */
+export async function competitorMatchCounts(domainId: string) {
+  const names = sql<string[]>`coalesce(${measurementSignals.signals}->'competitorsMentioned', '[]'::jsonb)`;
+  const rows = await getDb()
+    .select({ names, answers: sql<number>`count(*)::int` })
+    .from(measurements)
+    .innerJoin(measurementSignals, currentSignals)
+    .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
+    .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
+    .innerJoin(topicClusters, activeTopic)
+    .where(inScoringWindow(domainId))
+    .groupBy(names);
+  const named = new Map<string, number>();
+  for (const r of rows) for (const n of new Set(r.names)) named.set(n, (named.get(n) ?? 0) + r.answers);
+  return { answers: rows.reduce((sum, r) => sum + r.answers, 0), named };
+}
+
 /** Brands the assistants recommend for unbranded questions (scoring window, active topics) that are not tracked yet. */
 export async function competitorSuggestions(domainId: string) {
   const db = getDb();
@@ -23,20 +54,8 @@ export async function competitorSuggestions(domainId: string) {
     .innerJoin(measurementSignals, currentSignals)
     .innerJoin(promptVersions, eq(promptVersions.id, measurements.promptVersionId))
     .innerJoin(prompts, eq(prompts.id, promptVersions.promptId))
-    .innerJoin(
-      topicClusters,
-      and(eq(topicClusters.domainId, prompts.domainId), eq(topicClusters.key, prompts.clusterKey), eq(topicClusters.active, true)),
-    )
-    .where(
-      and(
-        eq(measurements.domainId, domainId),
-        eq(measurements.status, "SUCCEEDED"),
-        eq(measurements.purpose, "STANDARD"),
-        gte(measurements.finishedAt, new Date(Date.now() - DEFAULT_WINDOW_DAYS * 86_400_000)),
-        sql`${promptVersions.category} <> 'BRAND_VALIDATION'`,
-        sql`jsonb_array_length(coalesce(${sig}->'untrackedEntities', '[]'::jsonb)) > 0`,
-      ),
-    );
+    .innerJoin(topicClusters, activeTopic)
+    .where(and(inScoringWindow(domainId), sql`jsonb_array_length(coalesce(${sig}->'untrackedEntities', '[]'::jsonb)) > 0`));
   return suggestCompetitors(
     rows.map((r) => ({ signals: r.signals as RawSignals, providerId: r.providerId, promptId: r.promptId })),
     profile.profile,
@@ -57,28 +76,43 @@ export async function trackCompetitor(domainId: string, name: string, aliases: s
   const current = DomainProfile.parse(row.profile);
   // Ignored names do not block tracking: the admin may change their mind.
   if (isKnownCompetitorName(name, current, [])) return;
-  const profile: DomainProfile = {
-    ...current,
-    competitors: [
-      ...current.competitors,
-      { name, aliases, domains: domainNames, type: "BRAND" as const, overlap: 0.5, source: "OBSERVED_IN_ANSWERS" as const },
-    ],
-  };
-  await db.insert(domainProfiles).values({
-    domainId,
-    version: row.version + 1,
-    profile,
+  await writeCompetitors(row, [
+    ...current.competitors,
+    { name, aliases, domains: domainNames, type: "BRAND" as const, overlap: 0.5, source: "OBSERVED_IN_ANSWERS" as const },
+  ]);
+}
+
+/**
+ * Stop tracking a competitor: a new profile version without it. Its spellings join the ignored names, so neither
+ * the suggestions nor the next re-discovery (`runDiscovery`) bring it back (`trackCompetitor` still accepts it).
+ */
+export async function untrackCompetitor(domainId: string, name: string) {
+  const [row] = await getDb().select().from(domainProfiles).where(eq(domainProfiles.domainId, domainId)).orderBy(desc(domainProfiles.version)).limit(1);
+  const competitors = row ? DomainProfile.parse(row.profile).competitors : [];
+  const removed = competitors.find((c) => c.name === name);
+  if (!row || !removed) return;
+  await ignoreCompetitor(domainId, removed.name, ...removed.aliases, ...removed.domains);
+  await writeCompetitors(row, competitors.filter((c) => c !== removed));
+}
+
+/** The next profile version with these competitors; stored answers are re-extracted against it. */
+async function writeCompetitors(row: typeof domainProfiles.$inferSelect, competitors: DomainProfile["competitors"]) {
+  const version = row.version + 1;
+  await getDb().insert(domainProfiles).values({
+    domainId: row.domainId,
+    version,
+    profile: { ...DomainProfile.parse(row.profile), competitors },
     crawlDigest: row.crawlDigest,
     sizing: row.sizing,
     generatedBy: "manual",
   });
-  await enqueue("signals.reextract", { domainId }, { dedupeKey: `reextract:${domainId}:v${row.version + 1}` });
+  await enqueue("signals.reextract", { domainId: row.domainId }, { dedupeKey: `reextract:${row.domainId}:v${version}` });
 }
 
-export async function ignoreCompetitor(domainId: string, name: string) {
+export async function ignoreCompetitor(domainId: string, ...names: string[]) {
   await getDb()
     .update(domains)
-    .set({ ignoredCompetitors: sql`${domains.ignoredCompetitors} || ${JSON.stringify([name])}::jsonb` })
+    .set({ ignoredCompetitors: sql`${domains.ignoredCompetitors} || ${JSON.stringify(names)}::jsonb` })
     .where(eq(domains.id, domainId));
 }
 

@@ -1272,6 +1272,32 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     expect(await stored()).toEqual(["Nova Akademie", "Druha Skola"]);
   });
 
+  it("counts the answers naming each competitor; Remove untracks it, ignores its spellings and re-checks the answers", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { competitorMatchCounts, untrackCompetitor } = await import("@/services/competitors");
+    const { latestProfile } = await import("@/services/discovery");
+    const { processJobs } = await import("@/jobs/runner");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const before = (await latestProfile(demo!.id))!;
+    const counts = await competitorMatchCounts(demo!.id);
+    expect(counts.answers).toBeGreaterThan(1);
+    expect([counts.named.get("Nova Akademie"), counts.named.get("Druha Skola")]).toEqual([1, 1]);
+
+    await untrackCompetitor(demo!.id, "Nova Akademie");
+    await untrackCompetitor(demo!.id, "Nova Akademie"); // not tracked any more: no second version
+    const after = (await latestProfile(demo!.id))!;
+    expect(after.version).toBe(before.version + 1);
+    expect(after.profile.competitors.map((c) => c.name)).toEqual(before.profile.competitors.map((c) => c.name).filter((n) => n !== "Nova Akademie"));
+    const [domain] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
+    expect(domain!.ignoredCompetitors).toEqual(expect.arrayContaining(["Nova Akademie", "NovaAkademie"]));
+
+    await processJobs({ deadlineMs: 600_000, types: ["signals.reextract"] });
+    const recounted = await competitorMatchCounts(demo!.id);
+    expect([recounted.answers, recounted.named.get("Nova Akademie"), recounted.named.get("Druha Skola")]).toEqual([counts.answers, undefined, 1]);
+  });
+
   it("reads only cells the planner can still measure in the schedule, confidence and prompt columns", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

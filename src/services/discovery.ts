@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { domainProfiles, domains, portfolioProposals, prompts, runs, topicClusters } from "@/db/schema";
 import type { DomainProfile } from "@/core/domain-profile";
 import { DomainProfile as DomainProfileSchema } from "@/core/domain-profile";
-import { isKnownCompetitorName } from "@/core/competitors";
+import { isKnownCompetitorName, nameKey } from "@/core/competitors";
 import { crawlDomain } from "@/core/discovery/crawl";
 import { DISCOVERY_SYSTEM, discoveryUserPrompt, LlmProfile, toDomainProfile } from "@/core/discovery/profile-llm";
 import { buildClusters, IMPORTANT_CLUSTER_WEIGHT } from "@/core/portfolio/clusters";
@@ -47,6 +47,9 @@ export async function runDiscovery(domainId: string, trigger: string) {
     });
     await throwIfJobCancelled();
     const profile = toDomainProfile(llm, digest);
+    // A competitor the admin removed or ignored stays out, however the model spells it this time.
+    const ignored = new Set(domain.ignoredCompetitors.map(nameKey));
+    profile.competitors = profile.competitors.filter((c) => ![c.name, ...c.aliases, ...c.domains].some((n) => ignored.has(nameKey(n))));
     const clusters = buildClusters(profile);
     const sizing = estimatePortfolioSize({
       profile,

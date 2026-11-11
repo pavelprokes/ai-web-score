@@ -18,7 +18,7 @@ import { ProviderSetupError, syncProviderRegistry, updateProvider } from "@/serv
 import { promoteConfiguration } from "@/services/optimizer";
 import { RecommendationNotFound, setRecommendationStatus } from "@/services/recommendations";
 import { InvalidBalanceError, setAccountBalance } from "@/services/accounts";
-import { CompetitorError, ignoreCompetitor, trackCompetitor } from "@/services/competitors";
+import { CompetitorError, ignoreCompetitor, trackCompetitor, untrackCompetitor } from "@/services/competitors";
 
 export interface AddDomainState {
   error?: string;
@@ -69,6 +69,7 @@ export type DomainActionName =
   | "auto-apply-off"
   | "generate-recommendations"
   | "track-competitor"
+  | "untrack-competitor"
   | "ignore-competitor";
 
 const MESSAGES: Record<DomainActionName, string> = {
@@ -86,6 +87,7 @@ const MESSAGES: Record<DomainActionName, string> = {
   "auto-apply-off": "Portfolio changes wait for your approval again.",
   "generate-recommendations": "Writing recommendations (about a minute).",
   "track-competitor": "Competitor added. Stored answers are re-checked for it and the score history is rebuilt (a few minutes).",
+  "untrack-competitor": "Competitor removed. Stored answers are re-checked without it and the score history is rebuilt (a few minutes).",
   "ignore-competitor": "Hidden from the suggestions.",
 };
 
@@ -155,6 +157,7 @@ export async function domainAction(formData: FormData) {
       break;
     }
     case "track-competitor":
+    case "untrack-competitor":
     case "ignore-competitor": {
       const name = String(formData.get("name") ?? "").trim().slice(0, 120);
       if (!name) redirect(`${back}?error=${encodeURIComponent("Missing competitor name.")}`);
@@ -165,12 +168,13 @@ export async function domainAction(formData: FormData) {
           .filter(Boolean)
           .slice(0, 10);
       try {
-        await (action === "track-competitor" ? trackCompetitor(id, name, list("aliases"), list("domains").filter((d) => /^[\w.-]+\.[a-z]{2,}$/i.test(d))) : ignoreCompetitor(id, name));
+        if (action === "track-competitor") await trackCompetitor(id, name, list("aliases"), list("domains").filter((d) => /^[\w.-]+\.[a-z]{2,}$/i.test(d)));
+        else await (action === "untrack-competitor" ? untrackCompetitor(id, name) : ignoreCompetitor(id, name));
       } catch (e) {
         if (e instanceof CompetitorError) redirect(`${back}?error=${encodeURIComponent(e.message)}`);
         throw e;
       }
-      if (action === "track-competitor") kickJobs();
+      if (action !== "ignore-competitor") kickJobs();
       break;
     }
     default:
