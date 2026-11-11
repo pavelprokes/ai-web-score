@@ -1407,8 +1407,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect((await proposed()).filter((p) => p.kind === "ADD_PROMPT").length).toBeGreaterThan(0);
       expect(await activeIn("new-topic-manual")).toHaveLength(0);
       // "Approve all" is the whole decision: the selection is applied, not proposed again as ACTIVATE.
+      // A plain optimisation queued earlier runs next to the applying one and must not propose what it applied.
+      const { enqueue } = await import("@/jobs/queue");
+      await enqueue("portfolio.optimize", { domainId: demo!.id }, { dedupeKey: `optimize:${demo!.id}` });
       await decideProposals(demo!.id, "ALL", true, "test");
-      await optimize();
+      await processJobs({ deadlineMs: 600_000, concurrency: 4, types: ["portfolio.optimize"] });
+      const activeIds = new Set((await db.select().from(s.prompts).where(and(eq(s.prompts.domainId, demo!.id), eq(s.prompts.status, "ACTIVE")))).map((p) => p.id));
+      expect((await proposed()).filter((p) => p.kind === "ACTIVATE" && activeIds.has(p.promptId!))).toEqual([]);
       expect(await proposed()).toEqual([]);
       expect((await activeIn("new-topic-manual")).length).toBeGreaterThan(0);
 
@@ -1426,6 +1431,19 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await optimize();
       expect(await proposed()).toEqual([]);
       expect((await activeIn("new-topic-auto")).length).toBeGreaterThan(0);
+
+      // Turned on while a generation is running: its prompts need no approval either.
+      await setAutoApprove(demo!.id, false, "test");
+      await addCluster("new-topic-midflight");
+      const { fakeLlm } = await import("@/e2e/fake-world");
+      setLlmOverride(async (req) => {
+        await db.update(s.domains).set({ autoApprovePortfolioChanges: true }).where(eq(s.domains.id, demo!.id));
+        return fakeLlm(req);
+      });
+      await generatePortfolio(demo!.id, "REDISCOVERY");
+      await optimize();
+      expect(await proposed()).toEqual([]);
+      expect((await activeIn("new-topic-midflight")).length).toBeGreaterThan(0);
     } finally {
       setLlmOverride(null);
       await setAutoApprove(demo!.id, false, "test");

@@ -137,8 +137,9 @@ export async function domainAction(formData: FormData) {
     case "reject-proposals": {
       const proposalId = formData.get("proposalId");
       await decideProposals(id, proposalId ? [String(proposalId)] : "ALL", action === "approve-proposals", actor);
-      // Approved prompts enter the selection now, not at the next cron tick.
-      if (action === "approve-proposals") kickJobs();
+      // "Approve all" queues an applying selection: run it now, not at the next cron tick. Single approvals
+      // are clicked in series and mostly queue nothing, so they do not each start a queue drain.
+      if (action === "approve-proposals" && !proposalId) kickJobs();
       break;
     }
     case "auto-apply-on":

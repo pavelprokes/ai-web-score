@@ -887,7 +887,7 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
                 confirmLabel: `Approve all ${proposals.length}`,
                 body: (
                   <>
-                    <p>Approved prompts join the measured set right away, with no second approval. Measuring more prompts can shift the scores.</p>
+                    <p>Approved prompts become candidates and the selection is applied right away, up to the recommended size, with no second approval. Measuring more prompts can shift the scores.</p>
                     <p>{budget}</p>
                   </>
                 ),

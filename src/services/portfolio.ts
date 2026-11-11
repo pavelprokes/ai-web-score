@@ -115,7 +115,6 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
   const allocation = allocatePrompts(clusters, target);
   for (const [k, v] of allocation) allocation.set(k, Math.min(MAX_PROMPTS_PER_CLUSTER, Math.max(2, v)));
 
-  const status = initial || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
   let created = 0;
   const chunks: TopicCluster[][] = [];
   for (let i = 0; i < clusters.length; i += CLUSTERS_PER_LLM_CALL) {
@@ -138,6 +137,9 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
     ),
   );
   await throwIfJobCancelled();
+  // Read after the minutes of generation: the owner may have turned automatic changes on meanwhile.
+  const [fresh] = await db.select({ auto: domains.autoApprovePortfolioChanges }).from(domains).where(eq(domains.id, domainId));
+  const status = initial || mode === "REGENERATE" || fresh?.auto ? "CANDIDATE" : "PROPOSED";
   for (const [index, set] of sets.entries()) {
     const chunk = chunks[index]!;
     const validKeys = new Set(chunk.map((c) => c.key));
@@ -280,15 +282,19 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
   const roleOf = new Map(result.active.map((a) => [a.promptId, a.role]));
 
   // Either way this selection supersedes the rotations proposed by an earlier one.
-  await db
-    .delete(portfolioProposals)
-    .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
+  const dropRotations = () =>
+    db
+      .delete(portfolioProposals)
+      .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
   if (apply) {
+    // Dropped after applying: a plain optimisation running at the same time may have proposed in between.
     await applySelection(domainId, result.activated, result.deactivated, roleOf);
+    await dropRotations();
   } else {
+    await dropRotations();
     // Role changes of already-active prompts are bookkeeping, not a change of the measured set.
     await setRoles(result.active.filter((a) => !result.activated.includes(a.promptId)));
-    const proposals: Array<typeof portfolioProposals.$inferInsert> = [
+    const proposals: Array<{ domainId: string; kind: string; promptId: string; reason: string; payload?: unknown }> = [
       ...result.activated.map((id) => ({
         domainId,
         kind: "ACTIVATE",
@@ -306,7 +312,20 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
         };
       }),
     ];
-    if (proposals.length) await db.insert(portfolioProposals).values(proposals);
+    if (proposals.length) {
+      // Only what is still a change: an applying optimisation of the same domain may have run since the pool
+      // was read, and a proposal to activate an active prompt would ask the owner a second time.
+      const values = sql.join(
+        proposals.map((p) => sql`(${p.kind}, ${p.promptId}, ${p.reason}, ${p.payload ? JSON.stringify(p.payload) : null}::jsonb)`),
+        sql`, `,
+      );
+      await db.execute(sql`
+        insert into portfolio_proposals (domain_id, kind, prompt_id, reason, payload)
+        select ${domainId}, v.kind, v.prompt_id, v.reason, v.payload
+        from (values ${values}) as v(kind, prompt_id, reason, payload)
+        join prompts p on p.id = v.prompt_id
+        where (v.kind = 'ACTIVATE' and p.status in ('CANDIDATE', 'PAUSED')) or (v.kind = 'DEACTIVATE' and p.status = 'ACTIVE')`);
+    }
   }
   return { active: result.active.length, activated: result.activated.length, deactivated: result.deactivated.length, applied: apply };
 }
