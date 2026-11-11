@@ -790,12 +790,17 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
   const { portfolio, sizing, proposals } = detail;
   const q = portfolio.quality;
   const d = detail.domain;
+  // Sizing stored before the cap was rounded can hold fractions (145.6) until the next discovery.
+  const whole = Math.floor;
+  const auto = d.autoApprovePortfolioChanges;
+  const waiting = `${proposals.length} ${proposals.length === 1 ? "proposal" : "proposals"}`;
+  const budget = `Spending stays within the monthly budget of ${usd(detail.costs.monthlyBudgetUsd)}: the planner caps every measurement cycle.`;
   return (
     <Section title="Prompt portfolio" id="portfolio-heading">
       <dl className="tiles tiles--inner" aria-label="Prompt counts">
         <StatTile label={<>Active <MetricInfo id="active-prompts" /></>} value={portfolio.active} detail={`${portfolio.core} core · ${portfolio.exploration} exploration`} />
-        <StatTile label={<>Candidate pool <MetricInfo id="candidate-pool" /></>} value={portfolio.candidate} detail={sizing ? `target ${sizing.candidatePoolTarget}` : undefined} />
-        <StatTile label={<>Recommended size <MetricInfo id="recommended-size" /></>} value={sizing?.recommendedPromptCount ?? "–"} detail={sizing ? `${sizing.minimumPromptCount}–${sizing.maximumPromptCount}` : undefined} />
+        <StatTile label={<>Candidate pool <MetricInfo id="candidate-pool" /></>} value={portfolio.candidate} detail={sizing ? `target ${whole(sizing.candidatePoolTarget)}` : undefined} />
+        <StatTile label={<>Recommended size <MetricInfo id="recommended-size" /></>} value={sizing ? whole(sizing.recommendedPromptCount) : "–"} detail={sizing ? `${whole(sizing.minimumPromptCount)}–${whole(sizing.maximumPromptCount)}` : undefined} />
         <StatTile
           label={<>Quality score <MetricInfo id="quality-score" /></>}
           value={q ? <Score value={q.score} /> : "–"}
@@ -814,6 +819,39 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
           ))}
         </dl>
       )}
+
+      <h3 className="subhead">Apply changes automatically: {auto ? "On" : "Off"}</h3>
+      <p className="muted">
+        {auto
+          ? "New prompts and the daily rotation are applied without your approval: prompts rotate in and out of the measured set."
+          : "New prompts and rotations wait below for your approval. When on, they are applied as they come: prompts rotate in and out of the measured set."}{" "}
+        {budget} A larger measured set can raise spend up to that budget and shift the scores.
+      </p>
+      <div className="btn-row">
+        {auto ? (
+          <ActionButton domainId={d.id} action="auto-apply-off" label="Turn off automatic changes" returnTo={returnTo} />
+        ) : (
+          <ActionButton
+            domainId={d.id}
+            action="auto-apply-on"
+            label="Turn on automatic changes"
+            returnTo={returnTo}
+            confirm={{
+              title: `Apply portfolio changes for ${d.hostname} automatically?`,
+              confirmLabel: "Turn on",
+              body: (
+                <>
+                  <p>
+                    {proposals.length > 0 ? `The ${waiting} waiting now will be approved. ` : ""}From now on new prompts and the daily rotation
+                    are applied without approval. Measuring more prompts can shift the scores.
+                  </p>
+                  <p>{budget} You can turn this off at any time.</p>
+                </>
+              ),
+            }}
+          />
+        )}
+      </div>
 
       <h3 className="subhead" id="proposals-heading">
         Proposals waiting for approval ({proposals.length})
@@ -839,8 +877,33 @@ function Portfolio({ detail, returnTo }: { detail: Detail; returnTo: string }) {
           </ul>
           {proposals.length > 15 && <p className="muted">and {proposals.length - 15} more.</p>}
           <div className="btn-row">
-            <ActionButton domainId={d.id} action="approve-proposals" label={`Approve all ${proposals.length}`} returnTo={returnTo} />
-            <ActionButton domainId={d.id} action="reject-proposals" label="Reject all" returnTo={returnTo} />
+            <ActionButton
+              domainId={d.id}
+              action="approve-proposals"
+              label={`Approve all ${proposals.length}`}
+              returnTo={returnTo}
+              confirm={{
+                title: `Approve ${waiting} for ${d.hostname}?`,
+                confirmLabel: `Approve all ${proposals.length}`,
+                body: (
+                  <>
+                    <p>Approved prompts become candidates and the selection is applied right away, up to the recommended size, with no second approval. Measuring more prompts can shift the scores.</p>
+                    <p>{budget}</p>
+                  </>
+                ),
+              }}
+            />
+            <ActionButton
+              domainId={d.id}
+              action="reject-proposals"
+              label="Reject all"
+              returnTo={returnTo}
+              confirm={{
+                title: `Reject ${waiting} for ${d.hostname}?`,
+                confirmLabel: `Reject all ${proposals.length}`,
+                body: <p>Proposed new prompts are discarded and cannot be restored. Rotation proposals come back with the next daily optimisation.</p>,
+              }}
+            />
           </div>
         </>
       )}

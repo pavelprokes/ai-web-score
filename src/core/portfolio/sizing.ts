@@ -87,7 +87,7 @@ export function estimatePortfolioSize(input: SizingInput): PortfolioSizing {
   const minimum = Math.max(8, coverage);
   // Beyond ~8 active prompts per cluster and market, extra prompts are near-duplicates that add
   // cost but little information — breadth must come from more clusters, not more paraphrases.
-  const diversityCap = Math.max(minimum, input.totalClusterCount * MAX_ACTIVE_PER_CLUSTER * Math.max(1, 1 + extraMarkets));
+  const diversityCap = Math.max(minimum, Math.floor(input.totalClusterCount * MAX_ACTIVE_PER_CLUSTER * Math.max(1, 1 + extraMarkets)));
   const recommended = Math.min(
     diversityCap,
     Math.max(minimum, Math.round(Math.max(coverage, Math.min(statistical, complexity * 1.5), complexity))),

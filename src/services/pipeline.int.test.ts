@@ -1380,4 +1380,75 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
     expect(overview.databaseBytes).toBeGreaterThan(1_000_000);
   });
+
+  it("applies portfolio changes without a second approval: 'Approve all', and automatically once the domain opts in", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const { processJobs } = await import("@/jobs/runner");
+    const { decideProposals, generatePortfolio, setAutoApprove } = await import("@/services/portfolio");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    expect(demo!.autoApprovePortfolioChanges).toBe(false);
+    await db.execute(sql`delete from jobs`);
+    await db.delete(s.portfolioProposals).where(eq(s.portfolioProposals.domainId, demo!.id));
+    const [template] = await db.select().from(s.topicClusters).where(and(eq(s.topicClusters.domainId, demo!.id), eq(s.topicClusters.active, true))).limit(1);
+    const addCluster = (key: string) =>
+      db.insert(s.topicClusters).values({ ...template!, id: undefined, key, name: key, weight: 0.95, data: { ...(template!.data as object), key, name: key, weight: 0.95 } });
+    const proposed = () => db.select().from(s.portfolioProposals).where(and(eq(s.portfolioProposals.domainId, demo!.id), eq(s.portfolioProposals.status, "PROPOSED")));
+    const activeIn = (key: string) => db.select().from(s.prompts).where(and(eq(s.prompts.domainId, demo!.id), eq(s.prompts.clusterKey, key), eq(s.prompts.status, "ACTIVE")));
+    const optimize = () => processJobs({ deadlineMs: 600_000, types: ["portfolio.optimize"] });
+
+    setLlmOverride((await import("@/e2e/fake-world")).fakeLlm);
+    try {
+      // Manual domain: re-discovery proposes the new topic's prompts; nothing is measured before approval.
+      await addCluster("new-topic-manual");
+      await generatePortfolio(demo!.id, "REDISCOVERY");
+      expect((await proposed()).filter((p) => p.kind === "ADD_PROMPT").length).toBeGreaterThan(0);
+      expect(await activeIn("new-topic-manual")).toHaveLength(0);
+      // "Approve all" is the whole decision: the selection is applied, not proposed again as ACTIVATE.
+      // A plain optimisation queued earlier runs next to the applying one and must not propose what it applied.
+      const { enqueue } = await import("@/jobs/queue");
+      await enqueue("portfolio.optimize", { domainId: demo!.id }, { dedupeKey: `optimize:${demo!.id}` });
+      await decideProposals(demo!.id, "ALL", true, "test");
+      await processJobs({ deadlineMs: 600_000, concurrency: 4, types: ["portfolio.optimize"] });
+      const activeIds = new Set((await db.select().from(s.prompts).where(and(eq(s.prompts.domainId, demo!.id), eq(s.prompts.status, "ACTIVE")))).map((p) => p.id));
+      expect((await proposed()).filter((p) => p.kind === "ACTIVATE" && activeIds.has(p.promptId!))).toEqual([]);
+      expect(await proposed()).toEqual([]);
+      expect((await activeIn("new-topic-manual")).length).toBeGreaterThan(0);
+
+      // Opting in applies what is waiting; a later re-discovery then activates new topics by itself.
+      await addCluster("new-topic-waiting");
+      await generatePortfolio(demo!.id, "REDISCOVERY");
+      expect((await proposed()).length).toBeGreaterThan(0);
+      await setAutoApprove(demo!.id, true, "test");
+      await optimize();
+      expect(await proposed()).toEqual([]);
+      expect((await activeIn("new-topic-waiting")).length).toBeGreaterThan(0);
+
+      await addCluster("new-topic-auto");
+      await generatePortfolio(demo!.id, "REDISCOVERY");
+      await optimize();
+      expect(await proposed()).toEqual([]);
+      expect((await activeIn("new-topic-auto")).length).toBeGreaterThan(0);
+
+      // Turned on while a generation is running: its prompts need no approval either.
+      await setAutoApprove(demo!.id, false, "test");
+      await addCluster("new-topic-midflight");
+      const { fakeLlm } = await import("@/e2e/fake-world");
+      setLlmOverride(async (req) => {
+        await db.update(s.domains).set({ autoApprovePortfolioChanges: true }).where(eq(s.domains.id, demo!.id));
+        return fakeLlm(req);
+      });
+      await generatePortfolio(demo!.id, "REDISCOVERY");
+      await optimize();
+      expect(await proposed()).toEqual([]);
+      expect((await activeIn("new-topic-midflight")).length).toBeGreaterThan(0);
+    } finally {
+      setLlmOverride(null);
+      await setAutoApprove(demo!.id, false, "test");
+    }
+    const [after] = await db.select().from(s.domains).where(eq(s.domains.id, demo!.id));
+    expect(after!.autoApprovePortfolioChanges).toBe(false);
+  });
 });

@@ -23,7 +23,7 @@ const s = (v: unknown) => String(v);
 const HANDLERS: Record<JobType, Handler> = {
   "discovery.run": (p) => runDiscovery(s(p.domainId), s(p.trigger ?? "SYSTEM")),
   "portfolio.generate": (p) => generatePortfolio(s(p.domainId), (p.mode as GenerationMode) ?? "INITIAL"),
-  "portfolio.optimize": (p) => optimizePortfolio(s(p.domainId)),
+  "portfolio.optimize": (p) => optimizePortfolio(s(p.domainId), { applyDirectly: p.apply === true }),
   "measurement.plan": (p) => planMeasurements(s(p.domainId), (p.trigger as "CRON" | "MANUAL" | "SYSTEM") ?? "CRON"),
   "measurement.execute": (p) => executeMeasurement(s(p.measurementId)),
   "measurement.submit": (p) => submitAsync(s(p.runId), s(p.configurationId)),

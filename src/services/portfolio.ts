@@ -115,7 +115,6 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
   const allocation = allocatePrompts(clusters, target);
   for (const [k, v] of allocation) allocation.set(k, Math.min(MAX_PROMPTS_PER_CLUSTER, Math.max(2, v)));
 
-  const status = initial || mode === "REGENERATE" || domain.autoApprovePortfolioChanges ? "CANDIDATE" : "PROPOSED";
   let created = 0;
   const chunks: TopicCluster[][] = [];
   for (let i = 0; i < clusters.length; i += CLUSTERS_PER_LLM_CALL) {
@@ -138,6 +137,9 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
     ),
   );
   await throwIfJobCancelled();
+  // Read after the minutes of generation: the owner may have turned automatic changes on meanwhile.
+  const [fresh] = await db.select({ auto: domains.autoApprovePortfolioChanges }).from(domains).where(eq(domains.id, domainId));
+  const status = initial || mode === "REGENERATE" || fresh?.auto ? "CANDIDATE" : "PROPOSED";
   for (const [index, set] of sets.entries()) {
     const chunk = chunks[index]!;
     const validKeys = new Set(chunk.map((c) => c.key));
@@ -192,6 +194,9 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
     await optimizePortfolio(domainId, { applyDirectly: true });
     await db.update(domains).set({ status: "ACTIVE", lastError: null, nextPlanAt: new Date() }).where(eq(domains.id, domainId));
     await enqueue("measurement.plan", { domainId, trigger: "SYSTEM" }, { dedupeKey: `plan:${domainId}` });
+  } else if (created > 0 && status === "CANDIDATE") {
+    // New candidates need no approval: select them now, not at the next daily optimisation.
+    await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
   }
   return { created };
 }
@@ -276,15 +281,20 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
   const apply = opts.applyDirectly || domain.autoApprovePortfolioChanges;
   const roleOf = new Map(result.active.map((a) => [a.promptId, a.role]));
 
-  if (apply) {
-    await applySelection(domainId, result.activated, result.deactivated, roleOf);
-  } else {
-    // Role changes of already-active prompts are bookkeeping, not a change of the measured set.
-    await setRoles(result.active.filter((a) => !result.activated.includes(a.promptId)));
-    await db
+  // Either way this selection supersedes the rotations proposed by an earlier one.
+  const dropRotations = () =>
+    db
       .delete(portfolioProposals)
       .where(and(eq(portfolioProposals.domainId, domainId), eq(portfolioProposals.status, "PROPOSED"), inArray(portfolioProposals.kind, ["ACTIVATE", "DEACTIVATE"])));
-    const proposals: Array<typeof portfolioProposals.$inferInsert> = [
+  if (apply) {
+    // Dropped after applying: a plain optimisation running at the same time may have proposed in between.
+    await applySelection(domainId, result.activated, result.deactivated, roleOf);
+    await dropRotations();
+  } else {
+    await dropRotations();
+    // Role changes of already-active prompts are bookkeeping, not a change of the measured set.
+    await setRoles(result.active.filter((a) => !result.activated.includes(a.promptId)));
+    const proposals: Array<{ domainId: string; kind: string; promptId: string; reason: string; payload?: unknown }> = [
       ...result.activated.map((id) => ({
         domainId,
         kind: "ACTIVATE",
@@ -302,7 +312,20 @@ export async function optimizePortfolio(domainId: string, opts: { applyDirectly?
         };
       }),
     ];
-    if (proposals.length) await db.insert(portfolioProposals).values(proposals);
+    if (proposals.length) {
+      // Only what is still a change: an applying optimisation of the same domain may have run since the pool
+      // was read, and a proposal to activate an active prompt would ask the owner a second time.
+      const values = sql.join(
+        proposals.map((p) => sql`(${p.kind}, ${p.promptId}, ${p.reason}, ${p.payload ? JSON.stringify(p.payload) : null}::jsonb)`),
+        sql`, `,
+      );
+      await db.execute(sql`
+        insert into portfolio_proposals (domain_id, kind, prompt_id, reason, payload)
+        select ${domainId}, v.kind, v.prompt_id, v.reason, v.payload
+        from (values ${values}) as v(kind, prompt_id, reason, payload)
+        join prompts p on p.id = v.prompt_id
+        where (v.kind = 'ACTIVATE' and p.status in ('CANDIDATE', 'PAUSED')) or (v.kind = 'DEACTIVATE' and p.status = 'ACTIVE')`);
+    }
   }
   return { active: result.active.length, activated: result.activated.length, deactivated: result.deactivated.length, applied: apply };
 }
@@ -357,9 +380,21 @@ export async function decideProposals(domainId: string, ids: string[] | "ALL", a
   }
   // Approved new prompts are candidates only; let the selection rotate them in now rather than tomorrow.
   if (approve && list.some((p) => p.status === "PROPOSED" && p.kind === "ADD_PROMPT")) {
-    await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
+    // "Approve all" is the whole decision: the selection is applied instead of coming back as ACTIVATE
+    // proposals. Its own dedupe key, so a queued plain optimisation cannot swallow the apply.
+    if (ids === "ALL") await enqueue("portfolio.optimize", { domainId, apply: true }, { dedupeKey: `optimize:${domainId}:apply` });
+    else await enqueue("portfolio.optimize", { domainId }, { dedupeKey: `optimize:${domainId}` });
   }
   return list.length;
+}
+
+/** Opt a domain in or out of applying portfolio changes without approval (off by default). */
+export async function setAutoApprove(domainId: string, on: boolean, decidedBy: string) {
+  await getDb().update(domains).set({ autoApprovePortfolioChanges: on }).where(eq(domains.id, domainId));
+  if (!on) return;
+  // Opting in decides what is waiting, then selects now rather than at the next daily optimisation.
+  await decideProposals(domainId, "ALL", true, decidedBy);
+  await enqueue("portfolio.optimize", { domainId, apply: true }, { dedupeKey: `optimize:${domainId}:apply` });
 }
 
 export async function promptCounts(domainId: string) {
