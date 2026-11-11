@@ -331,6 +331,17 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     expect(domain!.status).toBe("ACTIVE");
     const profiles = await db.select().from(s.domainProfiles).where(eq(s.domainProfiles.domainId, domainId));
     expect(profiles.length).toBe(2);
+
+    // Each discovery and prompt-design run carries what its own LLM calls cost, not the earlier run's too.
+    const runs = await db.select().from(s.runs).where(and(eq(s.runs.domainId, domainId), inArray(s.runs.kind, ["DISCOVERY", "PORTFOLIO"])));
+    const usage = await db.select().from(s.llmUsage).where(eq(s.llmUsage.domainId, domainId));
+    for (const [kind, purpose] of [["DISCOVERY", "discovery"], ["PORTFOLIO", "portfolio."]] as const) {
+      const ofKind = runs.filter((r) => r.kind === kind);
+      const spent = usage.filter((u) => u.purpose.startsWith(purpose)).reduce((a, u) => a + u.costUsd, 0);
+      expect(ofKind.length).toBeGreaterThanOrEqual(2);
+      expect(ofKind.reduce((a, r) => a + r.estimatedCostUsd, 0)).toBeCloseTo(spent, 9);
+    }
+    expect(runs.filter((r) => r.kind === "DISCOVERY").every((r) => r.estimatedCostUsd > 0)).toBe(true);
   }, T);
 
   it.skipIf(live)("6) re-discovery is told the measured topics; a dropped topic takes its pending proposals with it", async () => {

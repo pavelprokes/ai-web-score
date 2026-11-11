@@ -11,6 +11,7 @@ import { PromptVersionSpec } from "@/core/prompt";
 import type { CellState } from "@/core/sampling/cell-state";
 import { generateStructured } from "@/lib/llm";
 import { deadlinePassed } from "@/lib/deadline";
+import { llmCostOfRun } from "./costs";
 import { latestProfile } from "./discovery";
 import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
@@ -27,6 +28,8 @@ const MAX_PROMPTS_PER_CLUSTER = 12;
 const MAX_NEW_CANDIDATES = Number(process.env.MAX_CANDIDATE_PROMPTS ?? 600);
 
 export type GenerationMode = "INITIAL" | "REDISCOVERY" | "REGENERATE" | "EXPLORATION";
+
+const llmPurpose = (mode: GenerationMode) => `portfolio.${mode.toLowerCase()}`;
 
 function newPromptId() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -46,6 +49,7 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
   const db = getDb();
   const setup = mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0;
   const [run] = await db.insert(runs).values({ domainId, kind: "PORTFOLIO", trigger: mode }).returning({ id: runs.id });
+  const estimatedCostUsd = llmCostOfRun(llmPurpose(mode));
   // A new attempt at the first portfolio: the previous attempt's error no longer describes the domain.
   if (setup) {
     await db
@@ -57,13 +61,15 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
     const result = await designPortfolio(domainId, mode);
     await db
       .update(runs)
-      .set({ status: "SUCCEEDED", finishedAt: new Date(), completedCount: result.created, plan: { mode, created: result.created } })
+      .set({ status: "SUCCEEDED", finishedAt: new Date(), completedCount: result.created, plan: { mode, created: result.created }, estimatedCostUsd })
       .where(and(eq(runs.id, run!.id), eq(runs.status, "RUNNING")));
     return result;
   } catch (e) {
     // Past the job's deadline the LLM calls were aborted; name the real cause, not "request aborted".
     const message = deadlinePassed() ? "Did not finish within the job's time limit" : e instanceof Error ? e.message : String(e);
     const cancelled = e instanceof JobCancelledError;
+    // A failed or stopped run was paid for as well (the cancel action has already closed a stopped one).
+    await db.update(runs).set({ estimatedCostUsd }).where(eq(runs.id, run!.id));
     await db
       .update(runs)
       .set({ status: cancelled ? "CANCELLED" : "FAILED", finishedAt: new Date(), error: message.slice(0, 1000) })
@@ -125,7 +131,7 @@ async function designPortfolio(domainId: string, mode: GenerationMode) {
         schema: LlmPromptSet,
         system: PROMPT_SYSTEM,
         user: promptGenerationUser({ profile, clusters: chunk, promptsPerCluster: allocation, exploratory }),
-        purpose: `portfolio.${mode.toLowerCase()}`,
+        purpose: llmPurpose(mode),
         domainId,
         effort: "medium",
       }),

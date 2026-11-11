@@ -9,6 +9,7 @@ import { DISCOVERY_SYSTEM, discoveryUserPrompt, LlmProfile, toDomainProfile } fr
 import { buildClusters, IMPORTANT_CLUSTER_WEIGHT } from "@/core/portfolio/clusters";
 import { estimatePortfolioSize, type PortfolioSizing } from "@/core/portfolio/sizing";
 import { generateStructured } from "@/lib/llm";
+import { llmCostOfRun } from "./costs";
 import { enqueue, JobCancelledError, throwIfJobCancelled } from "@/jobs/queue";
 
 /**
@@ -130,7 +131,10 @@ export async function runDiscovery(domainId: string, trigger: string) {
         lastError: null,
       })
       .where(eq(domains.id, domainId));
-    await db.update(runs).set({ status: "SUCCEEDED", finishedAt: new Date(), plan: { version, sizing } }).where(eq(runs.id, run!.id));
+    await db
+      .update(runs)
+      .set({ status: "SUCCEEDED", finishedAt: new Date(), plan: { version, sizing }, estimatedCostUsd: llmCostOfRun("discovery") })
+      .where(eq(runs.id, run!.id));
 
     await enqueue(
       "portfolio.generate",
@@ -142,6 +146,8 @@ export async function runDiscovery(domainId: string, trigger: string) {
     if (previous) await enqueue("signals.reextract", { domainId }, { dedupeKey: `reextract:${domainId}:v${version}` });
     return { version, sizing };
   } catch (e) {
+    // A failed or stopped run was paid for as well.
+    await db.update(runs).set({ estimatedCostUsd: llmCostOfRun("discovery") }).where(eq(runs.id, run!.id));
     if (e instanceof JobCancelledError) throw e; // the cancel action already closed the run and reset the domain
     const message = e instanceof Error ? e.message : String(e);
     await db.update(runs).set({ status: "FAILED", finishedAt: new Date(), error: message }).where(eq(runs.id, run!.id));

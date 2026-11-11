@@ -66,6 +66,20 @@ export async function internalLlmCost(since: Date) {
   return rows.map((r) => ({ purpose: r.purpose, cost: Number(r.cost) }));
 }
 
+/**
+ * What the internal LLM calls of a DISCOVERY or PORTFOLIO run cost, for the `set` of an update of that `runs` row.
+ * `llm_usage` has no run id: the run's calls are the domain's calls of its purpose since the run started (one run
+ * per kind and domain at a time — the job dedupe key).
+ */
+export function llmCostOfRun(purpose: string) {
+  return sql<number>`(select coalesce(sum(u.cost_usd), 0) from llm_usage u where u.domain_id = runs.domain_id and u.created_at >= runs.created_at and u.purpose = ${purpose})`;
+}
+
+/** Budget the monitored domains can spend this month: a paused domain is not planned, so its budget is left out. */
+export function budgetTotal(domains: Array<{ status: string; cost: { monthlyBudgetUsd: number } }>) {
+  return domains.reduce((a, d) => a + (d.status === "PAUSED" ? 0 : d.cost.monthlyBudgetUsd), 0);
+}
+
 const DAY_MS = 86_400_000;
 
 /** Month-end projection: spend so far + the daily run rate of the trailing window for the rest of the UTC month. */
