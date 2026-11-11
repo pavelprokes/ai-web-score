@@ -10,9 +10,12 @@ import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, Provide
  *
  * Cost: the `fast` preset runs on the `priority` tier (2× token prices). Monitoring needs no
  * low latency, so `service_tier: "flex"` (0.5× token prices, best-effort capacity) is requested.
- * The field is not in the official SDK's request schema and production answered every request
- * with `400 invalid request` (2026-10-07), so a 400 is retried once without it and the tier is not
- * sent again in this process (≈ +$0.0006 per answer). Web search stays $1 per 1k Fast Search calls.
+ * Production answered a bare `400 invalid request` to the field on 2026-10-07; the API has accepted it since
+ * (docs: an unsupported tier is ignored, the response's `service_tier` names the one that served, which can
+ * be `default` when flex capacity is short). That rejection did not name the field, so any 400 is retried
+ * once without the tier (≈ +$0.0004 for that answer; a rejected request is not billed). Nothing is
+ * remembered: one 400 used to switch the tier off for the life of the process.
+ * Web search stays $1 per 1k Fast Search calls.
  * Docs: docs.perplexity.ai/docs/agent-api (presets, models, web-search).
  */
 
@@ -30,9 +33,6 @@ interface PerplexityParams {
   searchType?: "web" | "fast";
   maxResults?: number;
 }
-
-/** Set after the API rejected a request carrying `service_tier`; later requests leave it out. */
-let serviceTierRejected = false;
 
 /**
  * The Agent API admits a fixed number of requests per rolling second for the whole organization
@@ -216,16 +216,15 @@ export const perplexityApi: ProviderAdapter = {
         }
       }
     };
-    const withTier = Boolean((config.params as PerplexityParams).serviceTier) && !serviceTierRejected;
+    const withTier = Boolean((config.params as PerplexityParams).serviceTier);
     let json: PplxResponse;
     try {
       json = await post(withTier);
     } catch (e) {
-      // A rejected request is not billed; retry once without the tier.
+      // A rejected request is not billed; retry this one without the tier (its rejection does not name the field).
       if (!withTier || !(e instanceof ProviderError) || e.status !== 400) throw e;
+      console.warn("[perplexity] HTTP 400 with service_tier — retrying this request without it.");
       json = await post(false);
-      serviceTierRejected = true;
-      console.warn("[perplexity] service_tier rejected with HTTP 400 — sending requests without it.");
     }
     return { answer: parsePerplexityResponse(json), raw: json, reportedCostUsd: json.usage?.cost?.total_cost ?? undefined };
   },

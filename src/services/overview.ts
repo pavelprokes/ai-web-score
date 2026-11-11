@@ -26,7 +26,7 @@ import { umamiDashboardUrl } from "@/core/analytics/umami";
 import { costByDomain, costByProvider, estimatedMonthlyCost, internalLlmCost, monthStart, providerValueReport } from "./costs";
 import { latestProfile } from "./discovery";
 import { promptCounts } from "./portfolio";
-import { DEFAULT_MONTHLY_BUDGET_USD, liveCells, standardConfigurationIds } from "./planning";
+import { calibrationPairKey, calibrationPairs, DEFAULT_MONTHLY_BUDGET_USD, enabledConfigurations, liveCells, standardConfigurationIds } from "./planning";
 import { currentSignals } from "./signals";
 import type { Citation } from "@/core/measurement/types";
 import type { RawSignals } from "@/core/signals/extract";
@@ -383,7 +383,7 @@ export async function providersOverview() {
       return fallback;
     }
   };
-  const [rows, configs, caps, prices, month, total, calib, llm] = await Promise.all([
+  const [rows, configs, caps, prices, month, total, latestCalib, llm, databaseBytes] = await Promise.all([
     db.select().from(providers),
     db.select().from(providerConfigurations),
     // Latest version per provider/model only; older versions are history.
@@ -398,13 +398,29 @@ export async function providersOverview() {
     optional("Prices", db.select().from(priceEntries).orderBy(desc(priceEntries.effectiveFrom)), []),
     optional("This month's cost", costByProvider(monthStart()), []),
     optional("All-time cost", costByProvider(new Date(0)), []),
+    // Latest result per pair, however old: a pair stops being evaluated while its provider is off,
+    // and its last state must not vanish from the page after a while.
     optional(
       "Calibration results",
-      db.select().from(calibrationResults).where(gte(calibrationResults.createdAt, new Date(Date.now() - 30 * 86_400_000))).orderBy(desc(calibrationResults.createdAt)),
+      db
+        .selectDistinctOn([calibrationResults.referenceConfigurationId, calibrationResults.candidateConfigurationId])
+        .from(calibrationResults)
+        .orderBy(calibrationResults.referenceConfigurationId, calibrationResults.candidateConfigurationId, desc(calibrationResults.createdAt)),
       [],
     ),
     optional("Internal analysis cost", internalLlmCost(monthStart()), []),
+    optional<number | null>(
+      "Database size",
+      // All databases of the project, which is what Supabase meters (not only the current one).
+      db.execute(sql`select sum(pg_database_size(datname))::float8 as bytes from pg_database`).then((r) => Number(r[0]!.bytes)),
+      null,
+    ),
   ]);
+  // A pair is measured and evaluated only while both sides are enabled with credentials (reference too).
+  const activePairs = new Set(calibrationPairs(await optional("Measured configurations", enabledConfigurations(), [])).map(calibrationPairKey));
+  const calib = latestCalib
+    .map((x) => ({ ...x, active: activePairs.has(calibrationPairKey({ reference: { id: x.referenceConfigurationId }, candidate: { id: x.candidateConfigurationId } })) }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // newest first, as the page reads it
   const reach = Object.fromEntries(rows.map((r) => [r.id, r.reach]));
   const value = await optional("Provider value", providerValueReport(reach), []);
   return {
@@ -426,7 +442,7 @@ export async function providersOverview() {
           .map((c) => ({
             ...c,
             capability: caps.find((x) => x.providerId === p.id && x.model === c.model) ?? null,
-            calibration: calib.filter((x) => x.candidateConfigurationId === c.id || x.referenceConfigurationId === c.id).slice(0, 3),
+            calibration: calib.filter((x) => x.candidateConfigurationId === c.id || x.referenceConfigurationId === c.id),
           })),
         prices: prices.filter((x) => x.providerId === p.id),
         cost: { month: month.find((x) => x.providerId === p.id) ?? null, total: total.find((x) => x.providerId === p.id) ?? null },
@@ -434,6 +450,7 @@ export async function providersOverview() {
       };
     }),
     internalLlmCostThisMonth: llm,
+    databaseBytes,
   };
 }
 

@@ -180,6 +180,20 @@ export const claudeApi: ProviderAdapter = {
       verifiedAt: "2026-10-06T00:00:00Z",
     },
     {
+      // Correction: cache reads on Sonnet 5.5 are 0.05× input ($0.10), not 0.1×. Entries are append-only,
+      // so the first one stays and answers measured before this date keep the cost they were stored with.
+      model: "claude-sonnet-5-5",
+      effectiveFrom: "2026-11-11T00:00:00Z",
+      inputPerMTok: 2,
+      cachedInputPerMTok: 0.1,
+      outputPerMTok: 10,
+      searchPer1k: 10,
+      batchDiscount: 0.5,
+      source: "https://platform.claude.com/docs/en/about-claude/pricing",
+      verifiedAt: "2026-11-11T00:00:00Z",
+      notes: "Corrects the cache-read rate of the 2026-09-01 entry ($0.20).",
+    },
+    {
       model: "claude-opus-5-5",
       effectiveFrom: "2026-09-01T00:00:00Z",
       inputPerMTok: 4,

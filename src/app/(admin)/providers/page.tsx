@@ -11,7 +11,8 @@ import { InternalModels } from "@/components/InternalModels";
 import { LLM_TASKS, llmModel, type LlmTask } from "@/lib/llm";
 import { MetricInfo } from "@/components/MetricInfo";
 import { SubmitButton } from "@/components/SubmitButton";
-import { num, pct, usd } from "@/components/format";
+import { absoluteTime, num, pct, usd } from "@/components/format";
+import { calibrationBadge } from "@/components/calibration";
 import { Badge, Section, StatTile, TableScroll, type Tone } from "@/components/ui";
 
 export const metadata: Metadata = { title: "AI providers" };
@@ -35,11 +36,8 @@ const ROLE: Record<string, string> = {
   CANDIDATE: "Candidate — cheaper, in shadow test",
 };
 
-const DECISION: Record<string, { tone: Tone; label: string }> = {
-  PROMOTE: { tone: "good", label: "Passed calibration" },
-  KEEP_TESTING: { tone: "info", label: "Still testing" },
-  REJECT: { tone: "critical", label: "Failed calibration" },
-};
+/** Supabase free tier: the project turns read-only when the database reaches 500 MB. Set the plan's limit after an upgrade. */
+const DATABASE_LIMIT_MB = Number(process.env.DATABASE_LIMIT_MB) || 500;
 
 export default async function ProvidersPage({ searchParams }: { searchParams: Promise<{ done?: string; error?: string }> }) {
   await requireAdminPage();
@@ -59,6 +57,8 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   const enabled = rows.filter((p) => p.enabled).length;
   const withoutCredentials = rows.filter((p) => p.enabled && p.missingEnv.length > 0).length;
   const labels = new Map(rows.map((p) => [p.id, p.label]));
+  const databaseMb = data.databaseBytes === null ? null : Math.round(data.databaseBytes / 1024 ** 2);
+  const databaseFull = databaseMb !== null && databaseMb > DATABASE_LIMIT_MB * 0.8;
 
   return (
     <>
@@ -70,6 +70,14 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       </div>
 
       <Flash message={done} error={error ?? ([...low, ...data.warnings].join(" ") || undefined)} />
+      {/* Not in Flash: this stays for weeks and must not replace the confirmation of an action. */}
+      {databaseFull && (
+        <div className="alert" role="status">
+          <Badge tone="warning">Storage</Badge> Database is at {num(databaseMb!)} MB of {num(DATABASE_LIMIT_MB)} MB; at the limit Supabase makes it
+          read-only and measuring stops. Set RAW_RESPONSE_RETENTION_DAYS and then run <code>VACUUM FULL measurements</code> (clearing alone
+          does not shrink the database), or upgrade the plan and set DATABASE_LIMIT_MB.
+        </div>
+      )}
 
       <dl className="tiles" aria-label="Summary">
         <StatTile
@@ -79,6 +87,13 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
         />
         <StatTile label="Measurements this month" value={usd(month)} detail="All domains" />
         <StatTile label={<>Analysis this month <MetricInfo id="analysis-cost" /></>} value={usd(llm)} detail="Discovery, prompt design, answer analysis" />
+        {databaseMb !== null && (
+          <StatTile
+            label="Database"
+            value={`${num(databaseMb)} MB`}
+            detail={`of ${num(DATABASE_LIMIT_MB)} MB on the Supabase plan${databaseFull ? " · running out of space" : ""}`}
+          />
+        )}
       </dl>
 
       <ProviderErrors errors={errors} now={now} />
@@ -251,7 +266,7 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
             {rows.flatMap((p) =>
               p.configurations.map((c) => {
                 const latest = c.calibration.find((x) => x.candidateConfigurationId === c.id);
-                const decision = latest ? DECISION[latest.decision] : null;
+                const decision = latest ? calibrationBadge(latest.decision, latest.active) : null;
                 const report = latest?.report as CalibrationReport | undefined;
                 return (
                   <tr key={c.id}>
@@ -270,7 +285,13 @@ function Configurations({ rows }: { rows: ProviderRow[] }) {
                             {num(report?.pairs ?? 0)} pairs over {num(report?.prompts ?? 0)} prompts
                           </span>
                           {report && agreementText(report) && <span className="cell-sub">{agreementText(report)}</span>}
-                          {report?.reasons?.[0] && <span className="cell-sub">{readableReason(report.reasons[0])}</span>}
+                          {decision.paused ? (
+                            <span className="cell-sub">
+                              Last result {absoluteTime(latest!.createdAt)}. Testing resumes when both configurations are measured again.
+                            </span>
+                          ) : (
+                            report?.reasons?.[0] && <span className="cell-sub">{readableReason(report.reasons[0])}</span>
+                          )}
                         </>
                       ) : (
                         <span className="muted">–</span>

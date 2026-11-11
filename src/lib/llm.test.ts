@@ -86,6 +86,9 @@ describe("helpers", () => {
     // 2,500 input + 500 output tokens, batched: (2500·0.1 + 500·0.5) / 1e6 / 2
     expect(llmCost("claude-haiku-5-5", 2500, 500, true)).toBeCloseTo(0.00025, 8);
     expect(llmCost("claude-sonnet-5-5", 2500, 500, true)).toBeCloseTo(0.005, 8);
+    // Cache reads on Sonnet 5.5 and Opus 5.5 cost 0.05× the input price ($0.10 and $0.20 per MTok).
+    expect(llmCost("claude-sonnet-5-5", 0, 0, false, 1e6)).toBeCloseTo(0.1, 8);
+    expect(llmCost("claude-opus-5-5", 0, 0, false, 1e6)).toBeCloseTo(0.2, 8);
     expect(noThinking("claude-haiku-5-5")).toEqual({ thinking: { type: "disabled" } });
     expect(noThinking("claude-sonnet-5-5")).toEqual({ thinking: { type: "between_tools" } });
     expect(noThinking("claude-opus-5-5")).toEqual({});

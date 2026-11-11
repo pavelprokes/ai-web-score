@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatgptUi, parseAiMode, parseLlmScraper } from "./dataforseo";
-import { buildClaudeParams, noteUnsupportedCountry, parseClaudeMessage } from "./anthropic";
+import { buildClaudeParams, claudeApi, noteUnsupportedCountry, parseClaudeMessage } from "./anthropic";
 import { buildOpenAiBody, parseOpenAiResponse } from "./openai";
 import { buildPerplexityBody, parsePerplexityResponse, perplexityApi } from "./perplexity";
 import { parseGeminiResponse } from "./gemini";
@@ -32,20 +32,32 @@ describe("provider request builders", () => {
     expect((direct.tools as Array<Record<string, unknown>>)[0]!.search_type).toBe("fast");
   });
 
-  it("Perplexity retries a 400 once without service_tier and then stops sending it", async () => {
+  it("Perplexity retries a 400 once without service_tier for that request only, and keeps asking for the tier", async () => {
     process.env.PERPLEXITY_API_KEY ??= "test";
     const standard = perplexityApi.configurations.find((c) => c.role === "STANDARD")!;
     const bodies: Array<Record<string, unknown>> = [];
+    // The body production got on 2026-10-07: it does not name the field.
+    const rejection = '{"error":{"message":"invalid request","type":"invalid_request","code":400}}';
+    let rejectAll = false;
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
       bodies.push(body);
-      if (body.service_tier) return new Response('{"error":{"message":"invalid request","code":400}}', { status: 400 });
+      if (body.service_tier || rejectAll) return new Response(rejection, { status: 400 });
       return new Response(JSON.stringify({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }));
     });
-    expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
-    expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
-    expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null, null]);
-    vi.unstubAllGlobals();
+    try {
+      expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
+      expect((await perplexityApi.execute!(req, standard)).answer.answerText).toBe("ok");
+      // No memory of the rejection: the next request asks for the cheaper tier again.
+      expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null, "flex", null]);
+      // A 400 that is not about the tier fails after that one extra (unbilled) attempt.
+      bodies.length = 0;
+      rejectAll = true;
+      await expect(perplexityApi.execute!(req, standard)).rejects.toThrow(/HTTP 400/);
+      expect(bodies.map((b) => b.service_tier ?? null)).toEqual(["flex", null]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("Perplexity spaces request starts and retries a 429 in place after Retry-After", async () => {
@@ -160,15 +172,21 @@ describe("provider response parsers", () => {
     expect(a.citations[0]!.url).toBe("https://kolabrno.cz");
     expect(a.answerText).toBe("Zkuste Kola Brno.");
 
-    // Cache reads and writes are input too, priced at 0.1× and 1.25×.
+    // Cache reads and writes are input too, priced at 0.05× and 1.25×.
     const cached = parseClaudeMessage({
       model: "claude-sonnet-5-5",
       content: [{ type: "text", text: "x" }],
       usage: { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 4000, cache_creation_input_tokens: 2000 },
     });
     expect(cached.usage).toMatchObject({ inputTokens: 7000, cachedInputTokens: 4000, cacheWriteTokens: 2000 });
-    const price = { providerId: "claude-api", model: "claude-sonnet-5-5", effectiveFrom: new Date(0), inputPerMTok: 2, cachedInputPerMTok: 0.2, outputPerMTok: 10, searchPer1k: 10, requestPer1k: 0, batchDiscount: 0.5 };
-    expect(computeCost({ answer: cached, price }).inputCostUsd).toBeCloseTo((1000 * 2 + 4000 * 0.2 + 2000 * 2 * 1.25) / 1e6, 10);
+    // Price entries are append-only: the corrected cache-read rate is a later entry, the first one stays.
+    const seeds = claudeApi.prices
+      .filter((x) => x.model === "claude-sonnet-5-5")
+      .map((x) => ({ requestPer1k: 0, ...x, providerId: "claude-api", effectiveFrom: new Date(x.effectiveFrom) }) as PriceEntry);
+    expect(seeds.map((x) => x.cachedInputPerMTok)).toEqual([0.2, 0.1]);
+    const price = selectPrice(seeds, "claude-api", "claude-sonnet-5-5", new Date("2026-11-12T00:00:00Z"))!;
+    expect(computeCost({ answer: cached, price }).inputCostUsd).toBeCloseTo((1000 * 2 + 4000 * 0.1 + 2000 * 2 * 1.25) / 1e6, 10);
+    expect(selectPrice(seeds, "claude-api", "claude-sonnet-5-5", new Date("2026-10-12T00:00:00Z"))!.cachedInputPerMTok).toBe(0.2);
   });
 
   it("OpenAI responses with sources and annotations", () => {
