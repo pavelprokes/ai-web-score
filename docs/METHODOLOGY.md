@@ -166,8 +166,9 @@ Each run stores a new set (findings + items); items can be marked Done or Dismis
 
 ## Known limitations
 
-- Production data contradict two statements above (docs/RESEARCH.md §7): the Wilson intervals of §6 are 4–5×
-  too narrow because answers cluster by prompt, and stable cells do not fade to infrequent measurement (§3).
+- Production data contradict two statements above (docs/RESEARCH.md §7): the Wilson intervals of §6 are up
+  to 4–5× too narrow where the brand appears, because answers cluster by prompt (about right for a brand that is
+  hardly ever named), and stable cells do not fade to infrequent measurement (§3).
 - Consumer capture is logged-out and memory-free (a neutral new user). Personalisation is not modelled.
 - Multi-turn follow-ups ("persistent visibility") are not measured yet (roadmap).
 - Claude's web search rejects some countries in `user_location` (CZ as of 2026-10). Those markets are

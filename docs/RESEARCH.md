@@ -113,14 +113,14 @@ Google AI Mode 6,168 (both from 10-12), Perplexity API 7,539 (from 10-07), Claud
 | 5 | Claude API + search through Batches $0.03–0.05 (COSTS) | Held | mean $0.0438 (168) |
 | 6 | Answer analysis ≈ $0.0025 per call, $0.0005–0.001 per measured answer (COSTS) | Held; cheaper per measured answer | $5.07 ÷ 1,869 analysed answers = $0.0027; ÷ 21,483 answers = $0.00024 |
 | 7 | Discovery + prompt design $0.2–0.7 per domain (COSTS) | Held on Sonnet, not on Opus | Opus $13.37 ÷ 10 discovery runs = $1.34; Sonnet $2.21 ÷ 5 = $0.44 |
-| 8 | Exact rerun Jaccard 0.50–0.61 (§4) | Did not hold: lower for UI capture, higher for the Perplexity API | Cited domains, same day: ChatGPT 0.39 (2,891 pairs), AI Mode 0.36 (1,332), Perplexity 0.74 (3,645) |
-| 9 | Day-to-day overlap 45–59 % (§4) | Lower end or below | Next-day Jaccard 0.39 / 0.34 / 0.54 (7,181 / 4,568 / 5,671 pairs) |
-| 10 | Breadth beats depth (§4; METHODOLOGY §2) | Held | Between-prompt sd 0.12–0.38 where the brand appears; a cell sampled daily instead of weekly gains ±16 → ±10 pp (7.3) |
+| 8 | Exact rerun Jaccard 0.50–0.61 (§4) | Not tested for brand lists. For cited domains: lower for UI capture, higher for the Perplexity API | Cited domains, same day: ChatGPT 0.39 (2,891 pairs), AI Mode 0.36 (1,332), Perplexity 0.74 (3,645) |
+| 9 | Day-to-day brand overlap 45–59 % (§4) | Not tested for brand lists. For cited domains: lower end or below | Next-day cited-domain Jaccard 0.39 / 0.34 / 0.54 (7,181 / 4,568 / 5,671 pairs) |
+| 10 | Breadth beats depth (§4; METHODOLOGY §2) | Held | Between-prompt sd 0.12–0.38 where the brand appears; a cell sampled daily instead of weekly gains ±17.5 → ±11 pp (7.3) |
 | 11 | ChatGPT searches for 86.5 % of commercial and 0.9 % of informational prompts (§5 ⚠) | Commercial held; informational did not | 96.1 % (3,504 answers) vs 52.4 % (1,686) |
 | 12 | 78 % of non-English ChatGPT runs include an English fan-out query (§5) | Not confirmed | ≥ 35.6 % of 4,430 answers to Czech unbranded prompts with visible queries (English word list, a lower bound) |
 | 13 | Prompts are generated at 12–25 words (METHODOLOGY §2) | Mostly | 291 of 395 unbranded prompts (74 %); 92 shorter, 12 longer |
 | 14 | Prior between-prompt sd 0.3 (sizing) | Depends on the domain | 0.01–0.14 `se-vezmou` (72 prompts), 0.12–0.26 `photographer` (35), 0.32–0.38 `vzdelani` (25) |
-| 15 | Observation noise R = p(1−p), floor 0.04 (METHODOLOGY §3) | Overstated ≈ 2× | Within-cell variance of the presence index 0.065 vs 0.149 assumed (339 cells where the brand appears, ≥ 8 answers) |
+| 15 | Observation noise R = p(1−p), floor 0.04 (METHODOLOGY §3) | Overstated ≈ 1.6× for unbranded cells | Within-cell variance of the presence index, cells where the brand appears, ≥ 8 answers: unbranded 0.091 vs 0.147 assumed (200 cells); branded 0.027 vs 0.151 (139) |
 | 16 | Process noise q within [0.0002, 0.02] per day, start ≈ 0.0022 | Supported | Measured 0.0021 [0.0014, 0.0029] (7.3); learned median 0.0014, no cell at a bound (1,421 cells) |
 | 17 | Prior mean 0.3 for a new cell | Too high | Mean presence 0.13; 73 % of 1,240 cells (≥ 8 answers) never show the brand |
 | 18 | CUSUM detects a level shift within days (METHODOLOGY §3) | Partly: slow and sparse | 2 alarms in 1,421 cells, both ChatGPT on `vzdelani`, 5 and 6 days after the 10-22 step (7.7) in which 12 of its 25 prompts rose |
@@ -128,7 +128,7 @@ Google AI Mode 6,168 (both from 10-12), Perplexity API 7,539 (from 10-07), Claud
 | 20 | Cheap captures get several samples per new cell | Held | 12.2 (ChatGPT) and 7.6 (AI Mode) answers in a cell's first week (62 cells each) |
 | 21 | A 10 % sample of competitor-only answers is analysed (METHODOLOGY §5) | Held | 531 of 5,691 (9.3 %) |
 | 22 | Analysing every answer would cost about as much as measuring it | Held (≈ 2×) | $0.0027 per analysed answer vs $0.0012–0.0014 per capture |
-| 23 | Rates carry Wilson CIs with Kish effective n (METHODOLOGY §6) | **Contradicted**: 4–5× too narrow | `photographer` 17.9 % [15.7, 20.3] reported vs [6.3, 29.7] from a bootstrap over prompts (7.5) |
+| 23 | Rates carry Wilson CIs with Kish effective n (METHODOLOGY §6) | **Contradicted** where the brand appears: up to 4–5× too narrow | `photographer` 17.9 % [15.7, 20.3] reported vs [6.3, 29.7] from a bootstrap over prompts (5×); `vzdelani` [44.7, 50.2] vs about [34, 58] (4.5×); `se-vezmou` [0.5, 1.3] vs [0.4, 1.3], about right (7.5) |
 | 24 | Calibration promotes a candidate relative to the reference's retest (METHODOLOGY §7) | Never exercised | At most 5 pairs per configuration pair, all KEEP_TESTING; no pair has run since 10-12 |
 | 25 | Simulation: $4–5 a month and 94–132 answers a day for 54 prompts (COSTS) | Held | $0.077 per active prompt-month and 2.0 answers per prompt-day (141 prompts, 11-03 … 11-09) vs ≈ $0.08 and 1.7–2.4 simulated |
 | 26 | Perplexity same-day Jaccard 0.76 (HANDOFF) | Held | 0.74 (3,645 pairs) |
@@ -158,8 +158,16 @@ Same prompt version, same UTC day, unbranded; the first three rows are the test�
 Query: self-join of answers on prompt version and day (within a provider: all pairs; Jaccard rows of the first
 three use at most four answers per cell and day), Jaccard over `signals.citedDomains`.
 
-Per prompt, 10-12 … 11-10, prompts with ≥ 3 answers from both providers (C = ChatGPT, A = AI Mode,
+The pooled κ is inflated by the different levels of the domains. Inside one domain (C = ChatGPT, A = AI Mode,
 P = Perplexity):
+
+| Domain | κ C×C | κ A×A | κ P×P | κ C×A | κ C×P | κ A×P |
+|---|---|---|---|---|---|---|
+| `se-vezmou` | — (never named twice) | 0.42 | 0.94 | 0.00 | 0.00 | 0.08 |
+| `photographer` | 0.63 | 0.45 (179 pairs) | 0.85 | 0.17 | 0.26 | 0.16 |
+| `vzdelani` | 0.69 | 0.47 | 0.78 | 0.36 | 0.39 | 0.32 |
+
+Per prompt, 10-12 … 11-10, prompts with ≥ 3 answers from both providers:
 
 | Domain | Prompts | r C–A | r C–P | r A–P | Split-half r inside C / A / P | Prompts where it is ever named, C / A / P |
 |---|---|---|---|---|---|---|
@@ -168,7 +176,10 @@ P = Perplexity):
 | `se-vezmou` | 149–156 | −0.01 | −0.03 | 0.11 | — / 0.83 / 0.96 | 1 / 8 / 21 |
 
 Query: Pearson r of per-prompt named rates; split-half = each prompt's answers split in two random halves
-(≥ 3 answers each). The interval of each r is about ±0.15.
+(≥ 3 answers each). Intervals from a bootstrap over prompts (4,000 draws): `photographer` C–A [0.11, 0.58],
+C–P [0.26, 0.74], A–P [0.10, 0.78]; `vzdelani` [0.43, 0.76], [0.44, 0.81], [0.28, 0.75]. The `photographer` r with
+Perplexity rests on the 5 prompts where Perplexity names it, and the upper end of A–P reaches the AI Mode
+split-half. The `se-vezmou` r with ChatGPT means nothing (1 prompt; undefined in a third of the draws).
 
 Named rate, 28 days to 11-10, unbranded prompts of active topics, mean of per-prompt rates:
 
@@ -180,9 +191,11 @@ Named rate, 28 days to 11-10, unbranded prompts of active topics, mean of per-pr
 | `photos` (4) | 0 % | 0 % | 0 % |
 
 - **Held:** one provider does not stand in for another. Two providers agree on a prompt far less than a provider
-  agrees with itself (κ 0.32–0.46 vs 0.65–0.90), they share a tenth of their cited domains, and within a domain
-  one provider explains 12–41 % of another's per-prompt variance (r² of 0.35–0.64). The per-prompt rates
-  themselves are reliable (split-half 0.83–0.97), so this is a real difference, not noise.
+  agrees with itself — in every domain: κ 0.00–0.39 across providers vs 0.42–0.94 within one (pooled 0.32–0.46 vs
+  0.65–0.90). The gap is narrowest for AI Mode on `vzdelani` (0.47 within vs 0.32–0.36 across). They share a
+  tenth of their cited domains, and within a domain one provider explains roughly 12–41 % of another's
+  per-prompt variance (r² of 0.35–0.64; wide intervals, see above). The per-prompt rates themselves are
+  reliable (split-half 0.83–0.97), so this is a real difference, not noise.
 - **Held:** the level differs too. `se-vezmou` is named for 21 of 149 prompts by Perplexity and for 1 by ChatGPT.
 - **Unknown:** the same-vendor claim of §1 (OpenAI API vs ChatGPT UI). It needs calibration pairs with
   `openai-api`; none were run.
@@ -232,16 +245,17 @@ them; the slope is q, half the intercept is R; interval from a bootstrap over ce
 | Constant | Code | Measured | Reading |
 |---|---|---|---|
 | Process noise q per day | `MIN_PROCESS_NOISE = 0.0002`, `MAX_PROCESS_NOISE = 0.02`, start `0.0002 + expectedVolatility × 0.004` (0.0022 at 0.5) | 0.0021 [0.0014, 0.0029] over 1,423 cells and 190,630 pairs. Unbranded, by provider: ChatGPT 0.0023 [0.0008, 0.0038], AI Mode 0.0022 [0.0006, 0.0040], Perplexity 0.0021 [0.0012, 0.0034]. By domain: `vzdelani` 0.0045 [0.0029, 0.0061], `se-vezmou` 0.0012 [0.0003, 0.0025], `photographer` 0.0007 [−0.0002, 0.0018] | Bounds and start supported. The learned values (median 0.0014, p10–p90 0.0008–0.0022) sit in the measured range but do not separate the domains: `vzdelani` median 0.0017 vs 0.0045 measured |
-| Observation noise R | `p(1−p)`, `MIN_OBSERVATION_NOISE = 0.04` | Variance of the presence index inside a cell: 0.065 where the brand appears (339 cells), 0 in the 73 % of cells that never show it; model 0.149 and 0.04 | Overstated about 2×. The presence index is the mean of three flags, so it varies less than a coin with the same mean. Errs on the safe side: the filter trusts an answer less than it could |
+| Observation noise R | `p(1−p)`, `MIN_OBSERVATION_NOISE = 0.04` | Variance of the presence index inside a cell where the brand appears: 0.091 unbranded (200 cells; model 0.147), 0.027 branded (139; model 0.151), 0.065 pooled; 0 in the 73 % of cells that never show it (model 0.04) | Overstated about 1.6× for unbranded cells, about 5.5× for branded ones. The presence index is the mean of three flags, so it varies less than a coin with the same mean. Errs on the safe side: the filter trusts an answer less than it could |
 | Prior mean | `initialCellState(0.3, …)` | Mean presence 0.13, median 0 (1,240 cells) | Too high; costs the first one or two answers of a cell |
 | Change detection | `CUSUM_K = 0.5`, `CUSUM_H = 5`, `CUSUM_CLIP = 3` | 2 alarms in 1,421 cells, on 10-27 and 10-28; ChatGPT on `vzdelani` went from 22.7 % to 46.0 % (25 prompts, 12 rose, paired t = 3.55) on 10-22 | Works per cell, 5–6 days late and for 2 of 12 cells; not a detector of a shift across a domain. One event |
 | Same cycle | `SAME_CYCLE_DAYS = 0.25`; repeats do not teach q | See above | Right for q. Not enough for Perplexity, whose repeats also carry little information about the rate |
 | Planner | `maxSamplesPerCell = 5`, `minIntervalDays = 0.9`, `minVarianceReduction = 0.0015`, `minValuePerDollar = 0.3`, `coreMaxIntervalDays = 7`, `TARGET_SD` 0.15 / 0.20 / 0.25 | 4.3–5.0 answers per prompt, provider and week (7.6); the interval shown in the admin has a median of 16 days | The realised interval is about two days, a tenth of the displayed one. Neither the budget nor the value floors hold it back at $0.0012 an answer: the `vzdelani` cycle of 11-10 planned 65 of 87 cells for $0.08 of a $0.55 allowance |
 
-What this implies for the interval (a calculation from q = 0.0022 and R = 0.065, not a measurement): a cell
-sampled daily is known to about ±10 pp (1 sd), every two days ±12 pp, weekly ±16 pp — the CORE target is ±15 pp.
+What this implies for the interval (a calculation from q = 0.0022 and the unbranded R = 0.091, not a measurement):
+a cell sampled daily is known to about ±11 pp (1 sd), every two days ±13 pp, weekly ±17.5 pp — the CORE target is
+±15 pp.
 The domain rate is limited by the spread between prompts (sd 0.12–0.38), not by this: going from two-day to
-weekly sampling widens the domain interval by about 5 %, doubling the prompts narrows it by 29 %.
+weekly sampling widens the domain interval by about 6 %, doubling the prompts narrows it by 29 %.
 
 **Unknown:** whether the drift is a slow walk or a few steps. Five weeks with one visible step (ChatGPT, 10-22)
 cannot tell; the `photographer` interval includes zero.
@@ -270,10 +284,12 @@ each). "Repeat disagreement" = chance that two answers of a cell disagree, 2p(1�
 
 All rows but the first are unbranded. Domains differ in level, so each row was also checked inside the domains:
 
-- **Held in all three domains:** commercial-investigation prompts name the brand more often than informational
-  ones (`se-vezmou` 4.1 vs 0.3 %, `photographer` 10.6 vs 3.2 %, `vzdelani` 32.8 vs 3.8 %).
+- **Same direction in all three domains, clear in one:** commercial-investigation prompts name the brand more
+  often than informational ones. Clear on `se-vezmou` (4.1 ± 1.9 %, 96 prompts, vs 0.3 ± 0.4 %, 51); marginal on
+  `photographer` (10.6 ± 5.8 %, 63, vs 3.2 ± 4.0 %, 51 — the intervals overlap); `vzdelani` has only 8
+  informational prompts (32.8 ± 10.0 %, 36, vs 3.8 ± 7.4 %, 8).
 - **One domain only:** English beats Czech for `photographer` (21.5 ± 10.1 %, 38 prompts, vs 3.7 ± 2.4 %, 139);
-  no difference for `se-vezmou` (1.9 vs 2.7 %). Slovak is 8 prompts of one domain.
+  no difference for `se-vezmou` (1.9 ± 2.5 %, 22 English prompts, vs 2.7 ± 1.3 %, 134). Slovak is 8 prompts of one domain.
 - **Not established:** location (the sign differs: `photographer` 10.5 vs 2.9 %, `vzdelani` 14.9 vs 25.5 %) and
   length (intervals overlap; the over-25 row is 12 prompts).
 - **Variance:** follows the rate and nothing else we can see. The LLM-assigned `expected_volatility` orders cells
@@ -297,11 +313,11 @@ planner uses the same numbers (`providerWeight = 0.25 + 0.75 · reach / max`; "c
 The latest 28-day window re-scored with the production code (`computeMetrics`, geo-v2) and other weights; the
 first column reproduces the stored snapshots exactly:
 
-| Domain (answers, prompts) | Overall, production | Overall, equal providers | Overall, production reach with equal weight per prompt | Named: production → equal providers → per prompt | Overall interval, bootstrap over prompts |
+| Domain (unbranded answers, prompts scored) | Overall, production | Overall, equal providers | Overall, production reach with equal weight per prompt | Named: production → equal providers → per prompt | Overall interval, bootstrap over prompts |
 |---|---|---|---|---|---|
-| `se-vezmou` (4,327; 79) | 19.2 | 22.4 | 19.0 | 0.8 → 3.3 → 0.5 % | [17.6, 20.3] |
-| `photographer` (1,910; 38) | 29.9 | 29.3 | 27.4 | 17.9 → 11.6 → 11.1 % | [22.9, 37.3] |
-| `vzdelani` (2,356; 29) | 59.2 | 57.0 | 55.3 | 47.4 → 43.0 → 40.4 % | [51.0, 64.8] |
+| `se-vezmou` (3,947; 72) | 19.2 | 22.4 | 19.0 | 0.8 → 3.3 → 0.5 % | [17.6, 20.3] |
+| `photographer` (1,731; 35) | 29.9 | 29.3 | 27.4 | 17.9 → 11.6 → 11.1 % | [22.9, 37.3] |
+| `vzdelani` (2,104; 25) | 59.2 | 57.0 | 55.3 | 47.4 → 43.0 → 40.4 % | [51.0, 64.8] |
 
 - **Defensible enough, and it matters little for Overall:** equal weights move it by −0.6 and −2.2 points on the
   two domains where the choice of prompts alone leaves ±7 points, and by +3.2 on `se-vezmou` (±1.4), which only
@@ -330,6 +346,11 @@ column 7 = all spend ÷ answers in cells where the brand was named in some, not 
 - Run rate, 11-03 … 11-09, 141 active prompts: 1,963 answers and $2.54 a week = **$10.9 a month** for
   measurement plus ≈ $2.4 for analysis, against $58 of configured budgets. Per active prompt and week: 4.6
   ChatGPT, 4.3 AI Mode, 5.0 Perplexity answers; never-named cells 3.4–4.3, the others 6.1–7.1.
+- That week starts on 11-03, the day Perplexity caught up after its outage (7.7): 265 Perplexity answers, about
+  half of them same-cycle repeats, and $0.60, against 56–94 answers and $0.29–0.37 on each of the other six
+  days. One day later (11-04 … 11-10) the same figures are $9.5 a month, 3.6 Perplexity answers per prompt and
+  week (the least sampled provider, not the most), ≈ $36 at 432 prompts and ≈ $14.6 for `vzdelani`. The tables
+  below keep 11-03 … 11-09, so read them as about 13 % high.
 
 Monthly cost at the recommended portfolio size (`domain_profiles.sizing`), from each domain's own cost per
 active prompt in that week, plus 22 % for analysis:
@@ -364,10 +385,12 @@ so it is more likely too high than too low; the planner caps each domain at its 
   artefact; request parameters and the reported model are the same before and after, and no measurement code
   changed. Cause unknown. Windows that span 10-22 mix two levels.
 - **Rates pooled over answers are tilted upwards.** The planner samples cells that show the brand more often
-  (correlation of answers per prompt with the prompt's rate 0.4–0.7), and the score weighs answers, not prompts:
+  (correlation of answers per prompt with the prompt's rate 0.4–0.7 in seven of nine domain × provider cells;
+  about 0 for `se-vezmou` on ChatGPT and `photographer` on AI Mode), and the score weighs answers, not prompts:
   `photographer` on ChatGPT is 19.7 % by answer and 11.7 % by prompt, `vzdelani` 46.9 vs 39.0 %.
-- **Intervals are too narrow.** They treat answers as independent although answers cluster by prompt. The
-  "Not enough data" floor (±10 pp) therefore never fires, while `vzdelani` is really known to about ±12 pp.
+- **Intervals are too narrow where the brand appears.** They treat answers as independent although answers
+  cluster by prompt: 4–5× too narrow on `photographer` and `vzdelani`, about right on `se-vezmou` (1.1–1.3×),
+  which is hardly ever named. The "Not enough data" floor (±10 pp) therefore never fires, while `vzdelani` is really known to about ±12 pp.
 - **Overall has a floor.** `se-vezmou` scores 19.2 with a named rate of 0.8 %: 18.6 of those points are position,
   sentiment and accuracy, which exist only for the few answers that do name it.
 - **Analysis coverage.** 3.2 % of the 17,481 answers that do not name the brand were analysed (9.3 % of those
@@ -382,24 +405,27 @@ Recommendations for the owner; no code or constant changes in this change.
 
 1. **Perplexity repeats: stop taking more than one sample per cycle.** Evidence: same-cycle Jaccard 0.74 and a
    third of the expected disagreement (5,053 pairs); 38 % of Perplexity answers were such repeats (≈ $3.9 of
-   $10.3). Uncertainty: low on the effect, and the saving is small (172 repeats, ≈ $0.25, in the last full week).
+   $10.3). Uncertainty: low on the effect, and the saving is small (172 repeats, ≈ $0.25, in the last full week — about
+   three quarters of them on the post-outage catch-up day 11-03, some 5 a day since).
    Keep repeats for ChatGPT and AI Mode, where they are as informative as a next-day answer.
 2. **Reach weights: leave 72 / 15 / 5, and stop treating them as measured.** Evidence: equal weights move
    Overall by 0.6–3.2 points; on two of three domains that is well inside the prompt-sampling interval.
    Uncertainty: high on the weights themselves (AI Mode has no source, no referral data). Worth doing instead:
    set the Umami traffic website per domain so reach is learned.
 3. **Budget: the $58 is enough; the constraint is prompts, not money.** Evidence: $10.9 a month now, ≈ $41 at
-   the recommended 432 prompts, ≈ $52 in the month they are activated. Exception: `vzdelani` would need ≈ $17
-   against $10. Uncertainty: ±30 % at least (one week of cadence, cells still fading).
+   the recommended 432 prompts, ≈ $52 in the month they are activated (≈ $36 and ≈ $47 without the
+   catch-up day, 7.6). Exception: `vzdelani` would need ≈ $15–17 against $10. Uncertainty: ±30 % at least (one
+   week of cadence, cells still fading).
 4. **Approve the waiting prompts first.** Evidence: 25–35 scored prompts leave the named rate at ±9–15 pp;
    more prompts are the only lever that narrows it (7.3). Uncertainty: low.
 5. **Next scoring version: one weight per prompt, intervals from prompts, and a look at the Overall floor.**
-   Evidence: 7.5 and 7.7 — named rates about 7 pp too high on two domains, intervals 4–5× too narrow, 19 points
-   for a brand named in 0.8 % of answers. Uncertainty: the direction is certain, the sizes come from 29–79 prompts.
+   Evidence: 7.5 and 7.7 — named rates about 7 pp too high on two domains, intervals 4–5× too narrow on the
+   same two (about right on `se-vezmou`), 19 points for a brand named in 0.8 % of answers. Uncertainty: the
+   direction is certain, the sizes come from 25–72 prompts.
 6. **Kalman constants: no change now.** Evidence: q start and bounds match the data. Revisit after eight more
-   weeks: R is about 2× too high, and never-named cells are sampled every two days although weekly would catch
-   the 3.5 % that wake up — that is 58 % of current answers. Uncertainty: the wake-up rate comes from four weeks
-   that include one real shift.
+   weeks: R is about 1.6× too high for unbranded cells, and never-named cells are sampled every two days
+   although weekly would catch the 3.5 % that wake up — that is 58 % of current answers. Uncertainty: the
+   wake-up rate comes from four weeks that include one real shift.
 7. **Add a change detector on the domain × provider rate.** Evidence: when ChatGPT doubled on `vzdelani`, the
    per-cell CUSUM flagged 2 of the 12 prompts that rose, 5–6 days later. Uncertainty: one event.
 8. **Keep all three providers; do not use an API as a stand-in for a UI.** Evidence: 7.2. Claude stays off: at
