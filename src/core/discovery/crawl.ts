@@ -1,4 +1,7 @@
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 import * as cheerio from "cheerio";
+import { Agent, fetch, type Response } from "undici";
 import { deadlineSignal } from "@/lib/deadline";
 
 /**
@@ -12,6 +15,8 @@ const UA = "Mozilla/5.0 (compatible; AIVisibilityBot/1.0; +https://github.com/pa
 const MAX_PAGES = 14;
 const MAX_SITEMAPS = 6;
 const FETCH_TIMEOUT = 15_000;
+const MAX_REDIRECTS = 5;
+const MAX_BODY_BYTES = 2_000_000;
 
 export interface PageDigest {
   url: string;
@@ -41,25 +46,109 @@ export interface CrawlDigest {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
 
-/** Polite bot UA first; bot-protection (403/429) gets one retry with a browser UA. */
-async function get(url: string): Promise<{ status: number; text: string; contentType: string } | null> {
-  const first = await fetchOnce(url, UA);
-  if (first && (first.status === 403 || first.status === 429)) return (await fetchOnce(url, BROWSER_UA)) ?? first;
+type Fetched = { status: number; text: string; contentType: string; url: string };
+
+// Loopback, private, link-local (cloud metadata), CGNAT, multicast and reserved ranges; IPv4-mapped IPv6 matches the IPv4 rules.
+const NON_PUBLIC = new BlockList();
+for (const [net, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const)
+  NON_PUBLIC.addSubnet(net, prefix, "ipv4");
+for (const [net, prefix] of [["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) NON_PUBLIC.addSubnet(net, prefix, "ipv6");
+
+/** The host as the crawler compares it: `www.` is the same site. */
+const siteHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, "");
+
+const isNonPublic = (address: string) => NON_PUBLIC.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
+
+/**
+ * The name resolution of the crawler's sockets (`net.connect`'s `lookup`): fails unless every address of the name is
+ * public. The socket connects to one of the addresses returned here, so a DNS answer that changes later (rebinding)
+ * cannot reach a private address. This is the only place resolved addresses are checked.
+ */
+export const publicLookup: LookupFunction = (hostname, options, callback) => {
+  lookup(hostname, { ...options, all: true }).then(
+    (addresses) => {
+      if (addresses.length === 0 || addresses.some((a) => isNonPublic(a.address))) callback(new Error(`${hostname} does not resolve to public addresses only`), []);
+      else if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    },
+    (err) => callback(err, []),
+  );
+};
+
+// undici's own fetch and Agent (not Node's built-in fetch): a dispatcher must come from the same undici as the fetch.
+const dispatcher = new Agent({ connect: { lookup: publicLookup } });
+
+/**
+ * Whether the crawler may request `url`: http(s) on the default port, on one of `hosts` (see `siteHost`) or a
+ * subdomain of one (`null` = any host), and not a non-public IP literal (a literal never goes through
+ * `publicLookup`; names are checked there, when the socket connects).
+ */
+function mayRequest(url: URL, hosts: string[] | null): boolean {
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.port) return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (hosts && !hosts.some((h) => host === h || host.endsWith(`.${h}`))) return false;
+  return !isIP(host) || !isNonPublic(host);
+}
+
+/**
+ * The only way the crawler talks to a site — every hop of a redirect chain is checked by `mayRequest`, and the body
+ * is read up to MAX_BODY_BYTES. Polite bot UA first; bot-protection (403/429) gets one retry with a browser UA.
+ * Null = not allowed, network error or too many redirects.
+ */
+export async function fetchFromSite(url: string, hosts: string[] | null): Promise<Fetched | null> {
+  const first = await fetchOnce(url, UA, hosts);
+  if (first && (first.status === 403 || first.status === 429)) return (await fetchOnce(url, BROWSER_UA, hosts)) ?? first;
   return first;
 }
 
-async function fetchOnce(url: string, ua: string): Promise<{ status: number; text: string; contentType: string } | null> {
+/**
+ * Requests the homepage first: the host it redirects to (apex → www, or a new domain) is part of the site for every
+ * later request made through `get`.
+ */
+export async function openSite(origin: string): Promise<{ home: Fetched | null; get: (url: string) => Promise<Fetched | null> }> {
+  const hosts = [siteHost(new URL(origin).hostname)];
+  const home = await fetchFromSite(origin, null);
+  if (home) hosts.push(siteHost(new URL(home.url).hostname));
+  return { home, get: (url) => fetchFromSite(url, hosts) };
+}
+
+async function fetchOnce(url: string, ua: string, hosts: string[] | null): Promise<Fetched | null> {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "cs,en;q=0.8" },
-      redirect: "follow",
-      signal: deadlineSignal(FETCH_TIMEOUT),
-    });
-    const text = await res.text();
-    return { status: res.status, text: text.slice(0, 2_000_000), contentType: res.headers.get("content-type") ?? "" };
+    const signal = deadlineSignal(FETCH_TIMEOUT);
+    let target = new URL(url);
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (!mayRequest(target, hosts)) return null;
+      const res = await fetch(target.href, {
+        headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "cs,en;q=0.8" },
+        redirect: "manual",
+        signal,
+        dispatcher,
+      });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) return { status: res.status, text: await readCapped(res), contentType: res.headers.get("content-type") ?? "", url: target.href };
+      void res.body?.cancel().catch(() => {});
+      target = new URL(location, target);
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/** The body as text, read from the stream and cancelled at MAX_BODY_BYTES (an endless response must not fill memory). */
+async function readCapped(res: Response): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < MAX_BODY_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+  }
+  void reader.cancel().catch(() => {});
+  return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES));
 }
 
 function clean(s: string, max = 300) {
@@ -78,7 +167,7 @@ export function parsePage(url: string, html: string): PageDigest & { links: Arra
     try {
       const parsed = JSON.parse($(el).text());
       const items = Array.isArray(parsed) ? parsed : parsed["@graph"] ? parsed["@graph"] : [parsed];
-      jsonLd.push(...items);
+      jsonLd.push(...items.filter((item: unknown) => item && typeof item === "object"));
     } catch {
       /* ignore invalid JSON-LD */
     }
@@ -87,7 +176,7 @@ export function parsePage(url: string, html: string): PageDigest & { links: Arra
   $("nav a, header a").each((_, el) => {
     const href = $(el).attr("href");
     const text = clean($(el).text(), 60);
-    if (href && text) links.push({ text, href: new URL(href, url).toString() });
+    if (href && text && URL.canParse(href, url)) links.push({ text, href: new URL(href, url).toString() });
   });
   $("script, style, noscript, svg").remove();
   return {
@@ -128,6 +217,8 @@ export async function crawlDomain(domain: string): Promise<CrawlDigest> {
     errors,
   };
 
+  const { home, get } = await openSite(origin);
+
   // Sitemaps: robots.txt first, then the conventional location.
   const robots = await get(`${origin}/robots.txt`);
   const sitemapQueue = robots?.status === 200 ? [...robots.text.matchAll(/^sitemap:\s*(\S+)/gim)].map((m) => m[1]!) : [];
@@ -152,7 +243,6 @@ export async function crawlDomain(domain: string): Promise<CrawlDigest> {
     }
   }
 
-  const home = await get(origin);
   if (!home || home.status >= 400) {
     errors.push(`Homepage fetch failed (${home?.status ?? "network error"})`);
     return digest;
