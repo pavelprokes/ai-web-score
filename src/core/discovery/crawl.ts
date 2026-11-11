@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
-import { BlockList } from "node:net";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 import * as cheerio from "cheerio";
+import { Agent, fetch, type Response } from "undici";
 import { deadlineSignal } from "@/lib/deadline";
 
 /**
@@ -56,19 +57,37 @@ for (const [net, prefix] of [["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe
 /** The host as the crawler compares it: `www.` is the same site. */
 const siteHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, "");
 
+const isNonPublic = (address: string) => NON_PUBLIC.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
+
+/**
+ * The name resolution of the crawler's sockets (`net.connect`'s `lookup`): fails unless every address of the name is
+ * public. The socket connects to one of the addresses returned here, so a DNS answer that changes later (rebinding)
+ * cannot reach a private address. This is the only place resolved addresses are checked.
+ */
+export const publicLookup: LookupFunction = (hostname, options, callback) => {
+  lookup(hostname, { ...options, all: true }).then(
+    (addresses) => {
+      if (addresses.length === 0 || addresses.some((a) => isNonPublic(a.address))) callback(new Error(`${hostname} does not resolve to public addresses only`), []);
+      else if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    },
+    (err) => callback(err, []),
+  );
+};
+
+// undici's own fetch and Agent (not Node's built-in fetch): a dispatcher must come from the same undici as the fetch.
+const dispatcher = new Agent({ connect: { lookup: publicLookup } });
+
 /**
  * Whether the crawler may request `url`: http(s) on the default port, on one of `hosts` (see `siteHost`) or a
- * subdomain of one (`null` = any host), and resolving to public addresses only.
+ * subdomain of one (`null` = any host), and not a non-public IP literal (a literal never goes through
+ * `publicLookup`; names are checked there, when the socket connects).
  */
-async function mayRequest(url: URL, hosts: string[] | null): Promise<boolean> {
+function mayRequest(url: URL, hosts: string[] | null): boolean {
   if ((url.protocol !== "https:" && url.protocol !== "http:") || url.port) return false;
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (hosts && !hosts.some((h) => host === h || host.endsWith(`.${h}`))) return false;
-  // ponytail: fetch resolves the name again, so a site owner whose DNS changes between the two lookups (rebinding)
-  // still reaches a private address on port 80/443; closing that needs a dispatcher that connects to the checked
-  // address (undici `Agent({ connect: { lookup } })`; undici is not a dependency).
-  const addresses = await lookup(host, { all: true });
-  return addresses.length > 0 && !addresses.some((a) => NON_PUBLIC.check(a.address, a.family === 6 ? "ipv6" : "ipv4"));
+  return !isIP(host) || !isNonPublic(host);
 }
 
 /**
@@ -98,11 +117,12 @@ async function fetchOnce(url: string, ua: string, hosts: string[] | null): Promi
     const signal = deadlineSignal(FETCH_TIMEOUT);
     let target = new URL(url);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (!(await mayRequest(target, hosts))) return null;
+      if (!mayRequest(target, hosts)) return null;
       const res = await fetch(target.href, {
         headers: { "User-Agent": ua, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "cs,en;q=0.8" },
         redirect: "manual",
         signal,
+        dispatcher,
       });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
       if (!location) return { status: res.status, text: await readCapped(res), contentType: res.headers.get("content-type") ?? "", url: target.href };

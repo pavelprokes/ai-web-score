@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isIP } from "node:net";
-import { crawlDomain, fetchFromSite, openSite, parsePage } from "./crawl";
+import { isIP, type LookupFunction } from "node:net";
+import { crawlDomain, fetchFromSite, openSite, parsePage, publicLookup } from "./crawl";
 
-// No real DNS or HTTP: an IP literal resolves to itself, every name to a public address unless listed here.
+// No real DNS or HTTP: every name resolves to a public address unless listed here (several addresses: comma-separated).
 const dns = vi.hoisted(() => ({ hosts: {} as Record<string, string> }));
 vi.mock("node:dns/promises", () => ({
-  lookup: async (host: string) => [isIP(host) ? { address: host, family: isIP(host) } : { address: dns.hosts[host] ?? "93.184.216.34", family: 4 }],
+  lookup: async (host: string) => (dns.hosts[host] ?? "93.184.216.34").split(",").filter(Boolean).map((address) => ({ address, family: isIP(address) })),
+}));
+// undici's fetch is the stubbed global one; the Agent only keeps its options, so the stub can resolve names the way a socket would.
+vi.mock("undici", () => ({
+  fetch: (input: unknown, init: unknown) => (globalThis.fetch as (...args: unknown[]) => unknown)(input, init),
+  Agent: class {
+    constructor(readonly options: unknown) {}
+  },
 }));
 
 const HTML = `<!doctype html><html lang="cs"><head>
@@ -52,11 +59,17 @@ describe("crawler requests", () => {
 
   const html = (body: string) => new Response(`<html><body>${body}</body></html>`, { headers: { "content-type": "text/html" } });
   const redirect = (location: string) => new Response(null, { status: 302, headers: { location } });
-  /** Stubs fetch with a URL → response table (404 otherwise) and records every requested URL. */
+  /**
+   * Stubs fetch with a URL → response table (404 otherwise) and records every requested URL. Like a real socket, a
+   * name is first resolved with the `lookup` of the request's dispatcher, and the request fails when that fails.
+   */
   const stubFetch = (routes: Record<string, () => Response>) => {
     const requested: string[] = [];
-    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit & { dispatcher?: { options: { connect: { lookup: LookupFunction } } } }) => {
       expect(init?.redirect).toBe("manual");
+      const { hostname } = new URL(String(input));
+      if (!isIP(hostname.replace(/^\[|\]$/g, "")))
+        await new Promise<void>((resolve, reject) => init!.dispatcher!.options.connect.lookup(hostname, { all: true }, (err) => (err ? reject(err) : resolve())));
       requested.push(String(input));
       return routes[String(input)]?.() ?? new Response("", { status: 404 });
     });
@@ -135,6 +148,14 @@ describe("crawler requests", () => {
     expect(requested).not.toContain("https://evil.example/llms.txt");
   });
 
+  it("fails when the name resolves to a private address as the socket connects (DNS rebinding)", async () => {
+    const requested = stubFetch({ "https://site.example/": () => html("<h1>secret</h1>") });
+    expect((await fetchFromSite("https://site.example/", ["site.example"]))?.text).toContain("secret");
+    dns.hosts = { "site.example": "169.254.169.254" };
+    expect(await fetchFromSite("https://site.example/", ["site.example"])).toBeNull();
+    expect(requested).toEqual(["https://site.example/"]);
+  });
+
   it("gives up on a redirect loop", async () => {
     const requested = stubFetch({ "https://site.example/a": () => redirect("/a") });
     expect(await fetchFromSite("https://site.example/a", ["site.example"])).toBeNull();
@@ -162,4 +183,37 @@ describe("crawler requests", () => {
     expect(pulled).toBe(2);
     expect(cancelled).toBe(true);
   });
+});
+
+describe("crawler connect lookup", () => {
+  afterEach(() => {
+    dns.hosts = {};
+  });
+
+  const resolve = (host: string, all: boolean) =>
+    new Promise<unknown[]>((done) => publicLookup(host, { all, family: 0 }, (...args) => done(args)));
+
+  it("passes public addresses on in the shape net.connect expects", async () => {
+    dns.hosts = { "site.example": "93.184.216.34,2606:2800:220:1:248:1893:25c8:1946" };
+    expect(await resolve("site.example", false)).toEqual([null, "93.184.216.34", 4]);
+    expect(await resolve("site.example", true)).toEqual([
+      null,
+      [
+        { address: "93.184.216.34", family: 4 },
+        { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+      ],
+    ]);
+  });
+
+  it.each(["127.0.0.1", "169.254.169.254", "10.0.0.5", "::1", "::ffff:192.168.1.10", "fd00::1", "93.184.216.34,127.0.0.1", ""])(
+    "fails when any resolved address is not public, or none is returned (%s)",
+    async (addresses) => {
+      dns.hosts = { "site.example": addresses };
+      for (const all of [false, true]) {
+        const [err, address] = await resolve("site.example", all);
+        expect(err).toBeInstanceOf(Error);
+        expect(address).toEqual([]);
+      }
+    },
+  );
 });
