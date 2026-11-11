@@ -2,7 +2,7 @@ import { requireAdminPage } from "@/lib/auth-guard";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { listDomainsOverview } from "@/services/overview";
-import { budgetTotal } from "@/services/costs";
+import { budgetTotal, outOfBudget } from "@/services/costs";
 
 type DomainRow = Awaited<ReturnType<typeof listDomainsOverview>>[number];
 import { AddDomainDialog } from "@/components/AddDomainDialog";
@@ -37,7 +37,7 @@ export default async function DomainsPage({
   const now = new Date();
   const monthCost = domains.reduce((a, d) => a + d.cost.monthUsd, 0);
   const monthBudget = budgetTotal(domains);
-  const paused = domains.some((d) => d.status === "PAUSED");
+  const paused = domains.some(outOfBudget);
   const active = domains.filter((d) => d.status === "ACTIVE").length;
   const activePrompts = domains.reduce((a, d) => a + d.prompts.active, 0);
   const pendingProposals = domains.reduce((a, d) => a + d.prompts.proposed, 0);
@@ -75,7 +75,7 @@ export default async function DomainsPage({
         <StatTile
           label="Cost this month"
           value={usd(monthCost)}
-          detail={`of ${usd(monthBudget)} total budget${paused ? ", paused domains excluded" : ""}`}
+          detail={`of ${usd(monthBudget)} total budget${paused ? ", paused domains without spend excluded" : ""}`}
         />
       </dl>
 

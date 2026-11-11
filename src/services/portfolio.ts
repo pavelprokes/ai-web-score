@@ -49,7 +49,6 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
   const db = getDb();
   const setup = mode !== "EXPLORATION" && (await promptCounts(domainId)).active === 0;
   const [run] = await db.insert(runs).values({ domainId, kind: "PORTFOLIO", trigger: mode }).returning({ id: runs.id });
-  const estimatedCostUsd = llmCostOfRun(llmPurpose(mode));
   // A new attempt at the first portfolio: the previous attempt's error no longer describes the domain.
   if (setup) {
     await db
@@ -61,15 +60,13 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
     const result = await designPortfolio(domainId, mode);
     await db
       .update(runs)
-      .set({ status: "SUCCEEDED", finishedAt: new Date(), completedCount: result.created, plan: { mode, created: result.created }, estimatedCostUsd })
+      .set({ status: "SUCCEEDED", finishedAt: new Date(), completedCount: result.created, plan: { mode, created: result.created } })
       .where(and(eq(runs.id, run!.id), eq(runs.status, "RUNNING")));
     return result;
   } catch (e) {
     // Past the job's deadline the LLM calls were aborted; name the real cause, not "request aborted".
     const message = deadlinePassed() ? "Did not finish within the job's time limit" : e instanceof Error ? e.message : String(e);
     const cancelled = e instanceof JobCancelledError;
-    // A failed or stopped run was paid for as well (the cancel action has already closed a stopped one).
-    await db.update(runs).set({ estimatedCostUsd }).where(eq(runs.id, run!.id));
     await db
       .update(runs)
       .set({ status: cancelled ? "CANCELLED" : "FAILED", finishedAt: new Date(), error: message.slice(0, 1000) })
@@ -83,6 +80,9 @@ export async function generatePortfolio(domainId: string, mode: GenerationMode) 
         .where(and(eq(domains.id, domainId), inArray(domains.status, ["READY", "ERROR"])));
     }
     throw e;
+  } finally {
+    // Whatever closed the run — success, failure, or the cancel action while this was still working — it was paid for.
+    await db.update(runs).set({ estimatedCostUsd: llmCostOfRun(llmPurpose(mode)) }).where(eq(runs.id, run!.id));
   }
 }
 

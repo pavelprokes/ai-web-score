@@ -68,16 +68,23 @@ export async function internalLlmCost(since: Date) {
 
 /**
  * What the internal LLM calls of a DISCOVERY or PORTFOLIO run cost, for the `set` of an update of that `runs` row.
- * `llm_usage` has no run id: the run's calls are the domain's calls of its purpose since the run started (one run
- * per kind and domain at a time — the job dedupe key).
+ * `llm_usage` has no run id: the run's calls are the domain's calls of its purpose since the run started. One run
+ * per kind and domain at a time (the job dedupe key), except that a run stopped and started again within one LLM
+ * call has that call counted on both; so has the retry of a failed prompt design whose other chunks were still
+ * answering.
  */
 export function llmCostOfRun(purpose: string) {
   return sql<number>`(select coalesce(sum(u.cost_usd), 0) from llm_usage u where u.domain_id = runs.domain_id and u.created_at >= runs.created_at and u.purpose = ${purpose})`;
 }
 
-/** Budget the monitored domains can spend this month: a paused domain is not planned, so its budget is left out. */
-export function budgetTotal(domains: Array<{ status: string; cost: { monthlyBudgetUsd: number } }>) {
-  return domains.reduce((a, d) => a + (d.status === "PAUSED" ? 0 : d.cost.monthlyBudgetUsd), 0);
+/** A paused domain is not planned, so its budget cannot be spent — unless it already spent some of it this month. */
+export function outOfBudget(d: { status: string; cost: { monthUsd: number } }) {
+  return d.status === "PAUSED" && d.cost.monthUsd === 0;
+}
+
+/** Budget behind this month's cost of the monitored domains. */
+export function budgetTotal(domains: Array<{ status: string; cost: { monthUsd: number; monthlyBudgetUsd: number } }>) {
+  return domains.reduce((a, d) => a + (outOfBudget(d) ? 0 : d.cost.monthlyBudgetUsd), 0);
 }
 
 const DAY_MS = 86_400_000;

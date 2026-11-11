@@ -1070,8 +1070,9 @@ function Runs({ detail, now }: { detail: Detail; now: Date }) {
                     )}
                   </td>
                   <td className="num">
-                    {r.estimatedCostUsd == null ? <span className="muted">–</span> : usd(r.estimatedCostUsd)}
-                    {/* Measurement runs carry the planner's estimate, discovery and prompt design what their LLM calls cost. */}
+                    {/* Measurement runs carry the planner's estimate, discovery and prompt design what their LLM calls cost.
+                        0 there is a run from before that was recorded, or one that never reached the LLM: not "$0.00". */}
+                    {r.estimatedCostUsd == null || (r.kind !== "MEASUREMENT" && r.estimatedCostUsd === 0) ? <span className="muted">–</span> : usd(r.estimatedCostUsd)}
                     {r.kind === "MEASUREMENT" && <span className="cell-sub">estimate</span>}
                   </td>
                 </tr>
