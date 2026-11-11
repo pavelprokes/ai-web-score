@@ -1,7 +1,7 @@
 import { deadlineRemainingMs } from "@/lib/deadline";
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
 import { isoLanguage } from "../../language";
-import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, ProviderError, requireEnv } from "../provider";
+import { httpJson, SYNC_ANSWER_TIMEOUT_MS, type ProviderAdapter, type ProviderConfigurationSeed, ProviderError, requireEnv } from "../provider";
 
 /**
  * Perplexity Agent API (POST /v1/agent). The Sonar chat-completions API was retired on
@@ -203,7 +203,7 @@ export const perplexityApi: ProviderAdapter = {
             method: "POST",
             headers: { Authorization: `Bearer ${requireEnv("PERPLEXITY_API_KEY")}`, "Content-Type": "application/json" },
             body: JSON.stringify(buildPerplexityBody(req, config, { serviceTier })),
-            timeoutMs: 70_000, // inside the 75 s measurement job budget; p99 is 33 s
+            timeoutMs: SYNC_ANSWER_TIMEOUT_MS, // p99 is 33 s
           });
         } catch (e) {
           if (!(e instanceof ProviderError) || e.status !== 429) throw e;

@@ -1,5 +1,5 @@
 import type { Citation, MeasurementRequest, NormalizedAnswer, RetrievedSource } from "../types";
-import { httpJson, type ProviderAdapter, type ProviderConfigurationSeed, requireEnv } from "../provider";
+import { httpJson, SYNC_ANSWER_TIMEOUT_MS, type ProviderAdapter, type ProviderConfigurationSeed, requireEnv } from "../provider";
 
 /**
  * OpenAI Responses API + web_search tool. This is the "model/API layer", NOT the
@@ -161,7 +161,7 @@ export const openaiApi: ProviderAdapter = {
       method: "POST",
       headers: { Authorization: `Bearer ${requireEnv("OPENAI_API_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify(buildOpenAiBody(req, config)),
-      timeoutMs: 140_000, // the 75 s measurement job budget cuts it off earlier
+      timeoutMs: SYNC_ANSWER_TIMEOUT_MS,
     });
     return { answer: parseOpenAiResponse(json), raw: json };
   },

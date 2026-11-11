@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { typesThatFit } from "./runner";
 import { JobTimeoutError, runAsJob, throwIfJobCancelled } from "./queue";
 import { deadlineFetch, deadlineRemainingMs, deadlineSignal, runWithDeadline } from "@/lib/deadline";
 import { chatgptUi } from "@/core/measurement/providers/dataforseo";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { SYNC_ANSWER_TIMEOUT_MS } from "@/core/measurement/provider";
+import { openaiApi } from "@/core/measurement/providers/openai";
+import { geminiApi } from "@/core/measurement/providers/gemini";
+import { perplexityApi } from "@/core/measurement/providers/perplexity";
 
 describe("typesThatFit", () => {
   it("only offers jobs that can finish before the invocation's deadline", () => {
@@ -85,6 +89,28 @@ describe("job time budget", () => {
       expect(out).toEqual([{ measurementId: "m1", status: "PENDING" }]);
       expect(calls).toBe(0);
     } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("gives every synchronous provider an HTTP timeout inside the measurement.execute budget", async () => {
+    // A timeout longer than the budget would be cut off by the runner mid-request instead of failing cleanly.
+    expect(typesThatFit(SYNC_ANSWER_TIMEOUT_MS)).not.toContain("measurement.execute");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("{}")) as typeof fetch;
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const keys = ["OPENAI_API_KEY", "GEMINI_API_KEY", "PERPLEXITY_API_KEY"];
+    for (const k of keys) process.env[k] = "test";
+    try {
+      const req = { measurementId: "m1", promptText: "q", language: "en", country: "US" };
+      for (const p of [openaiApi, geminiApi, perplexityApi]) {
+        timeout.mockClear();
+        await p.execute!(req, p.configurations[0]!).catch(() => {}); // the empty body may not parse
+        expect(timeout.mock.calls, p.id).toEqual([[SYNC_ANSWER_TIMEOUT_MS]]);
+      }
+    } finally {
+      for (const k of keys) delete process.env[k];
+      timeout.mockRestore();
       globalThis.fetch = realFetch;
     }
   });
