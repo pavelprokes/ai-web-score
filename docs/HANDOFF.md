@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-11-11.
+Read this first in a new session. Last updated 2026-11-12.
 
 ## How to continue in a new session
 
@@ -89,7 +89,16 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 ## Next task
 
-Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`.
+**Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
+(UX, scoring, logic, providers, what is new in the field) with five phases and five open owner decisions (raw
+retention 7/14/30 days, `answer_text` retention, the vzdelanibudoucnosti.cz budget, how the backlog is approved,
+whether outward use is planned). Start with Phase 0; it needs production access, which the session of 2026-11-12
+did not have (database port blocked, `pnpm install` failed on the hig-web-kit tarball). It supersedes the order of
+the items below, which stay as background. Note from that review: 30-day raw retention frees almost nothing
+(`raw_response` grew 298 MB in about a month) — use 7–14 days, and never clear `answer_text` before an extractor
+change (`signals.reextract` reads it).
+
+Earlier decisions: `docs/meetings/2026-10-12-first-production-data.md`.
 
 The audit of 2026-11-10 (production data, code, provider docs, comparable tools) produced a sequence of small PRs;
 #48–#68 are merged and verified on production. What is left needs an owner decision first:
