@@ -92,8 +92,7 @@ is new in the field, and produce a plan in phases. Decisions marked **open** are
 | Retention test, then the env var, then `VACUUM FULL` | qa, principal-engineer, Pavel | Test: clearing leaves answers, citations and signals intact and the API `raw` flag returns null. Database under 250 MB |
 | Read 30 answers marked "named" on se-vezmou.cz (Perplexity, AI Mode) and 30 on vzdelanibudoucnosti.cz; list every brand alias in production that is an ordinary phrase; tighten those and re-extract | seo-geo, principal-engineer | Named rate equals a hand count on each 30; a re-extract can be queued for one domain without a new profile version |
 | Before raw is cleared: count `chat_gpt_ad` items in stored raw responses and check whether ad text reaches `answer_text` | seo-geo, principal-engineer | A number; a parser test with an ad item |
-| Perplexity adapter against the current Agent API (`preset` → `effort`, retired model ids, web-search price) | principal-engineer | `pnpm smoke` passes; price entry matches the invoice |
-| `carryJudgement` keeps the previous `untrackedEntities` | principal-engineer | Unit test |
+| Perplexity adapter: send `effort` instead of the deprecated `preset` (still accepted, no removal date; the price entry already has Fast Search at $1 per 1,000) | principal-engineer | `pnpm smoke` passes |
 | Perplexity one sample per cycle; prior mean 0.13 | principal-engineer | Simulation test; no same-cycle Perplexity repeats in the next wave |
 | Labels: one name per metric, "Re-check every", "Named when asked directly", base on the Cited tile, actionable "Not enough data" | copywriter, ux-ui | No old label left in `src/` (grep, including the agent brief); `pnpm a11y` clean |
 | Caveat on "Share among tracked rivals" when untracked brands are named more often; attention rule needs a minimum number of prompts | ux-ui, copywriter | Shown on vzdelanibudoucnosti.cz; unit test in `attention.test.ts` |
@@ -227,3 +226,16 @@ independent fact-check that had to find two sources, primary where possible.
 - Whether Gemini UI capture raises a terms question (seo-geo asked the lawyer; not answered in the meeting).
 - The statute references in the lawyer's report were not checked against a second source.
 - Which role `PROD_DATABASE_URL` uses in the cloud environment.
+
+### Found while implementing (same day)
+
+- **Dropped: "`carryJudgement` keeps the previous `untrackedEntities`".** The empty list is correct. A carried
+  judgement belongs to a different answer that the analyser never read; copying the other brands of the earlier
+  answer would attribute them to an answer that may not contain them and inflate the "named in ≥ 3 analysed
+  answers" rule of the competitor suggestions (`src/core/competitors.ts`). The remedy for thin competitor data
+  stays the broader analysis of Phase 2.
+- **Perplexity `preset`**: confirmed in the vendor changelog and the "Effort" page — a naming change only,
+  `preset` is a deprecated alias without a removal date, the endpoint is unchanged. Low urgency.
+- The session got a working install (the kit cloned over git and installed from the local copy; manifests
+  untouched) and a local Postgres, so tests, typecheck and the cost simulation run here. Production is still
+  unreachable.
