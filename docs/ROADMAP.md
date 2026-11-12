@@ -57,5 +57,5 @@ calibration logic, several answers per request); Perplexity repeats (done).
 
 ## Not planned
 
-Claude API measurement ($0.044 an answer), a second capture vendor, Seznam Asistent, Copilot (no capture
+Turning Claude API measurement back on ($0.044 an answer; the adapter stays), a second capture vendor, Seznam Asistent, Copilot (no capture
 available from the current vendor), a public index, multi-tenant use.

@@ -524,7 +524,7 @@ function ScoreTiles({ detail }: { detail: Detail }) {
             <>
               {num(s.samples)} unbranded answers · {num(s.prompts)} prompts
               {s.insufficientData && (
-                <span className="tile__sub">Mentioned is not known to within ±10 points yet. Approving more prompts narrows it.</span>
+                <span className="tile__sub">The Mentioned interval is still too wide to read a level. Approving more prompts narrows it.</span>
               )}
               {mix && <span className="tile__sub">Weighted by reach: {mix}</span>}
             </>
@@ -1074,7 +1074,7 @@ const QUALITY_LABELS: Record<string, string> = {
   commercialCoverage: "Commercial coverage",
   providerCoverage: "Provider coverage",
   promptRedundancy: "Prompt redundancy (lower is better)",
-  measurementConfidence: "Measurement confidence",
+  measurementConfidence: "Certainty of the estimates",
 };
 
 const PROPOSAL_KIND: Record<string, string> = {

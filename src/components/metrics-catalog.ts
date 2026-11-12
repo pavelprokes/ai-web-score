@@ -286,7 +286,7 @@ export const METRICS: MetricDefinition[] = [
     short: "0–100 rating of the prompt portfolio: does it cover the business and give reliable data?",
     formula:
       "100 × (25 % topic coverage + 15 % intent coverage + 20 % commercial coverage + 15 % provider coverage " +
-      "+ 10 % (1 − prompt redundancy) + 15 % measurement confidence)",
+      "+ 10 % (1 − prompt redundancy) + 15 % certainty of the estimates)",
     description: "Below 60 the portfolio needs re-analysis: re-run discovery or regenerate prompts.",
     example: "All coverages 100 %, redundancy 0 %, confidence 33 % → 100 × (0.25 + 0.15 + 0.2 + 0.15 + 0.1 + 0.15 × 0.33) ≈ 90.",
   },
