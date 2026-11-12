@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-11-11.
+Read this first in a new session. Last updated 2026-11-12.
 
 ## How to continue in a new session
 
@@ -89,7 +89,44 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 ## Next task
 
-Decisions and the full plan: `docs/meetings/2026-10-12-first-production-data.md`.
+**Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
+(UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept
+90 days or more — so raw must be made small first; `answer_text` without a limit; vzdelanibudoucnosti.cz budget
+raised; proposals applied automatically; no outward use; costs are the focus after Phase 0). Start with Phase 0; it needs production access, which the session of 2026-11-12
+did not have (database port blocked, `pnpm install` failed on the hig-web-kit tarball). It supersedes the order of
+the items below, which stay as background. Notes from that review: check the brand aliases first
+(an alias such as "Se vezmou" or "Vzdělání budoucnosti" matches the ordinary phrase — possibly inflated named
+rates on two domains); raw retention of 30 days is enough at today's volume but not at the full portfolio (14
+days then), and the free tier is outgrown within about three months at the full portfolio anyway; never clear
+`answer_text` before an extractor change (`signals.reextract` reads it); the Perplexity adapter still sends
+`preset`, which the API renamed to `effort`.
+
+Done on the branch of that review (2026-11-12, tests and the cost simulation only — production was not reachable):
+
+- **`geo-v3` exists and no domain uses it.** One weight per prompt × assistant, intervals over prompts (with a
+  t correction for few prompts), no floor in the overall score (`src/core/scoring/weights.ts`, `geo-v3.test.ts`,
+  METHODOLOGY §6). Switch one domain with `PATCH /api/domains/{id}` `{"scoringVersion":"geo-v3"}` (history
+  backfills on the next compute), compare it with the acceptance checks of the plan (mention rate against the
+  SQL mean of per-prompt rates, interval against a bootstrap over prompts), then switch the rest with a
+  migration like `drizzle/0007`. Expect "Not enough data" on domains whose prompts disagree until the backlog
+  is approved, and lower overall scores (no floor).
+- **Quiet cells are slowed down only for domains on `geo-v3`** (weekly, every three days on ChatGPT; −37 % of
+  steady measurement spend in the simulation with `FAKE_SILENT_CELL_SHARE=0.73`). Under geo-v2 nothing changes,
+  because pooled answers would read the missing zeros as a higher rate. After the switch check on production:
+  answers per day by provider, and that woken cells return to the normal pace.
+- Perplexity takes one sample per cycle; a new cell starts at the measured prior 0.13.
+- Not done: the domain × provider change detector (the planner has a simpler guard: at least three wake-ups
+  and 15 % of an assistant's quiet cells in a week suspend the slow pace), labels, `pnpm prod:check`,
+  raw-response slimming. Recommendation diagnostics, the answer viewer and competitor counts still count
+  answers one by one; give the diagnostics a per-cell reading before or with the switch to `geo-v3`, and do not
+  switch a domain back to geo-v2 afterwards (its quiet cells are thinned).
+
+First things with production access, in this order: (1) brand aliases that are ordinary phrases on
+se-vezmou.cz and vzdelanibudoucnosti.cz; (2) what `raw_response` consists of per provider
+(`select provider_id, count(*), pg_size_pretty(sum(pg_column_size(raw_response))) …`, and the size of each
+top-level key) and whether `chat_gpt_ad` and `brand_entities` are in it; (3) replay `geo-v3` on one domain.
+
+Earlier decisions: `docs/meetings/2026-10-12-first-production-data.md`.
 
 The audit of 2026-11-10 (production data, code, provider docs, comparable tools) produced a sequence of small PRs;
 #48–#68 are merged and verified on production. What is left needs an owner decision first:

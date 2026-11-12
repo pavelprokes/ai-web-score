@@ -280,6 +280,39 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
     const after = (await getDb().select().from(s.scoreSnapshots).where(and(eq(s.scoreSnapshots.domainId, domainId), eq(s.scoreSnapshots.scope, "DOMAIN"))))[0]!;
     expect(after.overallScore).toBe(before.overallScore);
 
+    // geo-v3 beside it: each assistant's mention rate is the weighted mean of its per-prompt rates (one weight
+    // per prompt, however often it was measured), and computing it leaves the geo-v2 snapshots as they were.
+    const v2Before = await getDb().select().from(s.scoreSnapshots).where(and(eq(s.scoreSnapshots.domainId, domainId), eq(s.scoreSnapshots.scoringVersion, "geo-v2")));
+    await computeScores(domainId, { scoringVersion: "geo-v3", windowEnd: before.windowEnd });
+    const v3 = await getDb().select().from(s.scoreSnapshots).where(and(eq(s.scoreSnapshots.domainId, domainId), eq(s.scoreSnapshots.scoringVersion, "geo-v3")));
+    expect(v3.some((x) => x.scope === "DOMAIN")).toBe(true);
+    const perPrompt = await getDb().execute<{ provider_id: string; rate: number }>(sql`
+      with cell as (
+        select m.provider_id, pv.prompt_id, 0.6 * pv.importance + 0.4 * pv.commercial_value as w,
+               avg(((ms.signals->>'brandMentioned')::boolean)::int) as rate
+        from measurements m
+        join measurement_signals ms on ms.measurement_id = m.id
+        join prompt_versions pv on pv.id = m.prompt_version_id
+        join prompts p on p.id = pv.prompt_id
+        join topic_clusters tc on tc.domain_id = p.domain_id and tc.key = p.cluster_key and tc.active
+        where m.domain_id = ${domainId} and m.status = 'SUCCEEDED' and m.configuration->>'role' = 'STANDARD'
+          and pv.category <> 'BRAND_VALIDATION' and coalesce((ms.signals->>'noAnswer')::boolean, false) = false
+          and m.finished_at <= ${before.windowEnd.toISOString()}::timestamptz
+        group by 1, 2, 3)
+      select provider_id, (sum(w * rate) / sum(w))::float8 as rate from cell group by 1`);
+    expect(perPrompt.length).toBeGreaterThan(0);
+    for (const row of perPrompt) {
+      const snap = v3.find((x) => x.scope === "PROVIDER" && x.scopeKey === row.provider_id)!;
+      expect((snap.metrics as any).mentionRate.value).toBeCloseTo(Number(row.rate), 9);
+      // Honest intervals are never narrower than geo-v2's for the same answers.
+      const old = v2Before.find((x) => x.scope === "PROVIDER" && x.scopeKey === row.provider_id);
+      const width = (m: any) => m.mentionRate.high - m.mentionRate.low;
+      if (old) expect(width(snap.metrics)).toBeGreaterThanOrEqual(width(old.metrics) - 0.02);
+    }
+    const v2After = await getDb().select().from(s.scoreSnapshots).where(and(eq(s.scoreSnapshots.domainId, domainId), eq(s.scoreSnapshots.scoringVersion, "geo-v2")));
+    const byId = (rows: typeof v2After) => Object.fromEntries(rows.map((r) => [r.id, r.metrics]));
+    expect(byId(v2After)).toEqual(byId(v2Before));
+
     // Historical recalculation via the admin action.
     const res = await actionsRoute.POST(
       new Request(`http://t/api/domains/${domainId}/actions`, { ...auth, method: "POST", body: JSON.stringify({ action: "recalculate-scores", weeks: 2 }) }),

@@ -191,7 +191,10 @@ const BASE: Record<string, number> = { chatgpt: 0.65, aimode: 0.45, openai: 0.55
 
 export function fakeAnswer(provider: string, prompt: string, salt: string) {
   const r = hash(`${provider}|${prompt}|${salt}`);
-  const p = BASE[provider]! * (0.6 + 0.8 * hash(prompt));
+  // On production 73 % of prompt × assistant cells never show the brand (RESEARCH §7.3). The simulation can
+  // reproduce that share with FAKE_SILENT_CELL_SHARE; the default world shows the brand everywhere.
+  const silent = hash(`silent|${provider}|${prompt}`) < Number(process.env.FAKE_SILENT_CELL_SHARE ?? 0);
+  const p = silent ? 0 : BASE[provider]! * (0.6 + 0.8 * hash(prompt));
   const mentioned = r < p;
   const names = COMPETITORS.map((c) => c.name);
   if (mentioned) names.splice(Math.floor(hash(salt + prompt) * 3), 0, BRAND);

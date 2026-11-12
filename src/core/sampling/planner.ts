@@ -1,7 +1,9 @@
 import type { PromptRole } from "../prompt";
+import { SCORING_VERSIONS } from "../scoring/scoring";
 import {
   type CellState,
   daysBetween,
+  isQuietCell,
   posteriorVarianceAfter,
   predictedVariance,
   recommendedIntervalDays,
@@ -33,6 +35,19 @@ export interface PlanCell {
   costPerSample: number;
   /** Provider configuration is one of the domain's "important" providers (core coverage). */
   coreProvider: boolean;
+  /**
+   * Cap on samples of this cell in one cycle (below `maxSamplesPerCell`). For providers whose repeats
+   * within a cycle are near copies of the first answer and so carry little new information.
+   */
+  maxSamples?: number;
+  /**
+   * Re-measure the cell at the slower quiet pace while it is quiet (`isQuietCell`). Only safe when the
+   * domain's scoring gives each cell one weight: a version that pools answers would read fewer answers
+   * without the brand as a higher rate.
+   */
+  slowWhenQuiet?: boolean;
+  /** Days between two measurements while the cell is quiet; default `quietIntervalDays`. */
+  quietIntervalDays?: number;
 }
 
 export interface PlanOptions {
@@ -45,6 +60,13 @@ export interface PlanOptions {
   minVarianceReduction: number;
   /** Minimum days between two measurements of the same cell (unless a change was detected). */
   minIntervalDays: number;
+  /**
+   * Minimum days between two measurements of a quiet cell — one where the brand has not appeared for a
+   * long run of answers. Kept at or below `coreMaxIntervalDays`, so the core guarantee still holds.
+   */
+  quietIntervalDays: number;
+  /** Measure quiet cells like any other (a manual run measures everything). */
+  ignoreQuietPace?: boolean;
   /** Core prompts on core providers must be measured at least this often. */
   coreMaxIntervalDays: number;
   /**
@@ -65,6 +87,7 @@ export const DEFAULT_PLAN_OPTIONS: Omit<PlanOptions, "now" | "budgetUsd"> = {
   explorationBudgetShare: 0.15,
   minVarianceReduction: 0.0015,
   minIntervalDays: 0.9,
+  quietIntervalDays: 7,
   coreMaxIntervalDays: 7,
   nonCoreProviderMaxIntervalDays: 28,
   minValuePerDollar: 0.3,
@@ -124,7 +147,63 @@ function eligible(cell: PlanCell, opts: PlanOptions): boolean {
   const since = daysBetween(cell.state.lastObservedAt, opts.now);
   const recentChange =
     cell.state.changeDetectedAt !== null && daysBetween(cell.state.changeDetectedAt, opts.now) < 3;
-  return since >= opts.minIntervalDays || recentChange;
+  return since >= minIntervalOf(cell, opts) || recentChange;
+}
+
+/**
+ * Whether quiet cells of a domain scored with this version may be slowed down. Only a version that gives each
+ * cell one weight: one that pools answers would read fewer answers without the brand as a higher rate.
+ */
+export function slowsQuietCells(scoringVersion: string): boolean {
+  return SCORING_VERSIONS[scoringVersion]?.rules?.cellWeights === true;
+}
+
+/** The answer of a cycle lands minutes after its plan, so "every N days" is checked with this much slack. */
+const INTERVAL_SLACK_DAYS = 0.1;
+
+/** The cell is on the slower pace of quiet cells. */
+export function onQuietPace(cell: Pick<PlanCell, "state" | "slowWhenQuiet">): boolean {
+  return cell.slowWhenQuiet === true && isQuietCell(cell.state);
+}
+
+/** Days that must pass before the cell is measured again: longer while it is quiet. */
+export function minIntervalOf(
+  cell: PlanCell,
+  opts: Pick<PlanOptions, "minIntervalDays" | "quietIntervalDays" | "ignoreQuietPace">,
+): number {
+  if (opts.ignoreQuietPace || !onQuietPace(cell)) return opts.minIntervalDays;
+  return Math.max(opts.minIntervalDays, (cell.quietIntervalDays ?? opts.quietIntervalDays) - INTERVAL_SLACK_DAYS);
+}
+
+/**
+ * Several quiet cells of one assistant waking up within a week are a shift of the assistant (ChatGPT on
+ * 2026-10-22: 12 of 25 prompts rose), and its other quiet cells should be looked at now, not within the week.
+ * The slow pace is suspended when at least `QUIET_WAKE_SUSPEND_COUNT` cells and `QUIET_WAKE_SUSPEND_SHARE` of
+ * the assistant's quiet-or-just-woken cells woke up in the window. A share, because the count alone grows
+ * with the portfolio, and high enough that the suspension cannot feed itself: by chance about 1–2 % of quiet
+ * cells wake up in a week at the quiet pace and no more than 4 % at the normal one (0.4–0.7 % per answer,
+ * RESEARCH §7.6).
+ */
+export const QUIET_WAKE_WINDOW_DAYS = 7;
+export const QUIET_WAKE_SUSPEND_COUNT = 3;
+export const QUIET_WAKE_SUSPEND_SHARE = 0.15;
+
+/** Cells whose quiet run ended within the window. */
+export function recentWakeUps(states: CellState[], now: Date): number {
+  return states.filter((s) => s.wokeAt && daysBetween(s.wokeAt, now) < QUIET_WAKE_WINDOW_DAYS).length;
+}
+
+/** Whether the slow pace of quiet cells is suspended for an assistant, given the states of its cells in the domain. */
+export function quietPaceSuspended(states: CellState[], now: Date): boolean {
+  const woke = recentWakeUps(states, now);
+  const quiet = states.filter(isQuietCell).length;
+  return woke >= QUIET_WAKE_SUSPEND_COUNT && woke / (woke + quiet) >= QUIET_WAKE_SUSPEND_SHARE;
+}
+
+function sampleCap(cell: PlanCell, opts: PlanOptions): number {
+  // A quiet cell is re-checked with one answer: a repeat adds nothing to "still not there".
+  if (!opts.ignoreQuietPace && onQuietPace(cell)) return 1;
+  return Math.min(opts.maxSamplesPerCell, cell.maxSamples ?? opts.maxSamplesPerCell);
 }
 
 function coreGuaranteeDue(cell: PlanCell, opts: PlanOptions): boolean {
@@ -180,7 +259,7 @@ export function planCycle(cells: PlanCell[], opts: PlanOptions): Plan {
   const heap = new MaxHeap<{ cell: PlanCell; k: number; value: number; ratio: number }>((x) => x.ratio);
   for (const cell of pool) {
     const k = (taken.get(cell.cellKey)?.samples ?? 0) + 1;
-    if (k > opts.maxSamplesPerCell) continue;
+    if (k > sampleCap(cell, opts)) continue;
     const value = marginalValue(cell, now, k);
     heap.push({ cell, k, value, ratio: value / cell.costPerSample });
   }
@@ -195,7 +274,7 @@ export function planCycle(cells: PlanCell[], opts: PlanOptions): Plan {
     if (cell.role === "EXPLORATION" && explorationSpent + cell.costPerSample > explorationCap) continue;
     take(cell, "VALUE_OF_INFORMATION", value);
     const nextK = k + 1;
-    if (nextK <= opts.maxSamplesPerCell) {
+    if (nextK <= sampleCap(cell, opts)) {
       const nextValue = marginalValue(cell, now, nextK);
       heap.push({ cell, k: nextK, value: nextValue, ratio: nextValue / cell.costPerSample });
     }

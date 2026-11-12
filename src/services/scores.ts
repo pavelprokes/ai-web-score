@@ -6,6 +6,7 @@ import { throwIfJobCancelled } from "@/jobs/queue";
 import { ownPages, topSources } from "@/core/scoring/sources";
 import { latestProfile } from "./discovery";
 import { computeMetrics, getScoringVersion, type ScoringObservation } from "@/core/scoring/scoring";
+import { cellWeights } from "@/core/scoring/weights";
 import type { RawSignals } from "@/core/signals/extract";
 
 /**
@@ -83,17 +84,31 @@ function weigh(windowRows: Row[], end: Date, scoringVersion: string, reach: Reac
   const countBy = new Map<string, number>();
   for (const r of rows) countBy.set(r.providerId, (countBy.get(r.providerId) ?? 0) + 1);
 
-  return rows.map((r) => ({
+  const promptWeight = (r: Row) => 0.6 * r.importance + 0.4 * r.commercialValue;
+  const branded = (r: Row) => r.category === "BRAND_VALIDATION";
+  const perCell = rules?.cellWeights
+    ? cellWeights(
+        rows.map((r) => ({
+          promptId: r.promptId,
+          providerId: r.providerId,
+          promptWeight: promptWeight(r),
+          branded: branded(r),
+          counts: !(r.signals as RawSignals).noAnswer,
+        })),
+        (p) => effReach(p) / totalReach,
+      )
+    : null;
+
+  return rows.map((r, i) => ({
     signals: r.signals as RawSignals,
     measurementId: r.measurementId,
     providerId: r.providerId,
     promptId: r.promptId,
     clusterKey: r.clusterKey,
-    branded: r.category === "BRAND_VALIDATION",
+    branded: branded(r),
     weight:
-      (0.6 * r.importance + 0.4 * r.commercialValue) *
-      (effReach(r.providerId) / totalReach) *
-      (rows.length / (present.length * (countBy.get(r.providerId) ?? 1))),
+      perCell?.[i] ??
+      promptWeight(r) * (effReach(r.providerId) / totalReach) * (rows.length / (present.length * (countBy.get(r.providerId) ?? 1))),
   }));
 }
 
@@ -119,7 +134,10 @@ async function writeWindow(domainId: string, version: string, obs: ObservationRo
   // What AI says when asked about the brand by name (branded prompts only; mention/sentiment/accuracy).
   const branded = obs.filter((o) => o.branded).map((o) => ({ ...o, branded: false }));
   if (branded.length) push("BRAND", "all", branded);
-  for (const p of new Set(obs.map((o) => o.providerId))) push("PROVIDER", p, obs.filter((o) => o.providerId === p), true);
+  // Per assistant, earlier versions flatten the importance weights; cell weights must stay as they are, or the
+  // answers of a cell would again count one by one.
+  const flatten = !getScoringVersion(version).rules?.cellWeights;
+  for (const p of new Set(obs.map((o) => o.providerId))) push("PROVIDER", p, obs.filter((o) => o.providerId === p), flatten);
   for (const c of new Set(obs.map((o) => o.clusterKey))) push("CLUSTER", c, obs.filter((o) => o.clusterKey === c));
 
   await getDb().transaction(async (tx) => {

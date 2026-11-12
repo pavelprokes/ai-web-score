@@ -216,6 +216,7 @@ function createAdapter(args: {
   configurations: ProviderConfigurationSeed[];
   notes: string[];
   fanOut: boolean;
+  sampling?: ProviderAdapter["sampling"];
 }): ProviderAdapter {
   const path = PATHS[args.dfsSurface];
   const parse = (r: unknown, model: string) =>
@@ -228,6 +229,7 @@ function createAdapter(args: {
     kind: "CONSUMER_UI",
     requiredEnv: ["DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD"],
     defaultReach: args.defaultReach,
+    sampling: args.sampling,
     warnings: [
       "Consumer-UI capture is done by DataForSEO (logged-out, no memory/personalisation). Review the vendor's terms for your use.",
     ],
@@ -343,6 +345,10 @@ export const chatgptUi = createAdapter({
   surface: "chatgpt.com",
   dfsSurface: "chat_gpt",
   defaultReach: 0.72,
+  // After eight answers without the brand a further ChatGPT answer still names it in 3.1 % (most of it one
+  // step on 2026-10-22), against 0.4–0.7 % elsewhere: quiet cells are re-checked every 3 days, not weekly.
+  // Review with the Kalman constants (RESEARCH §7, decision 6).
+  sampling: { quietIntervalDays: 3 },
   similarity: 0.85,
   fanOut: true,
   configurations: [{ id: "chatgpt-ui:standard", model: "chatgpt-default", params: { priority: 1 }, role: "STANDARD" }],

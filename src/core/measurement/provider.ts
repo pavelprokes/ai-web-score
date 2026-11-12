@@ -89,6 +89,13 @@ export interface ProviderAdapter {
   warnings?: string[];
   configurations: ProviderConfigurationSeed[];
   capability: CapabilityProfile;
+  /** How the planner samples this provider, where it differs from the defaults. */
+  sampling?: {
+    /** Samples of one prompt per cycle. Set to 1 when repeats within a cycle are near copies. */
+    maxSamplesPerCycle?: number;
+    /** Days between measurements of a cell where the brand has not appeared for a long run of answers. */
+    quietIntervalDays?: number;
+  };
   prices: PriceSeed[];
   /**
    * SYNC providers answer within the request. ASYNC providers accept a task and

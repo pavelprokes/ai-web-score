@@ -3,6 +3,7 @@ import {
   type CellState,
   confidence,
   initialCellState,
+  isQuietCell,
   PRIOR_VARIANCE,
   predictedVariance,
   recommendedIntervalDays,
@@ -10,7 +11,7 @@ import {
   updateCell,
 } from "./cell-state";
 import { rng } from "../scoring/stats";
-import { cycleBudget, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS } from "./planner";
+import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS, quietPaceSuspended, recentWakeUps, slowsQuietCells } from "./planner";
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, 1 + n, 6));
 
@@ -190,6 +191,111 @@ describe("VOI planner", () => {
       cell({ cellKey: k, role: "CORE", providerWeight: 0.28, coreProvider: false, costPerSample: 0.05, state: measured(daysAgo) });
     const plan = planCycle([lowReach("recent", 10), lowReach("stale", 30)], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 1 });
     expect(plan.items.map((i) => [i.cellKey, i.reason])).toEqual([["stale", "CORE_GUARANTEE"]]);
+  });
+
+  describe("quiet cells (brand absent for a long run of answers)", () => {
+    // Ten answers without the brand, one a day, the last one `daysAgo` days before `now`.
+    const quiet = (daysAgo: number) => feed(initialCellState(), Array(10).fill(0), 10 - daysAgo - 9);
+    // Priced like a UI capture: at this price the value floors do not hold a confident cell back.
+    const cheap = (over: Parameters<typeof cell>[0]) => cell({ costPerSample: 0.0012, promptWeight: 1, slowWhenQuiet: true, ...over });
+    const opts = { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 };
+
+    it("needs eight answers and an estimate near zero", () => {
+      expect(isQuietCell(feed(initialCellState(), Array(7).fill(0)))).toBe(false);
+      expect(isQuietCell(feed(initialCellState(), Array(8).fill(0)))).toBe(true);
+      expect(isQuietCell(feed(initialCellState(), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+    });
+
+    it("needs answers from several cycles: the repeats of a new cell's first days are not eight looks", () => {
+      // 5 + 2 + 1 answers on three consecutive days, as the planner samples a new cheap cell.
+      let s = initialCellState();
+      for (const [d, k] of [[0, 5], [1, 2], [2, 1]] as const) for (let i = 0; i < k; i++) s = updateCell(s, [0], new Date(day(d).getTime() + i * 60_000)).state;
+      expect(s.n).toBe(8);
+      expect(s.cycles).toBe(3);
+      expect(isQuietCell(s)).toBe(false);
+      expect(isQuietCell(updateCell(s, [0], day(3)).state)).toBe(true);
+    });
+
+    it("records when a quiet run ends", () => {
+      const q = quiet(2);
+      expect(q.wokeAt).toBeNull();
+      const woke = updateCell(q, [1], day(9)).state;
+      expect(woke.wokeAt).toBe(day(9).toISOString());
+      expect(recentWakeUps([woke, q], day(12))).toBe(1);
+      expect(recentWakeUps([woke, q], day(17))).toBe(0);
+    });
+
+    it("suspend the slow pace of an assistant when a real share of its quiet cells wakes up in a week", () => {
+      const q = quiet(2);
+      const woke = updateCell(q, [1], day(9)).state;
+      const states = (wokeN: number, quietN: number) => [...Array<CellState>(wokeN).fill(woke), ...Array<CellState>(quietN).fill(q)];
+      expect(quietPaceSuspended(states(2, 5), day(10))).toBe(false); // too few
+      expect(quietPaceSuspended(states(3, 10), day(10))).toBe(true); // 3 of 13
+      // Chance wake-ups of a large portfolio (3 of 300) are not a shift.
+      expect(quietPaceSuspended(states(3, 300), day(10))).toBe(false);
+      expect(quietPaceSuspended(states(12, 13), day(10))).toBe(true); // 2026-10-22
+      expect(quietPaceSuspended(states(12, 13), day(17))).toBe(false); // a week later
+    });
+
+    it("counts cycles from zero for a state stored before cycles existed", () => {
+      const legacy = { ...feed(initialCellState(), Array(8).fill(0)), cycles: undefined };
+      expect(isQuietCell(legacy)).toBe(false);
+      expect(isQuietCell(feed(legacy, Array(4).fill(0), 20))).toBe(true);
+    });
+
+    it("keep the normal pace unless the domain's scoring gives each cell one weight", () => {
+      expect(slowsQuietCells("geo-v2")).toBe(false);
+      expect(slowsQuietCells("geo-v3")).toBe(true);
+      expect(slowsQuietCells("unknown")).toBe(false);
+      const c = cell({ cellKey: "q", costPerSample: 0.0012, promptWeight: 1, state: quiet(2) });
+      expect(minIntervalOf(c, DEFAULT_PLAN_OPTIONS)).toBe(DEFAULT_PLAN_OPTIONS.minIntervalDays);
+      expect(planCycle([c], opts).items.map((i) => i.cellKey)).toEqual(["q"]);
+    });
+
+    it("are due on the same hour a week later, although the answer landed after the plan", () => {
+      // Planned at 06:00, answered at 06:10; seven days later at 06:00 it is 6.99 days old.
+      const s = updateCell(quiet(3), [0], new Date(day(3).getTime() + 10 * 60_000)).state;
+      expect(planCycle([cheap({ cellKey: "q", state: s })], { ...opts, now: day(10) }).items.map((i) => i.samples)).toEqual([1]);
+      expect(planCycle([cheap({ cellKey: "q", state: s })], { ...opts, now: day(9) }).items).toEqual([]);
+    });
+
+    it("are re-measured weekly with a single answer", () => {
+      expect(planCycle([cheap({ cellKey: "q", state: quiet(2) })], opts).items).toEqual([]);
+      expect(planCycle([cheap({ cellKey: "q", state: quiet(6) })], opts).items).toEqual([]);
+      const due = planCycle([cheap({ cellKey: "q", state: quiet(8) })], opts).items;
+      expect(due.map((i) => [i.cellKey, i.samples])).toEqual([["q", 1]]);
+    });
+
+    it("follow the provider's own pace when it sets one", () => {
+      const c = (daysAgo: number) => cheap({ cellKey: "q", state: quiet(daysAgo), quietIntervalDays: 3 });
+      expect(planCycle([c(2)], opts).items).toEqual([]);
+      expect(planCycle([c(4)], opts).items.map((i) => i.samples)).toEqual([1]);
+    });
+
+    it("return to the normal pace after one answer that shows the brand", () => {
+      const woke = feed(quiet(2), [1], 9);
+      expect(isQuietCell(woke)).toBe(false);
+      expect(minIntervalOf(cheap({ cellKey: "w", state: woke }), DEFAULT_PLAN_OPTIONS)).toBe(DEFAULT_PLAN_OPTIONS.minIntervalDays);
+      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(2) }), DEFAULT_PLAN_OPTIONS)).toBeCloseTo(6.9);
+    });
+
+    it("keep the core guarantee", () => {
+      const core = cheap({ cellKey: "core", role: "CORE", state: quiet(8) });
+      expect(planCycle([core], opts).items.map((i) => i.reason)).toEqual(["CORE_GUARANTEE"]);
+    });
+
+    it("are still measured by a manual run", () => {
+      const manual = { ...opts, minIntervalDays: 0, coreMaxIntervalDays: 0, nonCoreProviderMaxIntervalDays: 0, ignoreQuietPace: true };
+      expect(planCycle([cheap({ cellKey: "q", role: "CORE", state: quiet(1) })], manual).items.map((i) => i.cellKey)).toEqual(["q"]);
+      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(1) }), manual)).toBe(0);
+    });
+  });
+
+  it("honours a provider's cap on samples per cycle", () => {
+    const capped = planCycle([cell({ cellKey: "p", maxSamples: 1 })], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 });
+    const free = planCycle([cell({ cellKey: "p" })], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 });
+    expect(capped.items.map((i) => i.samples)).toEqual([1]);
+    expect(free.items[0]!.samples).toBeGreaterThan(1);
   });
 
   it("paces the monthly budget across remaining cycles", () => {

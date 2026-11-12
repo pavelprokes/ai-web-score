@@ -30,6 +30,13 @@ export interface CellState {
   /** Two-sided CUSUM statistics of standardized innovations (change detection). */
   cusumUp?: number;
   cusumDown?: number;
+  /**
+   * Measurement cycles folded in (answers of one cycle count once). States stored before it existed start
+   * counting at 0, so an old cell becomes quiet after four further cycles.
+   */
+  cycles?: number;
+  /** When the cell last stopped being quiet (`isQuietCell`): the brand appeared after a long run without it. */
+  wokeAt?: string | null;
 }
 
 /** Variance of Uniform(0,1) — what we know about a rate we have never measured. */
@@ -53,7 +60,13 @@ const Q_LOG_STEP_MAX = 0.6;
 const SAME_CYCLE_DAYS = 0.25;
 const DAY_MS = 86_400_000;
 
-export function initialCellState(priorMean = 0.3, expectedVolatility = 0.5): CellState {
+/**
+ * Prior mean of a cell that has no answers yet. Measured on production (RESEARCH §7.3): mean presence
+ * 0.13, and 73 % of cells never show the brand — the earlier 0.3 cost the first one or two answers.
+ */
+export const PRIOR_MEAN = 0.13;
+
+export function initialCellState(priorMean = PRIOR_MEAN, expectedVolatility = 0.5): CellState {
   return {
     mean: priorMean,
     variance: PRIOR_VARIANCE,
@@ -167,18 +180,23 @@ export function updateCell(state: CellState, observations: number[], now: Date):
     responseVariance = 0.7 * responseVariance + 0.3 * sv;
   }
 
+  const next: CellState = {
+    mean,
+    variance,
+    processNoisePerDay: q,
+    n: state.n + k,
+    lastObservedAt: now.toISOString(),
+    changeDetectedAt,
+    responseVariance,
+    cusumUp,
+    cusumDown,
+    cycles: (state.cycles ?? 0) + (isFirst || !sameCycle ? 1 : 0),
+    wokeAt: state.wokeAt ?? null,
+  };
+  if (isQuietCell(state) && !isQuietCell(next)) next.wokeAt = now.toISOString();
+
   return {
-    state: {
-      mean,
-      variance,
-      processNoisePerDay: q,
-      n: state.n + k,
-      lastObservedAt: now.toISOString(),
-      changeDetectedAt,
-      responseVariance,
-      cusumUp,
-      cusumDown,
-    },
+    state: next,
     innovation,
     normalizedInnovation: nis,
     changeDetected,
@@ -216,4 +234,22 @@ export function recommendedSampleCount(state: CellState, now: Date, targetSd: nu
 
 export function clamp(x: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, x));
+}
+
+/** A cell needs this many answers, from this many separate cycles, before it can count as quiet. */
+export const QUIET_MIN_OBSERVATIONS = 8;
+export const QUIET_MIN_CYCLES = 4;
+/** … and an estimate below this. One answer that shows the brand lifts the estimate well above it. */
+export const QUIET_MEAN = 0.01;
+
+/**
+ * A cell where the brand has not appeared for a long run of answers. After eight answers without it a
+ * further answer names the brand in 0.4–0.7 % (3.1 % on ChatGPT; RESEARCH §7.6), yet such cells took 58 % of
+ * all answers — so the planner may re-measure them at a slower pace. The rule reads the estimate, not a
+ * counter: an answer that shows the brand moves the estimate up and the cell returns to the normal pace on
+ * its own. The answers must come from several cycles: a new cell gets up to five in its first cycle, and
+ * repeats within a cycle are not independent looks.
+ */
+export function isQuietCell(state: CellState): boolean {
+  return state.n >= QUIET_MIN_OBSERVATIONS && (state.cycles ?? 0) >= QUIET_MIN_CYCLES && state.mean < QUIET_MEAN;
 }
