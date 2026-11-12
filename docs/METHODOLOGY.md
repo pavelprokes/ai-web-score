@@ -78,7 +78,16 @@ Each cycle the planner buys samples greedily by VOI per dollar within the paced 
   get several samples per new cell, while expensive low-reach APIs get one baseline sample and are then
   sampled rarely;
 - new prompts start at maximum uncertainty → measured intensively; stable prompts fade to
-  infrequent measurement; volatile prompts keep a short interval.
+  infrequent measurement; volatile prompts keep a short interval;
+- **quiet cells** — at least eight answers and an estimate below 0.01, i.e. a long run of answers without
+  the brand — are re-measured weekly with one answer (every three days on ChatGPT). At $0.0012 an answer
+  neither the budget nor the value floors hold such a cell back, and they took 58 % of all answers while a
+  further answer named the brand in 0.4–0.7 % (3.1 % on ChatGPT; RESEARCH §7.6). One answer that shows the
+  brand lifts the estimate and the cell returns to the normal pace; a detected change overrides the interval;
+- a provider may cap the samples of a cell per cycle (`sampling.maxSamplesPerCycle`): Perplexity takes one,
+  because a repeat within a cycle is close to a copy of the first answer (RESEARCH §7.3).
+
+A cell without answers starts at the measured mean presence, 0.13 (`PRIOR_MEAN`).
 
 The learned interval per cell (`recommendedIntervalDays`) and sample count are stored for display.
 
@@ -111,6 +120,30 @@ re-normalise the weights). Rates carry Wilson CIs using Kish effective n. Aggreg
 window, prompt weights and provider reach (each provider's weight spread over its own samples so cheap,
 frequently sampled providers do not dominate). Snapshots (domain / provider / cluster) are derived data;
 `recalculate-scores` rebuilds history for any version from stored raw signals.
+
+`geo-v2` (the default): the same over unbranded prompts of active topics; branded prompts feed sentiment and
+accuracy only; recommendation rate over all answers; a new provider phases in over 7 days; "Not enough data"
+when the mention interval is wider than ±10 points.
+
+`geo-v3` (available per domain, `PATCH /api/domains/{id}` with `scoringVersion`; no domain uses it until it has
+been replayed on production data) answers three defects measured there (RESEARCH §7.5, §7.7):
+
+- **One weight per prompt and assistant.** A cell carries the prompt's weight and its answers share it
+  (`src/core/scoring/weights.ts`), so a cell measured twenty times counts like one measured twice. geo-v2
+  weighs answers, and the planner measures cells that show the brand more often: rates came out about 7 points
+  too high on two domains. Each assistant's cells together carry its reach share.
+- **Intervals over prompts.** The variance of the weighted rate is estimated from the prompts' residual totals
+  (the linearised estimator for cluster samples) and expressed as an effective number of independent answers
+  for the Wilson interval; with one prompt, or a rate of exactly 0 or 1, the prompts are the sample. In the
+  simulated domain of `geo-v3.test.ts` the "95 %" interval of geo-v2 contains the true rate in 9 % of runs,
+  that of geo-v3 in 93 %.
+- **No floor in the overall score.** Position counts 0 for an answer that does not recommend the brand, and
+  sentiment and accuracy count in proportion to the mention rate. geo-v2 averaged them over the few answers
+  that name the brand (19 points for a brand named in 0.8 % of answers). The Sentiment and Accuracy metrics
+  themselves are unchanged.
+
+With honest intervals "Not enough data" will show for domains whose prompts disagree a lot, until they have
+more prompts — the threshold stays ±10 points.
 
 ## 7. Calibration & optimization
 
@@ -166,9 +199,10 @@ Each run stores a new set (findings + items); items can be marked Done or Dismis
 
 ## Known limitations
 
-- Production data contradict two statements above (docs/RESEARCH.md §7): the Wilson intervals of §6 are up
-  to 4–5× too narrow where the brand appears, because answers cluster by prompt (about right for a brand that is
-  hardly ever named), and stable cells do not fade to infrequent measurement (§3).
+- Under `geo-v2`, still the default, the Wilson intervals of §6 are up to 4–5× too narrow where the brand
+  appears, because answers cluster by prompt (docs/RESEARCH.md §7); `geo-v3` corrects it.
+- The quiet-cell rule (§3) is a threshold on the estimate, not a learned interval: it was added because
+  stable cells did not fade to infrequent measurement on their own at these prices.
 - Consumer capture is logged-out and memory-free (a neutral new user). Personalisation is not modelled.
 - Multi-turn follow-ups ("persistent visibility") are not measured yet (roadmap).
 - Claude's web search rejects some countries in `user_location` (CZ as of 2026-10). Those markets are

@@ -72,6 +72,18 @@ export interface ScoringVersion {
     activeTopicsOnly: boolean;
     /** A provider reaches its full reach weight after this many days with data in the window. */
     providerPhaseInDays: number;
+    /**
+     * One weight per prompt × provider cell, shared by its answers (`cellWeights`). Without it a cell counts
+     * in proportion to how often it was sampled, and the planner samples cells that show the brand more often.
+     */
+    cellWeights?: boolean;
+    /** Intervals treat the prompt, not the answer, as the independent unit (answers of one prompt agree). */
+    clusteredIntervals?: boolean;
+    /**
+     * Position, sentiment and accuracy count in the overall score in proportion to how often the brand
+     * appears, so a brand that is almost never named does not score on the few answers that name it.
+     */
+    unconditionalComponents?: boolean;
   };
 }
 
@@ -114,6 +126,32 @@ export const SCORING_VERSIONS: Record<string, ScoringVersion> = {
       providerPhaseInDays: 7,
     },
   },
+  "geo-v3": {
+    id: "geo-v3",
+    description:
+      "geo-v2 with one weight per prompt and assistant (not per answer), intervals computed over prompts, and " +
+      "position, sentiment and accuracy counted in proportion to how often the brand is named.",
+    weights: {
+      mention: 0.25,
+      citation: 0.15,
+      recommendation: 0.2,
+      position: 0.1,
+      shareOfVoice: 0.15,
+      sentiment: 0.075,
+      accuracy: 0.075,
+    },
+    positionScore: (p) => 1 / p,
+    rules: {
+      excludeBranded: true,
+      recommendationOverAllAnswers: true,
+      maxCiHalfWidth: 0.1,
+      activeTopicsOnly: true,
+      providerPhaseInDays: 7,
+      cellWeights: true,
+      clusteredIntervals: true,
+      unconditionalComponents: true,
+    },
+  },
 };
 
 export const DEFAULT_SCORING_VERSION = "geo-v2";
@@ -124,15 +162,47 @@ export function getScoringVersion(id: string): ScoringVersion {
   return v;
 }
 
-function weightedRate(obs: ScoringObservation[], pick: (o: ScoringObservation) => boolean | null): RateWithCi {
+function weightedRate(
+  obs: ScoringObservation[],
+  pick: (o: ScoringObservation) => boolean | null,
+  clustered = false,
+): RateWithCi {
   const rel = obs.filter((o) => pick(o) !== null);
   const ws = rel.map((o) => o.weight);
   const sw = ws.reduce((a, b) => a + b, 0);
   if (rel.length === 0 || sw <= 0) return { value: null, low: null, high: null, n: 0 };
   const value = rel.reduce((a, o) => a + (pick(o) ? o.weight : 0), 0) / sw;
-  const nEff = effectiveN(ws);
+  const nEff = clustered ? clusteredEffectiveN(rel, pick, value, sw) : effectiveN(ws);
   const ci = wilson(value, nEff);
   return { value, low: ci.low, high: ci.high, n: rel.length };
+}
+
+/**
+ * Effective sample size of a weighted rate when answers cluster by prompt. The variance of the ratio
+ * Σwy / Σw is estimated from the prompts' residual totals (the linearised, "sandwich" estimator used for
+ * cluster samples), then expressed as the number of independent answers that would give the same variance,
+ * so the Wilson interval keeps its good behaviour near 0 and 1. Where the estimate carries no information —
+ * one prompt, or a rate of exactly 0 or 1 — the prompts themselves are the sample.
+ */
+function clusteredEffectiveN(
+  rel: ScoringObservation[],
+  pick: (o: ScoringObservation) => boolean | null,
+  value: number,
+  sw: number,
+): number {
+  const residual = new Map<string, number>();
+  const mass = new Map<string, number>();
+  for (const o of rel) {
+    residual.set(o.promptId, (residual.get(o.promptId) ?? 0) + o.weight * ((pick(o) ? 1 : 0) - value));
+    mass.set(o.promptId, (mass.get(o.promptId) ?? 0) + o.weight);
+  }
+  const prompts = effectiveN([...mass.values()]);
+  const answers = effectiveN(rel.map((o) => o.weight));
+  const g = residual.size;
+  if (g < 2 || value <= 0 || value >= 1) return Math.min(prompts, answers);
+  const variance = (g / (g - 1)) * [...residual.values()].reduce((a, r) => a + r * r, 0) / (sw * sw);
+  if (!(variance > 0)) return Math.min(prompts, answers);
+  return Math.min(answers, (value * (1 - value)) / variance);
 }
 
 function weightedMean(obs: ScoringObservation[], pick: (o: ScoringObservation) => number | null | undefined) {
@@ -145,6 +215,11 @@ function weightedMean(obs: ScoringObservation[], pick: (o: ScoringObservation) =
     w += o.weight;
   }
   return w > 0 ? s / w : null;
+}
+
+/** A quality that exists only where the brand is named, counted in proportion to how often it is named. */
+function scaled(score: number | null, rate: number | null): number | null {
+  return score === null || rate === null ? null : score * rate;
 }
 
 function uniqueJudgements(obs: ScoringObservation[]): ScoringObservation[] {
@@ -164,17 +239,22 @@ export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SC
   // Visibility metrics come from answers to questions that do not name the brand.
   const visible = rules?.excludeBranded ? valid.filter((o) => !o.branded) : valid;
 
-  const mentionRate = weightedRate(visible, (o) => o.signals.brandMentioned);
+  const clustered = rules?.clusteredIntervals ?? false;
+  const unconditional = rules?.unconditionalComponents ?? false;
+  const mentionRate = weightedRate(visible, (o) => o.signals.brandMentioned, clustered);
   // Citations can only exist when the engine searched; otherwise the measurement is not informative.
-  const citationRate = weightedRate(visible, (o) =>
-    o.signals.searchWasUsed || o.signals.citedUrls.length > 0 ? o.signals.domainCited : null,
+  const citationRate = weightedRate(
+    visible,
+    (o) => (o.signals.searchWasUsed || o.signals.citedUrls.length > 0 ? o.signals.domainCited : null),
+    clustered,
   );
   const recommendationRate = rules?.recommendationOverAllAnswers
-    ? weightedRate(visible, (o) => o.signals.recommendationPosition !== null)
+    ? weightedRate(visible, (o) => o.signals.recommendationPosition !== null, clustered)
     : weightedRate(visible, (o) => (o.signals.recommendationPresent ? o.signals.recommendationPosition !== null : null));
   const avgRecommendationPosition = weightedMean(visible, (o) => o.signals.recommendationPosition);
+  // Over the answers that recommend the brand — or, for versions without a floor, over all answers (0 when absent).
   const positionComponent = weightedMean(visible, (o) =>
-    o.signals.recommendationPosition !== null ? version.positionScore(o.signals.recommendationPosition) : null,
+    o.signals.recommendationPosition !== null ? version.positionScore(o.signals.recommendationPosition) : unconditional ? 0 : null,
   );
 
   let ownCit = 0;
@@ -214,8 +294,8 @@ export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SC
     // Position only matters when recommended at all; absent → 0 contribution, not "unknown".
     position: recommendationRate.value === null ? null : (positionComponent ?? 0),
     shareOfVoice,
-    sentiment: sentimentScore,
-    accuracy: accuracyScore,
+    sentiment: unconditional ? scaled(sentimentScore, mentionRate.value) : sentimentScore,
+    accuracy: unconditional ? scaled(accuracyScore, mentionRate.value) : accuracyScore,
   };
 
   // Missing components (e.g. no search happened) re-normalise the remaining weights.
