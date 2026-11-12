@@ -66,13 +66,22 @@ is new in the field, and produce a plan in phases. Decisions marked **open** are
 | Raw retention | owner, product-manager, lawyer, qa: 30 days. principal-engineer: 14 days and stop storing DataForSEO raw | 30 days is enough at today's volume and too much at the full portfolio (review below). Recommendation: 14 days via the env var, after the checks that need raw (ads, review item 5); then a code change that keeps raw only for failed extractions and a 1 % sample. **Open** — the deletion is irreversible |
 | Timing of honest intervals | ux-ui: show a "provisional" tag now. principal-engineer: `geo-v3` is a small PR | Ship `geo-v3` early in Phase 1 instead of interim UI; Phase 0 only raises the bar of the attention rule (minimum prompts) |
 
-## Open decisions (Pavel)
+## Decisions (Pavel, 2026-11-12)
 
-1. Raw-response retention: 7, 14 or 30 days (and `VACUUM FULL measurements` outside ~12:55 / ~21:15 UTC).
-2. `answer_text` retention of 395 days, on by default (lawyer) — or stay without a limit.
-3. vzdelanibudoucnosti.cz: raise the budget to ≈ $17, or rely on the planner saving, or approve part of its backlog.
-4. Backlog: approve by hand, or switch on "Apply changes automatically" for ACTIVE domains.
-5. Is selling the tool or sharing reports with clients planned within six months? It decides whether Phase 4 exists.
+1. **Raw responses: keep as long as possible, 90 days or more.** Consequence (chair): at ≈ 14 kB per answer this
+   does not fit the free tier even at today's volume (≈ 4 MB a day → 500 MB in about three weeks), and Supabase
+   Pro ($25 a month) would cost more than all measurement. So the first cost task is to make raw small: measure
+   what it consists of on production, stop storing what the columns already hold (answer text, sources, search
+   results, queries), then set the retention. Nothing is cleared until that is measured.
+2. **`answer_text`: no limit for now.**
+3. **vzdelanibudoucnosti.cz: raise the budget** (to ≈ $17).
+4. **Backlog: switch on "Apply changes automatically"** on the ACTIVE domains — after the alias check and the
+   database work, because it triples the answers per day.
+5. **No outward use planned; the data is for Pavel only.** Phase 4 is dropped. The legal items shrink to the
+   privacy note; "nothing published before `geo-v3`" no longer blocks anything.
+6. **After Phase 0, focus on costs.** Order by size: database tier ($25 a month if the free tier is lost),
+   never-named cells (≈ $12 a month at the full portfolio), discovery and prompt design ($15.58 of the $20.77
+   internal LLM spend in five weeks), analysis, Perplexity repeats.
 
 ## Plan
 
@@ -122,10 +131,9 @@ is new in the field, and produce a plan in phases. Decisions marked **open** are
 - A written fallback if consumer-UI capture stops; quarterly re-check of the SerpApi case and vendor terms.
 - Domain page split into components before any new section is added.
 
-### Phase 4 — outward use (only if decision 5 is yes)
+### Phase 4 — outward use
 
-Case study from Pavel's own domains, five interviews with agencies, a free Czech grader (≈ $0.07 per lead),
-Czech UI copy, terms and DPA. Legal review before any published figure.
+Dropped (decision 5).
 
 ## Deliberately not doing
 

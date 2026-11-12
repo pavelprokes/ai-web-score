@@ -90,9 +90,9 @@ Keep this file current: update it at the end of each piece of work (state, merge
 ## Next task
 
 **Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
-(UX, scoring, logic, providers, what is new in the field) with five phases and five open owner decisions (raw
-retention 7/14/30 days, `answer_text` retention, the vzdelanibudoucnosti.cz budget, how the backlog is approved,
-whether outward use is planned). Start with Phase 0; it needs production access, which the session of 2026-11-12
+(UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept
+90 days or more — so raw must be made small first; `answer_text` without a limit; vzdelanibudoucnosti.cz budget
+raised; proposals applied automatically; no outward use; costs are the focus after Phase 0). Start with Phase 0; it needs production access, which the session of 2026-11-12
 did not have (database port blocked, `pnpm install` failed on the hig-web-kit tarball). It supersedes the order of
 the items below, which stay as background. Notes from that review: check the brand aliases first
 (an alias such as "Se vezmou" or "Vzdělání budoucnosti" matches the ordinary phrase — possibly inflated named
