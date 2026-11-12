@@ -94,9 +94,12 @@ Keep this file current: update it at the end of each piece of work (state, merge
 retention 7/14/30 days, `answer_text` retention, the vzdelanibudoucnosti.cz budget, how the backlog is approved,
 whether outward use is planned). Start with Phase 0; it needs production access, which the session of 2026-11-12
 did not have (database port blocked, `pnpm install` failed on the hig-web-kit tarball). It supersedes the order of
-the items below, which stay as background. Note from that review: 30-day raw retention frees almost nothing
-(`raw_response` grew 298 MB in about a month) — use 7–14 days, and never clear `answer_text` before an extractor
-change (`signals.reextract` reads it).
+the items below, which stay as background. Notes from that review: check the brand aliases first
+(an alias such as "Se vezmou" or "Vzdělání budoucnosti" matches the ordinary phrase — possibly inflated named
+rates on two domains); raw retention of 30 days is enough at today's volume but not at the full portfolio (14
+days then), and the free tier is outgrown within about three months at the full portfolio anyway; never clear
+`answer_text` before an extractor change (`signals.reextract` reads it); the Perplexity adapter still sends
+`preset`, which the API renamed to `effort`.
 
 Earlier decisions: `docs/meetings/2026-10-12-first-production-data.md`.
 
