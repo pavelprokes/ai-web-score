@@ -21,7 +21,8 @@
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke-providers.ts",
     "a11y": "node scripts/a11y-audit.mjs",
     "db:probe": "tsx --env-file-if-exists=.env.local scripts/db-probe.ts",
-    "prod:sql": "tsx --env-file-if-exists=.env.local scripts/prod-sql.ts"
+    "prod:sql": "tsx --env-file-if-exists=.env.local scripts/prod-sql.ts",
+    "prod:check": "tsx --env-file-if-exists=.env.local scripts/prod-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

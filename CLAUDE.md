@@ -26,6 +26,7 @@ pnpm smoke [--llm]             # one real paid request per provider with keys
 pnpm cli <cmd>                 # CLI over the REST API (API_URL, ADMIN_API_TOKEN)
 pnpm a11y http://localhost:3000 a11y-report / /providers   # axe-core audit
 pnpm prod:sql "select …"       # one read-only query on production (PROD_DATABASE_URL, role claude_readonly)
+pnpm prod:check                # production health in one read-only pass (failures, stuck answers, job timeouts, DB size); exit 1 over a threshold
 ```
 
 `SIMULATE_DAYS=30 TEST_DATABASE_URL=… pnpm vitest run src/e2e/simulate.e2e.test.ts` runs the cost simulation.
