@@ -86,6 +86,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #66 | `docs/RESEARCH.md` §7 "Measured on production (2026-10-07 … 2026-11-11)": 21,483 answers against the assumptions of RESEARCH / METHODOLOGY / COSTS, with nine recommendations under "Decisions this supports" |
 | #67 | Domain page: "Needs your attention" first (fixes, significant mention-rate changes, budget, decisions), reference sections folded into `<details>` with a one-line summary (12 550 px → ~3 500 px); overview table fits 1280 px |
 | #68 | Reports from stored signals: "Who AI names instead" (brand among tracked competitors), "Your pages AI cites" and the top pages per third-party site, "What assistants search for" (fan-out queries per topic), answer viewer filtered by prompt |
+| #70 | Team review and phased plan (`docs/meetings/2026-11-12-…`); scoring `geo-v3`, opt-in, no domain switched (one weight per prompt × assistant, intervals over prompts, no floor); quiet cells re-measured weekly under geo-v3 only; Perplexity one sample per cycle; prior mean 0.13; cost simulation knobs `FAKE_SILENT_CELL_SHARE`, `SIMULATE_SCORING_VERSION` |
+| #71 | Metric labels ("Named when asked by name", "Re-check every", "Certainty"), actionable "Not enough data"; `pnpm prod:check`; domain action `reextract-signals`; ROADMAP by phases |
 
 ## Next task
 
@@ -101,7 +103,8 @@ days then), and the free tier is outgrown within about three months at the full 
 `answer_text` before an extractor change (`signals.reextract` reads it); the Perplexity adapter still sends
 `preset`, which the API renamed to `effort`.
 
-Done on the branch of that review (2026-11-12, tests and the cost simulation only — production was not reachable):
+Merged from that review as #70 and #71 (2026-11-12; tests and the cost simulation only — production was not
+reachable, so nothing below is verified there):
 
 - **`geo-v3` exists and no domain uses it.** One weight per prompt × assistant, intervals over prompts (with a
   t correction for few prompts), no floor in the overall score (`src/core/scoring/weights.ts`, `geo-v3.test.ts`,
