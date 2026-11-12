@@ -88,7 +88,13 @@ function weigh(windowRows: Row[], end: Date, scoringVersion: string, reach: Reac
   const branded = (r: Row) => r.category === "BRAND_VALIDATION";
   const perCell = rules?.cellWeights
     ? cellWeights(
-        rows.map((r) => ({ promptId: r.promptId, providerId: r.providerId, promptWeight: promptWeight(r), branded: branded(r) })),
+        rows.map((r) => ({
+          promptId: r.promptId,
+          providerId: r.providerId,
+          promptWeight: promptWeight(r),
+          branded: branded(r),
+          counts: !(r.signals as RawSignals).noAnswer,
+        })),
         (p) => effReach(p) / totalReach,
       )
     : null;

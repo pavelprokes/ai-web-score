@@ -7,6 +7,7 @@ import { eq, sql } from "drizzle-orm";
  * timestamps one day into the past between cycles. Prints daily spend per provider.
  *
  *   SIMULATE_DAYS=30 TEST_DATABASE_URL=… pnpm vitest run src/e2e/simulate.e2e.test.ts
+ *   FAKE_SILENT_CELL_SHARE=0.73 SIMULATE_SCORING_VERSION=geo-v3 … --silent=false   (a production-like world, geo-v3 pacing)
  */
 
 const url = process.env.TEST_DATABASE_URL;
@@ -61,6 +62,7 @@ describe.skipIf(!url || !days)("cost simulation", () => {
     await db.execute(sql`update measurements set created_at = created_at - ${d}, started_at = started_at - ${d}, finished_at = finished_at - ${d}`);
     await db.execute(sql`update cell_states set ${shiftJson("lastObservedAt")}, created_at = created_at - ${d}, next_due_at = next_due_at - ${d}`);
     await db.execute(sql`update cell_states set ${shiftJson("changeDetectedAt")}`);
+    await db.execute(sql`update cell_states set ${shiftJson("wokeAt")}`);
     await db.execute(sql`update domains set next_plan_at = next_plan_at - ${d}, last_measured_at = last_measured_at - ${d}`);
     await db.execute(sql`update runs set created_at = created_at - ${d}, finished_at = finished_at - ${d}`);
     await db.execute(sql`update llm_usage set created_at = created_at - ${d}`);
@@ -80,6 +82,10 @@ describe.skipIf(!url || !days)("cost simulation", () => {
     // Enable everything the fake world serves; Claude is not served offline.
     await db.update(s.providers).set({ enabled: true }).where(sql`id in ('chatgpt-ui','google-ai-mode','perplexity-api','openai-api')`);
     const domain = await createDomain({ hostname: "se-vezmou.cz", monthlyBudgetUsd: 30, runDiscovery: true });
+    // SIMULATE_SCORING_VERSION=geo-v3 also switches on what the planner does only under that version (quiet cells).
+    if (process.env.SIMULATE_SCORING_VERSION) {
+      await db.update(s.domains).set({ scoringVersion: process.env.SIMULATE_SCORING_VERSION }).where(eq(s.domains.id, domain.id));
+    }
     await drain();
 
     const rows: Array<Record<string, string | number>> = [];

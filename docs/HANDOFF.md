@@ -101,6 +101,28 @@ days then), and the free tier is outgrown within about three months at the full 
 `answer_text` before an extractor change (`signals.reextract` reads it); the Perplexity adapter still sends
 `preset`, which the API renamed to `effort`.
 
+Done on the branch of that review (2026-11-12, tests and the cost simulation only — production was not reachable):
+
+- **`geo-v3` exists and no domain uses it.** One weight per prompt × assistant, intervals over prompts (with a
+  t correction for few prompts), no floor in the overall score (`src/core/scoring/weights.ts`, `geo-v3.test.ts`,
+  METHODOLOGY §6). Switch one domain with `PATCH /api/domains/{id}` `{"scoringVersion":"geo-v3"}` (history
+  backfills on the next compute), compare it with the acceptance checks of the plan (mention rate against the
+  SQL mean of per-prompt rates, interval against a bootstrap over prompts), then switch the rest with a
+  migration like `drizzle/0007`. Expect "Not enough data" on domains whose prompts disagree until the backlog
+  is approved, and lower overall scores (no floor).
+- **Quiet cells are slowed down only for domains on `geo-v3`** (weekly, every three days on ChatGPT; −37 % of
+  steady measurement spend in the simulation with `FAKE_SILENT_CELL_SHARE=0.73`). Under geo-v2 nothing changes,
+  because pooled answers would read the missing zeros as a higher rate. After the switch check on production:
+  answers per day by provider, and that woken cells return to the normal pace.
+- Perplexity takes one sample per cycle; a new cell starts at the measured prior 0.13.
+- Not done: the domain × provider change detector (the planner has a simpler guard: three wake-ups of one
+  assistant in a week suspend the slow pace), labels, `pnpm prod:check`, raw-response slimming.
+
+First things with production access, in this order: (1) brand aliases that are ordinary phrases on
+se-vezmou.cz and vzdelanibudoucnosti.cz; (2) what `raw_response` consists of per provider
+(`select provider_id, count(*), pg_size_pretty(sum(pg_column_size(raw_response))) …`, and the size of each
+top-level key) and whether `chat_gpt_ad` and `brand_entities` are in it; (3) replay `geo-v3` on one domain.
+
 Earlier decisions: `docs/meetings/2026-10-12-first-production-data.md`.
 
 The audit of 2026-11-10 (production data, code, provider docs, comparable tools) produced a sequence of small PRs;

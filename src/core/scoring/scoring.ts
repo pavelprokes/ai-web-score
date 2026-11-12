@@ -162,27 +162,57 @@ export function getScoringVersion(id: string): ScoringVersion {
   return v;
 }
 
-function weightedRate(
-  obs: ScoringObservation[],
-  pick: (o: ScoringObservation) => boolean | null,
-  clustered = false,
-): RateWithCi {
-  const rel = obs.filter((o) => pick(o) !== null);
+interface RateOptions {
+  /** Intervals over prompts (`rules.clusteredIntervals`). */
+  clustered?: boolean;
+  /** Weights are per cell (`rules.cellWeights`): a cell keeps its weight when only some of its answers apply. */
+  cells?: boolean;
+}
+
+const cellOf = (o: ScoringObservation) => `${o.providerId}|${o.promptId}`;
+
+/**
+ * With one weight per cell, a metric that applies to some answers only (citations need a search) must not
+ * thin the cell: the answers that apply share the weight of the whole cell.
+ */
+function keepCellMass(all: ScoringObservation[], rel: ScoringObservation[]): ScoringObservation[] {
+  if (rel.length === all.length) return rel;
+  const total = new Map<string, number>();
+  const kept = new Map<string, number>();
+  for (const o of all) total.set(cellOf(o), (total.get(cellOf(o)) ?? 0) + o.weight);
+  for (const o of rel) kept.set(cellOf(o), (kept.get(cellOf(o)) ?? 0) + o.weight);
+  return rel.map((o) => ({ ...o, weight: (o.weight * total.get(cellOf(o))!) / kept.get(cellOf(o))! }));
+}
+
+function weightedRate(obs: ScoringObservation[], pick: (o: ScoringObservation) => boolean | null, opts: RateOptions = {}): RateWithCi {
+  const applies = obs.filter((o) => pick(o) !== null);
+  const rel = opts.cells ? keepCellMass(obs, applies) : applies;
   const ws = rel.map((o) => o.weight);
   const sw = ws.reduce((a, b) => a + b, 0);
   if (rel.length === 0 || sw <= 0) return { value: null, low: null, high: null, n: 0 };
   const value = rel.reduce((a, o) => a + (pick(o) ? o.weight : 0), 0) / sw;
-  const nEff = clustered ? clusteredEffectiveN(rel, pick, value, sw) : effectiveN(ws);
+  const nEff = opts.clustered ? clusteredEffectiveN(rel, pick, value, sw) : effectiveN(ws);
   const ci = wilson(value, nEff);
   return { value, low: ci.low, high: ci.high, n: rel.length };
 }
+
+/** Two-sided 95 % Student t quantiles for 1…30 degrees of freedom. */
+const T95 = [
+  12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.16, 2.145, 2.131, 2.12, 2.11, 2.101, 2.093, 2.086,
+  2.08, 2.074, 2.069, 2.064, 2.06, 2.056, 2.052, 2.048, 2.045, 2.042,
+];
+const t95 = (df: number) => (df <= 30 ? T95[Math.max(1, df) - 1]! : df <= 60 ? 2.02 : df <= 120 ? 1.99 : 1.96);
+/** A weighted rate this close to 0 or 1 is 0 or 1 (the sums carry rounding). */
+const RATE_EPS = 1e-9;
 
 /**
  * Effective sample size of a weighted rate when answers cluster by prompt. The variance of the ratio
  * Σwy / Σw is estimated from the prompts' residual totals (the linearised, "sandwich" estimator used for
  * cluster samples), then expressed as the number of independent answers that would give the same variance,
- * so the Wilson interval keeps its good behaviour near 0 and 1. Where the estimate carries no information —
- * one prompt, or a rate of exactly 0 or 1 — the prompts themselves are the sample.
+ * so the Wilson interval keeps its good behaviour near 0 and 1. A variance estimated from g prompts is itself
+ * uncertain: the interval is widened by the Student t quantile for g − 1 degrees of freedom, which matters
+ * for a topic or a small portfolio. Where the estimate carries no information — one prompt, or a rate of
+ * exactly 0 or 1 — the prompts themselves are the sample.
  */
 function clusteredEffectiveN(
   rel: ScoringObservation[],
@@ -199,10 +229,11 @@ function clusteredEffectiveN(
   const prompts = effectiveN([...mass.values()]);
   const answers = effectiveN(rel.map((o) => o.weight));
   const g = residual.size;
-  if (g < 2 || value <= 0 || value >= 1) return Math.min(prompts, answers);
-  const variance = (g / (g - 1)) * [...residual.values()].reduce((a, r) => a + r * r, 0) / (sw * sw);
-  if (!(variance > 0)) return Math.min(prompts, answers);
-  return Math.min(answers, (value * (1 - value)) / variance);
+  if (g < 2 || value <= RATE_EPS || value >= 1 - RATE_EPS) return Math.min(prompts, answers);
+  const variance = ((g / (g - 1)) * [...residual.values()].reduce((a, r) => a + r * r, 0)) / (sw * sw);
+  // Prompts that agree exactly leave only the answers' own noise; never claim more than the answers give.
+  const independent = variance > 0 ? Math.min(answers, (value * (1 - value)) / variance) : answers;
+  return independent / (t95(g - 1) / 1.96) ** 2;
 }
 
 function weightedMean(obs: ScoringObservation[], pick: (o: ScoringObservation) => number | null | undefined) {
@@ -222,12 +253,19 @@ function scaled(score: number | null, rate: number | null): number | null {
   return score === null || rate === null ? null : score * rate;
 }
 
-function uniqueJudgements(obs: ScoringObservation[]): ScoringObservation[] {
+/**
+ * One observation per LLM judgement. With per-answer weights the copies of a carried judgement are dropped
+ * (the heaviest stays). With per-cell weights the judgement stands for every answer that carries it, so it
+ * keeps their combined weight — otherwise the cells that name the brand most steadily would count least.
+ */
+function uniqueJudgements(obs: ScoringObservation[], sumWeights = false): ScoringObservation[] {
   const byKey = new Map<string, ScoringObservation>();
   obs.forEach((o, i) => {
     const key = o.signals.judgementCarriedFrom ?? o.measurementId ?? `#${i}`;
     const prev = byKey.get(key);
-    if (!prev || o.weight > prev.weight) byKey.set(key, o);
+    if (!prev) byKey.set(key, sumWeights ? { ...o } : o);
+    else if (sumWeights) prev.weight += o.weight;
+    else if (o.weight > prev.weight) byKey.set(key, o);
   });
   return [...byKey.values()];
 }
@@ -239,17 +277,17 @@ export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SC
   // Visibility metrics come from answers to questions that do not name the brand.
   const visible = rules?.excludeBranded ? valid.filter((o) => !o.branded) : valid;
 
-  const clustered = rules?.clusteredIntervals ?? false;
+  const rate: RateOptions = { clustered: rules?.clusteredIntervals ?? false, cells: rules?.cellWeights ?? false };
   const unconditional = rules?.unconditionalComponents ?? false;
-  const mentionRate = weightedRate(visible, (o) => o.signals.brandMentioned, clustered);
+  const mentionRate = weightedRate(visible, (o) => o.signals.brandMentioned, rate);
   // Citations can only exist when the engine searched; otherwise the measurement is not informative.
   const citationRate = weightedRate(
     visible,
     (o) => (o.signals.searchWasUsed || o.signals.citedUrls.length > 0 ? o.signals.domainCited : null),
-    clustered,
+    rate,
   );
   const recommendationRate = rules?.recommendationOverAllAnswers
-    ? weightedRate(visible, (o) => o.signals.recommendationPosition !== null, clustered)
+    ? weightedRate(visible, (o) => o.signals.recommendationPosition !== null, rate)
     : weightedRate(visible, (o) => (o.signals.recommendationPresent ? o.signals.recommendationPosition !== null : null));
   const avgRecommendationPosition = weightedMean(visible, (o) => o.signals.recommendationPosition);
   // Over the answers that recommend the brand — or, for versions without a floor, over all answers (0 when absent).
@@ -276,7 +314,7 @@ export function computeMetrics(obs: ScoringObservation[], versionId = DEFAULT_SC
 
   // Judgement-based metrics: an inherited (carried) judgement is one LLM observation, not N —
   // count each distinct judgement once so duplicates neither dominate the mean nor fake precision.
-  const mentioned = uniqueJudgements(valid.filter((o) => o.signals.brandMentioned));
+  const mentioned = uniqueJudgements(valid.filter((o) => o.signals.brandMentioned), rules?.cellWeights ?? false);
   const sentimentRaw = weightedMean(mentioned, (o) => o.signals.sentiment);
   const sentimentScore = sentimentRaw === null ? null : (sentimentRaw + 1) / 2;
   const accuracyScore = weightedMean(mentioned, (o) => {

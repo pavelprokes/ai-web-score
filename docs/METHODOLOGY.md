@@ -79,11 +79,18 @@ Each cycle the planner buys samples greedily by VOI per dollar within the paced 
   sampled rarely;
 - new prompts start at maximum uncertainty → measured intensively; stable prompts fade to
   infrequent measurement; volatile prompts keep a short interval;
-- **quiet cells** — at least eight answers and an estimate below 0.01, i.e. a long run of answers without
-  the brand — are re-measured weekly with one answer (every three days on ChatGPT). At $0.0012 an answer
-  neither the budget nor the value floors hold such a cell back, and they took 58 % of all answers while a
-  further answer named the brand in 0.4–0.7 % (3.1 % on ChatGPT; RESEARCH §7.6). One answer that shows the
-  brand lifts the estimate and the cell returns to the normal pace; a detected change overrides the interval;
+- **quiet cells** — at least eight answers from at least four cycles and an estimate below 0.01, i.e. a long
+  run of answers without the brand — are re-measured weekly with one answer (every three days on ChatGPT).
+  At $0.0012 an answer neither the budget nor the value floors hold such a cell back, and they took 58 % of
+  all answers while a further answer named the brand in 0.4–0.7 % (3.1 % on ChatGPT; RESEARCH §7.6). In the
+  cost simulation with 73 % silent cells this removes 37 % of the steady measurement spend. Guard rails:
+  - only for domains scored with a version that gives each cell one weight (`geo-v3`, §6). A version that
+    pools answers would read fewer answers without the brand as a higher rate, so under `geo-v2` the pace
+    does not change;
+  - one answer that shows the brand lifts the estimate and the cell returns to the normal pace; a detected
+    change overrides the interval;
+  - when three or more quiet cells of one assistant wake up within seven days, all of that assistant's cells
+    in the domain go back to the normal pace for that week (a shift of the assistant, as on 2026-10-22);
 - a provider may cap the samples of a cell per cycle (`sampling.maxSamplesPerCycle`): Perplexity takes one,
   because a repeat within a cycle is close to a copy of the first answer (RESEARCH §7.3).
 
@@ -134,7 +141,10 @@ been replayed on production data) answers three defects measured there (RESEARCH
   too high on two domains. Each assistant's cells together carry its reach share.
 - **Intervals over prompts.** The variance of the weighted rate is estimated from the prompts' residual totals
   (the linearised estimator for cluster samples) and expressed as an effective number of independent answers
-  for the Wilson interval; with one prompt, or a rate of exactly 0 or 1, the prompts are the sample. In the
+  for the Wilson interval, widened by the Student t quantile for the number of prompts (a topic with three
+  prompts cannot pin a level down); with one prompt, or a rate of exactly 0 or 1, the prompts are the sample.
+  A metric that applies to some answers only (citations need a search) and answers without content do not
+  thin a cell: the answers that apply share the cell's weight. In the
   simulated domain of `geo-v3.test.ts` the "95 %" interval of geo-v2 contains the true rate in 9 % of runs,
   that of geo-v3 in 93 %.
 - **No floor in the overall score.** Position counts 0 for an answer that does not recommend the brand, and

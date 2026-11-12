@@ -7,7 +7,7 @@ import { classifyProviderError, ProviderError, type ProviderConfigurationSeed, t
 import type { MeasurementRequest } from "@/core/measurement/types";
 import { computeCost, selectPrice } from "@/core/pricing/cost";
 import { type CellState, confidence, initialCellState, recommendedIntervalDays, recommendedSampleCount, updateCell } from "@/core/sampling/cell-state";
-import { TARGET_SD } from "@/core/sampling/planner";
+import { DEFAULT_PLAN_OPTIONS, onQuietPace, slowsQuietCells, TARGET_SD } from "@/core/sampling/planner";
 import { carryJudgement, JUDGEMENT_MAX_AGE_DAYS, shouldAnalyze } from "@/core/signals/analyze-llm";
 import { extractSignals, presenceIndex, type RawSignals, type TrackedEntity } from "@/core/signals/extract";
 import type { DomainProfile } from "@/core/domain-profile";
@@ -305,7 +305,7 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
     })
     .onConflictDoNothing();
 
-  await updateCellState(m.domainId, m.promptVersionId, m.configurationId, presence, finishedAt);
+  await updateCellState(m.domainId, m.promptVersionId, m.configurationId, m.providerId, presence, finishedAt);
 
   await db
     .update(runs)
@@ -326,7 +326,7 @@ export async function finalizeMeasurement(id: string, result: ProviderResult, st
   await enqueue("scores.compute", { domainId: m.domainId }, { dedupeKey: `scores:${m.domainId}`, runAt: new Date(Date.now() + 120_000) });
 }
 
-async function updateCellState(domainId: string, promptVersionId: string, configurationId: string, presence: number, at: Date) {
+async function updateCellState(domainId: string, promptVersionId: string, configurationId: string, providerId: string, presence: number, at: Date) {
   const db = getDb();
   const [row] = await db
     .select()
@@ -337,7 +337,14 @@ async function updateCellState(domainId: string, promptVersionId: string, config
   const { state } = updateCell(prev, [presence], at);
   const [p] = await db.execute(sql`select role from prompts where id = ${pv?.promptId ?? ""}`);
   const role = ((p?.role as PromptRole | null) ?? "ROTATING") as PromptRole;
-  const interval = recommendedIntervalDays(state, TARGET_SD[role] ** 2, { min: 1, max: role === "CORE" ? 7 : 30 });
+  const learned = recommendedIntervalDays(state, TARGET_SD[role] ** 2, { min: 1, max: role === "CORE" ? 7 : 30 });
+  // The stored schedule follows the planner: a quiet cell waits for its quiet interval and gets one answer,
+  // and a provider's cap on samples per cycle holds.
+  const [d] = await db.select({ scoringVersion: domains.scoringVersion }).from(domains).where(eq(domains.id, domainId));
+  const sampling = providerSampling(providerId);
+  const quiet = onQuietPace({ state, slowWhenQuiet: d ? slowsQuietCells(d.scoringVersion) : false });
+  const interval = quiet ? Math.max(learned, sampling?.quietIntervalDays ?? DEFAULT_PLAN_OPTIONS.quietIntervalDays) : learned;
+  const samples = recommendedSampleCount(state, new Date(at.getTime() + interval * 86_400_000), TARGET_SD[role]);
   const values = {
     domainId,
     promptVersionId,
@@ -345,7 +352,7 @@ async function updateCellState(domainId: string, promptVersionId: string, config
     state,
     confidence: confidence(state, at),
     recommendedIntervalDays: interval,
-    recommendedSamples: recommendedSampleCount(state, new Date(at.getTime() + interval * 86_400_000), TARGET_SD[role]),
+    recommendedSamples: quiet ? 1 : Math.min(samples, sampling?.maxSamplesPerCycle ?? samples),
     nextDueAt: new Date(at.getTime() + interval * 86_400_000),
     updatedAt: at,
   };
@@ -353,6 +360,14 @@ async function updateCellState(domainId: string, promptVersionId: string, config
     .insert(cellStates)
     .values(values)
     .onConflictDoUpdate({ target: [cellStates.domainId, cellStates.promptVersionId, cellStates.configurationId], set: values });
+}
+
+function providerSampling(providerId: string) {
+  try {
+    return getProvider(providerId).sampling;
+  } catch {
+    return undefined; // a provider that is no longer registered
+  }
 }
 
 /** Most recent LLM-judged measurement of the same cell (for judgement carry-over). */

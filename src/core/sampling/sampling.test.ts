@@ -11,7 +11,7 @@ import {
   updateCell,
 } from "./cell-state";
 import { rng } from "../scoring/stats";
-import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS } from "./planner";
+import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS, recentWakeUps, slowsQuietCells } from "./planner";
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, 1 + n, 6));
 
@@ -197,13 +197,48 @@ describe("VOI planner", () => {
     // Ten answers without the brand, one a day, the last one `daysAgo` days before `now`.
     const quiet = (daysAgo: number) => feed(initialCellState(), Array(10).fill(0), 10 - daysAgo - 9);
     // Priced like a UI capture: at this price the value floors do not hold a confident cell back.
-    const cheap = (over: Parameters<typeof cell>[0]) => cell({ costPerSample: 0.0012, promptWeight: 1, ...over });
+    const cheap = (over: Parameters<typeof cell>[0]) => cell({ costPerSample: 0.0012, promptWeight: 1, slowWhenQuiet: true, ...over });
     const opts = { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 };
 
     it("needs eight answers and an estimate near zero", () => {
       expect(isQuietCell(feed(initialCellState(), Array(7).fill(0)))).toBe(false);
       expect(isQuietCell(feed(initialCellState(), Array(8).fill(0)))).toBe(true);
       expect(isQuietCell(feed(initialCellState(), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+    });
+
+    it("needs answers from several cycles: the repeats of a new cell's first days are not eight looks", () => {
+      // 5 + 2 + 1 answers on three consecutive days, as the planner samples a new cheap cell.
+      let s = initialCellState();
+      for (const [d, k] of [[0, 5], [1, 2], [2, 1]] as const) for (let i = 0; i < k; i++) s = updateCell(s, [0], new Date(day(d).getTime() + i * 60_000)).state;
+      expect(s.n).toBe(8);
+      expect(s.cycles).toBe(3);
+      expect(isQuietCell(s)).toBe(false);
+      expect(isQuietCell(updateCell(s, [0], day(3)).state)).toBe(true);
+    });
+
+    it("records when a quiet run ends", () => {
+      const q = quiet(2);
+      expect(q.wokeAt).toBeNull();
+      const woke = updateCell(q, [1], day(9)).state;
+      expect(woke.wokeAt).toBe(day(9).toISOString());
+      expect(recentWakeUps([woke, q], day(12))).toBe(1);
+      expect(recentWakeUps([woke, q], day(17))).toBe(0);
+    });
+
+    it("keep the normal pace unless the domain's scoring gives each cell one weight", () => {
+      expect(slowsQuietCells("geo-v2")).toBe(false);
+      expect(slowsQuietCells("geo-v3")).toBe(true);
+      expect(slowsQuietCells("unknown")).toBe(false);
+      const c = cell({ cellKey: "q", costPerSample: 0.0012, promptWeight: 1, state: quiet(2) });
+      expect(minIntervalOf(c, DEFAULT_PLAN_OPTIONS)).toBe(DEFAULT_PLAN_OPTIONS.minIntervalDays);
+      expect(planCycle([c], opts).items.map((i) => i.cellKey)).toEqual(["q"]);
+    });
+
+    it("are due on the same hour a week later, although the answer landed after the plan", () => {
+      // Planned at 06:00, answered at 06:10; seven days later at 06:00 it is 6.99 days old.
+      const s = updateCell(quiet(3), [0], new Date(day(3).getTime() + 10 * 60_000)).state;
+      expect(planCycle([cheap({ cellKey: "q", state: s })], { ...opts, now: day(10) }).items.map((i) => i.samples)).toEqual([1]);
+      expect(planCycle([cheap({ cellKey: "q", state: s })], { ...opts, now: day(9) }).items).toEqual([]);
     });
 
     it("are re-measured weekly with a single answer", () => {
@@ -223,7 +258,7 @@ describe("VOI planner", () => {
       const woke = feed(quiet(2), [1], 9);
       expect(isQuietCell(woke)).toBe(false);
       expect(minIntervalOf(cheap({ cellKey: "w", state: woke }), DEFAULT_PLAN_OPTIONS)).toBe(DEFAULT_PLAN_OPTIONS.minIntervalDays);
-      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(2) }), DEFAULT_PLAN_OPTIONS)).toBe(7);
+      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(2) }), DEFAULT_PLAN_OPTIONS)).toBeCloseTo(6.9);
     });
 
     it("keep the core guarantee", () => {

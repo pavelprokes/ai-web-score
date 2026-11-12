@@ -16,24 +16,27 @@ export interface WeighableRow {
   /** Prompt-level business weight (importance × commercial value blend). */
   promptWeight: number;
   branded: boolean;
+  /** False for an answer that scoring ignores (no answer): it gets no weight and does not thin its cell. */
+  counts?: boolean;
 }
 
 export function cellWeights(rows: WeighableRow[], providerShare: (providerId: string) => number): number[] {
   const cellKey = (r: WeighableRow) => `${r.providerId}|${r.promptId}`;
   const groupKey = (r: WeighableRow) => `${r.providerId}|${r.branded ? "b" : "u"}`;
+  const counted = rows.filter((r) => r.counts !== false);
   const answersInCell = new Map<string, number>();
-  for (const r of rows) answersInCell.set(cellKey(r), (answersInCell.get(cellKey(r)) ?? 0) + 1);
+  for (const r of counted) answersInCell.set(cellKey(r), (answersInCell.get(cellKey(r)) ?? 0) + 1);
   // Total prompt weight of an assistant's cells (each cell once).
   const groupMass = new Map<string, number>();
   const seen = new Set<string>();
-  for (const r of rows) {
+  for (const r of counted) {
     if (seen.has(cellKey(r))) continue;
     seen.add(cellKey(r));
     groupMass.set(groupKey(r), (groupMass.get(groupKey(r)) ?? 0) + r.promptWeight);
   }
   return rows.map((r) => {
     const mass = groupMass.get(groupKey(r)) ?? 0;
-    if (mass <= 0) return 0;
+    if (r.counts === false || mass <= 0) return 0;
     return (providerShare(r.providerId) * r.promptWeight) / mass / answersInCell.get(cellKey(r))!;
   });
 }

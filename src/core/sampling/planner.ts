@@ -1,4 +1,5 @@
 import type { PromptRole } from "../prompt";
+import { SCORING_VERSIONS } from "../scoring/scoring";
 import {
   type CellState,
   daysBetween,
@@ -39,7 +40,13 @@ export interface PlanCell {
    * within a cycle are near copies of the first answer and so carry little new information.
    */
   maxSamples?: number;
-  /** Days between two measurements while the cell is quiet (`isQuietCell`); default `quietIntervalDays`. */
+  /**
+   * Re-measure the cell at the slower quiet pace while it is quiet (`isQuietCell`). Only safe when the
+   * domain's scoring gives each cell one weight: a version that pools answers would read fewer answers
+   * without the brand as a higher rate.
+   */
+  slowWhenQuiet?: boolean;
+  /** Days between two measurements while the cell is quiet; default `quietIntervalDays`. */
   quietIntervalDays?: number;
 }
 
@@ -141,17 +148,47 @@ function eligible(cell: PlanCell, opts: PlanOptions): boolean {
   return since >= minIntervalOf(cell, opts) || recentChange;
 }
 
+/**
+ * Whether quiet cells of a domain scored with this version may be slowed down. Only a version that gives each
+ * cell one weight: one that pools answers would read fewer answers without the brand as a higher rate.
+ */
+export function slowsQuietCells(scoringVersion: string): boolean {
+  return SCORING_VERSIONS[scoringVersion]?.rules?.cellWeights === true;
+}
+
+/** The answer of a cycle lands minutes after its plan, so "every N days" is checked with this much slack. */
+const INTERVAL_SLACK_DAYS = 0.1;
+
+/** The cell is on the slower pace of quiet cells. */
+export function onQuietPace(cell: Pick<PlanCell, "state" | "slowWhenQuiet">): boolean {
+  return cell.slowWhenQuiet === true && isQuietCell(cell.state);
+}
+
 /** Days that must pass before the cell is measured again: longer while it is quiet. */
 export function minIntervalOf(cell: PlanCell, opts: Pick<PlanOptions, "minIntervalDays" | "quietIntervalDays">): number {
-  if (!isQuietCell(cell.state)) return opts.minIntervalDays;
+  if (!onQuietPace(cell)) return opts.minIntervalDays;
   // A manual run sets the minimum to 0 and measures everything; do not hold quiet cells back then.
   if (opts.minIntervalDays === 0) return 0;
-  return Math.max(opts.minIntervalDays, cell.quietIntervalDays ?? opts.quietIntervalDays);
+  return Math.max(opts.minIntervalDays, (cell.quietIntervalDays ?? opts.quietIntervalDays) - INTERVAL_SLACK_DAYS);
+}
+
+/**
+ * Quiet cells of one assistant that woke up within this window suspend the slower pace for all of its cells
+ * in the domain: several first mentions at once are a shift of the assistant (ChatGPT on 2026-10-22: 12 of
+ * 25 prompts rose), and the other quiet cells should be looked at now, not within the week. By chance about
+ * one quiet cell in a hundred wakes up in a week (31 of 888 in four weeks, RESEARCH §7.6).
+ */
+export const QUIET_WAKE_WINDOW_DAYS = 7;
+export const QUIET_WAKE_SUSPEND = 3;
+
+/** Cells whose quiet run ended within the window. */
+export function recentWakeUps(states: CellState[], now: Date): number {
+  return states.filter((s) => s.wokeAt && daysBetween(s.wokeAt, now) < QUIET_WAKE_WINDOW_DAYS).length;
 }
 
 function sampleCap(cell: PlanCell, opts: PlanOptions): number {
   // A quiet cell is re-checked with one answer: a repeat adds nothing to "still not there".
-  if (isQuietCell(cell.state)) return 1;
+  if (onQuietPace(cell)) return 1;
   return Math.min(opts.maxSamplesPerCell, cell.maxSamples ?? opts.maxSamplesPerCell);
 }
 
@@ -263,8 +300,7 @@ export function cycleBudget(args: {
 /** Human-readable schedule hint per cell — the learned frequency shown in the admin. */
 export function cellScheduleHint(cell: PlanCell, now: Date) {
   const target = TARGET_SD[cell.role] ** 2;
-  const learned = recommendedIntervalDays(cell.state, target, { min: 1, max: cell.role === "CORE" ? 7 : 30 });
-  const interval = Math.max(learned, minIntervalOf(cell, DEFAULT_PLAN_OPTIONS));
+  const interval = recommendedIntervalDays(cell.state, target, { min: 1, max: cell.role === "CORE" ? 7 : 30 });
   return {
     predictedSd: Math.sqrt(predictedVariance(cell.state, now)),
     recommendedIntervalDays: interval,

@@ -117,6 +117,47 @@ describe("geo-v3 weights", () => {
     expect(sum((r) => r.providerId === "small" && r.branded)).toBeCloseTo(0.2);
   });
 
+  it("leave a cell its weight when some of its answers do not count", () => {
+    const noAnswer = sig({ noAnswer: true });
+    // Cell A: one answer naming the brand and four empty ones. Cell B: five answers without it.
+    const answers: Answer[] = [
+      { promptId: "a", providerId: "x", signals: named },
+      ...Array.from({ length: 4 }, () => ({ promptId: "a", providerId: "x", signals: noAnswer })),
+      ...Array.from({ length: 5 }, () => ({ promptId: "b", providerId: "x", signals: absent })),
+    ];
+    const w = cellWeights(
+      answers.map((a) => ({ promptId: a.promptId, providerId: a.providerId, promptWeight: 1, branded: false, counts: !a.signals.noAnswer })),
+      () => 1,
+    );
+    const obs = answers.map((a, i) => ({ ...a, weight: w[i]!, measurementId: `m${i}` }));
+    expect(computeMetrics(obs, "geo-v3").mentionRate.value).toBeCloseTo(0.5);
+  });
+
+  it("leave a cell its weight in the citation rate when only some of its answers searched", () => {
+    const cited = sig({ domainCited: true, domainCitationCount: 1 });
+    const noSearch = sig({ searchWasUsed: false });
+    // Cell A: one of ten answers searched, and cited the domain. Cell B: ten searched, none cited.
+    const answers: Answer[] = [
+      { promptId: "a", providerId: "x", signals: cited },
+      ...Array.from({ length: 9 }, () => ({ promptId: "a", providerId: "x", signals: noSearch })),
+      ...Array.from({ length: 10 }, () => ({ promptId: "b", providerId: "x", signals: absent })),
+    ];
+    expect(computeMetrics(v3(answers), "geo-v3").citationRate.value).toBeCloseTo(0.5);
+  });
+
+  it("let a carried judgement stand for every answer that carries it", () => {
+    const judged = (sentiment: number) => sig({ brandMentioned: true, brandPosition: 1, sentiment });
+    // Cell A: ten answers naming the brand, nine of them carrying the first one's judgement (+1).
+    // Cell B: one answer, judged −1.
+    const answers: Answer[] = [
+      { promptId: "a", providerId: "x", signals: judged(1) },
+      ...Array.from({ length: 9 }, () => ({ promptId: "a", providerId: "x", signals: { ...judged(1), judgementCarriedFrom: "m0" } as RawSignals })),
+      { promptId: "b", providerId: "x", signals: judged(-1) },
+    ];
+    // Sentiment −1…1 is reported on 0…1: the two cells weigh the same, so the middle.
+    expect(computeMetrics(v3(answers), "geo-v3").sentimentScore).toBeCloseTo(0.5);
+  });
+
   it("remove the tilt of a planner that measures visible prompts more often", () => {
     let biasV2 = 0;
     let biasV3 = 0;
@@ -151,6 +192,31 @@ describe("geo-v3 intervals", () => {
     expect(coveredV3 / runs).toBeGreaterThanOrEqual(0.9);
     expect(widthV3 / widthV2).toBeGreaterThan(1.3);
     if (process.env.PRINT_COVERAGE) console.log({ v2: coveredV2 / runs, v3: coveredV3 / runs, width: widthV3 / widthV2 });
+  });
+
+  it("stay honest with the few prompts of a topic or a small portfolio", () => {
+    for (const prompts of [3, 5, 8]) {
+      let covered = 0;
+      const runs = 600;
+      for (let s = 1; s <= runs; s++) {
+        const { answers } = world(5000 + prompts * 1000 + s, prompts);
+        const m = computeMetrics(v3(answers), "geo-v3").mentionRate;
+        if (m.low! <= POPULATION_RATE && POPULATION_RATE <= m.high!) covered++;
+      }
+      expect(covered / runs).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+
+  it("do not depend on rounding when prompts agree exactly", () => {
+    // Two prompts, 5 of 10 named each, with weights that do not sum exactly in binary and with ones that do.
+    const answers = (weight: number): ScoringObservation[] =>
+      Array.from({ length: 20 }, (_, i) => ({ promptId: `p${i % 2}`, providerId: "a", signals: i < 10 ? named : absent, weight, measurementId: `m${i}` }));
+    const a = computeMetrics(answers(0.1 / 3), "geo-v3").mentionRate;
+    const b = computeMetrics(answers(0.25), "geo-v3").mentionRate;
+    expect(a.low!).toBeCloseTo(b.low!, 6);
+    expect(a.high!).toBeCloseTo(b.high!, 6);
+    // Two prompts cannot pin a level down, however well they agree.
+    expect(a.high! - a.low!).toBeGreaterThan(0.6);
   });
 
   it("stay wide for a brand that no prompt names, by the number of prompts and not of answers", () => {

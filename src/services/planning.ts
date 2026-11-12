@@ -17,7 +17,7 @@ import { getProvider, listProviders, missingEnv } from "@/core/measurement/provi
 import type { ProviderConfigurationSeed } from "@/core/measurement/provider";
 import type { PromptRole } from "@/core/prompt";
 import { type CellState, confidence, initialCellState } from "@/core/sampling/cell-state";
-import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle } from "@/core/sampling/planner";
+import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle, QUIET_WAKE_SUSPEND, recentWakeUps, slowsQuietCells } from "@/core/sampling/planner";
 import { expectedCostPerSample } from "@/core/pricing/cost";
 import { enqueue } from "@/jobs/queue";
 
@@ -175,6 +175,13 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
     return expectedCostPerSample(o?.avg ?? null, o?.n ?? 0, est);
   };
 
+  // Quiet cells are slowed down only under a scoring version that gives each cell one weight (a version
+  // that pools answers would read fewer answers without the brand as a higher rate), and not while several
+  // quiet cells of the assistant have just woken up.
+  const cellScoring = slowsQuietCells(domain.scoringVersion);
+  const wakeUps = new Map<string, number>();
+  for (const c of standard) wakeUps.set(c.id, recentWakeUps(states.filter((s) => s.configurationId === c.id).map((s) => s.state as CellState), now));
+
   const cells: PlanCell[] = [];
   for (const { p, v } of active) {
     for (const c of standard) {
@@ -190,6 +197,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
         costPerSample: costOf(c),
         coreProvider: reach >= 0.1 || reach === maxReach,
         maxSamples: getProvider(c.providerId).sampling?.maxSamplesPerCycle,
+        slowWhenQuiet: cellScoring && (wakeUps.get(c.id) ?? 0) < QUIET_WAKE_SUSPEND,
         quietIntervalDays: getProvider(c.providerId).sampling?.quietIntervalDays,
       });
     }
