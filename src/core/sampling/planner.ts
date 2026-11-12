@@ -65,6 +65,8 @@ export interface PlanOptions {
    * long run of answers. Kept at or below `coreMaxIntervalDays`, so the core guarantee still holds.
    */
   quietIntervalDays: number;
+  /** Measure quiet cells like any other (a manual run measures everything). */
+  ignoreQuietPace?: boolean;
   /** Core prompts on core providers must be measured at least this often. */
   coreMaxIntervalDays: number;
   /**
@@ -165,30 +167,42 @@ export function onQuietPace(cell: Pick<PlanCell, "state" | "slowWhenQuiet">): bo
 }
 
 /** Days that must pass before the cell is measured again: longer while it is quiet. */
-export function minIntervalOf(cell: PlanCell, opts: Pick<PlanOptions, "minIntervalDays" | "quietIntervalDays">): number {
-  if (!onQuietPace(cell)) return opts.minIntervalDays;
-  // A manual run sets the minimum to 0 and measures everything; do not hold quiet cells back then.
-  if (opts.minIntervalDays === 0) return 0;
+export function minIntervalOf(
+  cell: PlanCell,
+  opts: Pick<PlanOptions, "minIntervalDays" | "quietIntervalDays" | "ignoreQuietPace">,
+): number {
+  if (opts.ignoreQuietPace || !onQuietPace(cell)) return opts.minIntervalDays;
   return Math.max(opts.minIntervalDays, (cell.quietIntervalDays ?? opts.quietIntervalDays) - INTERVAL_SLACK_DAYS);
 }
 
 /**
- * Quiet cells of one assistant that woke up within this window suspend the slower pace for all of its cells
- * in the domain: several first mentions at once are a shift of the assistant (ChatGPT on 2026-10-22: 12 of
- * 25 prompts rose), and the other quiet cells should be looked at now, not within the week. By chance about
- * one quiet cell in a hundred wakes up in a week (31 of 888 in four weeks, RESEARCH §7.6).
+ * Several quiet cells of one assistant waking up within a week are a shift of the assistant (ChatGPT on
+ * 2026-10-22: 12 of 25 prompts rose), and its other quiet cells should be looked at now, not within the week.
+ * The slow pace is suspended when at least `QUIET_WAKE_SUSPEND_COUNT` cells and `QUIET_WAKE_SUSPEND_SHARE` of
+ * the assistant's quiet-or-just-woken cells woke up in the window. A share, because the count alone grows
+ * with the portfolio, and high enough that the suspension cannot feed itself: by chance about 1–2 % of quiet
+ * cells wake up in a week at the quiet pace and no more than 4 % at the normal one (0.4–0.7 % per answer,
+ * RESEARCH §7.6).
  */
 export const QUIET_WAKE_WINDOW_DAYS = 7;
-export const QUIET_WAKE_SUSPEND = 3;
+export const QUIET_WAKE_SUSPEND_COUNT = 3;
+export const QUIET_WAKE_SUSPEND_SHARE = 0.15;
 
 /** Cells whose quiet run ended within the window. */
 export function recentWakeUps(states: CellState[], now: Date): number {
   return states.filter((s) => s.wokeAt && daysBetween(s.wokeAt, now) < QUIET_WAKE_WINDOW_DAYS).length;
 }
 
+/** Whether the slow pace of quiet cells is suspended for an assistant, given the states of its cells in the domain. */
+export function quietPaceSuspended(states: CellState[], now: Date): boolean {
+  const woke = recentWakeUps(states, now);
+  const quiet = states.filter(isQuietCell).length;
+  return woke >= QUIET_WAKE_SUSPEND_COUNT && woke / (woke + quiet) >= QUIET_WAKE_SUSPEND_SHARE;
+}
+
 function sampleCap(cell: PlanCell, opts: PlanOptions): number {
   // A quiet cell is re-checked with one answer: a repeat adds nothing to "still not there".
-  if (onQuietPace(cell)) return 1;
+  if (!opts.ignoreQuietPace && onQuietPace(cell)) return 1;
   return Math.min(opts.maxSamplesPerCell, cell.maxSamples ?? opts.maxSamplesPerCell);
 }
 

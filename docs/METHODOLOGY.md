@@ -89,8 +89,10 @@ Each cycle the planner buys samples greedily by VOI per dollar within the paced 
     does not change;
   - one answer that shows the brand lifts the estimate and the cell returns to the normal pace; a detected
     change overrides the interval;
-  - when three or more quiet cells of one assistant wake up within seven days, all of that assistant's cells
-    in the domain go back to the normal pace for that week (a shift of the assistant, as on 2026-10-22);
+  - when at least three quiet cells of one assistant, and at least 15 % of its quiet cells, wake up within
+    seven days, all of that assistant's cells in the domain go back to the normal pace for that week (a shift
+    of the assistant, as on 2026-10-22; by chance 1–4 % wake up in a week);
+  - a manual run measures quiet cells like any other;
 - a provider may cap the samples of a cell per cycle (`sampling.maxSamplesPerCycle`): Perplexity takes one,
   because a repeat within a cycle is close to a copy of the first answer (RESEARCH §7.3).
 
@@ -138,7 +140,8 @@ been replayed on production data) answers three defects measured there (RESEARCH
 - **One weight per prompt and assistant.** A cell carries the prompt's weight and its answers share it
   (`src/core/scoring/weights.ts`), so a cell measured twenty times counts like one measured twice. geo-v2
   weighs answers, and the planner measures cells that show the brand more often: rates came out about 7 points
-  too high on two domains. Each assistant's cells together carry its reach share.
+  too high on two domains. Each assistant's cells together carry its reach share; a branded cell weighs like
+  an unbranded one of the same prompt weight where both are read together (sentiment, accuracy).
 - **Intervals over prompts.** The variance of the weighted rate is estimated from the prompts' residual totals
   (the linearised estimator for cluster samples) and expressed as an effective number of independent answers
   for the Wilson interval, widened by the Student t quantile for the number of prompts (a topic with three
@@ -151,6 +154,11 @@ been replayed on production data) answers three defects measured there (RESEARCH
   sentiment and accuracy count in proportion to the mention rate. geo-v2 averaged them over the few answers
   that name the brand (19 points for a brand named in 0.8 % of answers). The Sentiment and Accuracy metrics
   themselves are unchanged.
+
+Everything outside the score snapshots still counts answers one by one: recommendation diagnostics, the
+answer viewer, competitor counts, and `geo-v2` itself. Once a domain's quiet cells are measured less often
+those counts lean towards the answers that show the brand, so a domain that was on `geo-v3` should not be
+switched back, and the diagnostics need the same per-cell reading before they quote rates (open).
 
 With honest intervals "Not enough data" will show for domains whose prompts disagree a lot, until they have
 more prompts — the threshold stays ±10 points.

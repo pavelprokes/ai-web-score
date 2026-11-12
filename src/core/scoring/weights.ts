@@ -6,9 +6,10 @@
  * for more. (The planner measures cells that show the brand more often: weighting answers pushed the mention
  * rate about 7 points up on two production domains, RESEARCH §7.7.)
  *
- * Each assistant's cells together carry the assistant's share of the aggregate, separately for branded and
- * unbranded prompts, so both the visibility metrics and the "asked by name" block weigh assistants by reach
- * whatever each of them happened to answer.
+ * All cells of an assistant together carry the assistant's share of the aggregate, so assistants weigh by
+ * reach whatever each of them happened to answer. Branded and unbranded prompts are normalised together: a
+ * branded cell weighs like an unbranded one of the same prompt weight wherever both are read at once
+ * (sentiment, accuracy).
  */
 export interface WeighableRow {
   promptId: string;
@@ -21,22 +22,23 @@ export interface WeighableRow {
 }
 
 export function cellWeights(rows: WeighableRow[], providerShare: (providerId: string) => number): number[] {
-  const cellKey = (r: WeighableRow) => `${r.providerId}|${r.promptId}`;
-  const groupKey = (r: WeighableRow) => `${r.providerId}|${r.branded ? "b" : "u"}`;
-  const counted = rows.filter((r) => r.counts !== false);
-  const answersInCell = new Map<string, number>();
-  for (const r of counted) answersInCell.set(cellKey(r), (answersInCell.get(cellKey(r)) ?? 0) + 1);
-  // Total prompt weight of an assistant's cells (each cell once).
-  const groupMass = new Map<string, number>();
-  const seen = new Set<string>();
-  for (const r of counted) {
-    if (seen.has(cellKey(r))) continue;
-    seen.add(cellKey(r));
-    groupMass.set(groupKey(r), (groupMass.get(groupKey(r)) ?? 0) + r.promptWeight);
+  // A prompt whose category changed inside the window is two cells: its branded and its unbranded answers.
+  const cellKey = (r: WeighableRow) => `${r.providerId}|${r.promptId}|${r.branded ? "b" : "u"}`;
+  const cells = new Map<string, { providerId: string; answers: number; weightSum: number }>();
+  for (const r of rows) {
+    if (r.counts === false) continue;
+    const c = cells.get(cellKey(r)) ?? { providerId: r.providerId, answers: 0, weightSum: 0 };
+    c.answers += 1;
+    c.weightSum += r.promptWeight;
+    cells.set(cellKey(r), c);
   }
+  // A cell weighs the mean prompt weight of its answers (versions of a prompt may differ in importance).
+  const providerMass = new Map<string, number>();
+  for (const c of cells.values()) providerMass.set(c.providerId, (providerMass.get(c.providerId) ?? 0) + c.weightSum / c.answers);
   return rows.map((r) => {
-    const mass = groupMass.get(groupKey(r)) ?? 0;
-    if (r.counts === false || mass <= 0) return 0;
-    return (providerShare(r.providerId) * r.promptWeight) / mass / answersInCell.get(cellKey(r))!;
+    const c = cells.get(cellKey(r));
+    const mass = providerMass.get(r.providerId) ?? 0;
+    if (r.counts === false || !c || mass <= 0) return 0;
+    return (providerShare(r.providerId) * (c.weightSum / c.answers)) / mass / c.answers;
   });
 }

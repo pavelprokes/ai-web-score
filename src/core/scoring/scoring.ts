@@ -169,7 +169,7 @@ interface RateOptions {
   cells?: boolean;
 }
 
-const cellOf = (o: ScoringObservation) => `${o.providerId}|${o.promptId}`;
+const cellOf = (o: ScoringObservation) => `${o.providerId}|${o.promptId}|${o.branded ? "b" : "u"}`;
 
 /**
  * With one weight per cell, a metric that applies to some answers only (citations need a search) must not
@@ -233,7 +233,8 @@ function clusteredEffectiveN(
   const variance = ((g / (g - 1)) * [...residual.values()].reduce((a, r) => a + r * r, 0)) / (sw * sw);
   // Prompts that agree exactly leave only the answers' own noise; never claim more than the answers give.
   const independent = variance > 0 ? Math.min(answers, (value * (1 - value)) / variance) : answers;
-  return independent / (t95(g - 1) / 1.96) ** 2;
+  // Never below one answer: with two or three prompts the widening would otherwise say less than nothing.
+  return Math.max(1, independent / (t95(g - 1) / 1.96) ** 2);
 }
 
 function weightedMean(obs: ScoringObservation[], pick: (o: ScoringObservation) => number | null | undefined) {

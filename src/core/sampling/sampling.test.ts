@@ -11,7 +11,7 @@ import {
   updateCell,
 } from "./cell-state";
 import { rng } from "../scoring/stats";
-import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS, recentWakeUps, slowsQuietCells } from "./planner";
+import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS, quietPaceSuspended, recentWakeUps, slowsQuietCells } from "./planner";
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, 1 + n, 6));
 
@@ -225,6 +225,24 @@ describe("VOI planner", () => {
       expect(recentWakeUps([woke, q], day(17))).toBe(0);
     });
 
+    it("suspend the slow pace of an assistant when a real share of its quiet cells wakes up in a week", () => {
+      const q = quiet(2);
+      const woke = updateCell(q, [1], day(9)).state;
+      const states = (wokeN: number, quietN: number) => [...Array<CellState>(wokeN).fill(woke), ...Array<CellState>(quietN).fill(q)];
+      expect(quietPaceSuspended(states(2, 5), day(10))).toBe(false); // too few
+      expect(quietPaceSuspended(states(3, 10), day(10))).toBe(true); // 3 of 13
+      // Chance wake-ups of a large portfolio (3 of 300) are not a shift.
+      expect(quietPaceSuspended(states(3, 300), day(10))).toBe(false);
+      expect(quietPaceSuspended(states(12, 13), day(10))).toBe(true); // 2026-10-22
+      expect(quietPaceSuspended(states(12, 13), day(17))).toBe(false); // a week later
+    });
+
+    it("counts cycles from zero for a state stored before cycles existed", () => {
+      const legacy = { ...feed(initialCellState(), Array(8).fill(0)), cycles: undefined };
+      expect(isQuietCell(legacy)).toBe(false);
+      expect(isQuietCell(feed(legacy, Array(4).fill(0), 20))).toBe(true);
+    });
+
     it("keep the normal pace unless the domain's scoring gives each cell one weight", () => {
       expect(slowsQuietCells("geo-v2")).toBe(false);
       expect(slowsQuietCells("geo-v3")).toBe(true);
@@ -267,8 +285,9 @@ describe("VOI planner", () => {
     });
 
     it("are still measured by a manual run", () => {
-      const plan = planCycle([cheap({ cellKey: "q", state: quiet(1) })], { ...opts, minIntervalDays: 0 });
-      expect(plan.items.map((i) => i.cellKey)).toEqual(["q"]);
+      const manual = { ...opts, minIntervalDays: 0, coreMaxIntervalDays: 0, nonCoreProviderMaxIntervalDays: 0, ignoreQuietPace: true };
+      expect(planCycle([cheap({ cellKey: "q", role: "CORE", state: quiet(1) })], manual).items.map((i) => i.cellKey)).toEqual(["q"]);
+      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(1) }), manual)).toBe(0);
     });
   });
 

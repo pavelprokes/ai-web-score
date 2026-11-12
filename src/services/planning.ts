@@ -17,7 +17,7 @@ import { getProvider, listProviders, missingEnv } from "@/core/measurement/provi
 import type { ProviderConfigurationSeed } from "@/core/measurement/provider";
 import type { PromptRole } from "@/core/prompt";
 import { type CellState, confidence, initialCellState } from "@/core/sampling/cell-state";
-import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle, QUIET_WAKE_SUSPEND, recentWakeUps, slowsQuietCells } from "@/core/sampling/planner";
+import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle, quietPaceSuspended, slowsQuietCells } from "@/core/sampling/planner";
 import { expectedCostPerSample } from "@/core/pricing/cost";
 import { enqueue } from "@/jobs/queue";
 
@@ -179,8 +179,8 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
   // that pools answers would read fewer answers without the brand as a higher rate), and not while several
   // quiet cells of the assistant have just woken up.
   const cellScoring = slowsQuietCells(domain.scoringVersion);
-  const wakeUps = new Map<string, number>();
-  for (const c of standard) wakeUps.set(c.id, recentWakeUps(states.filter((s) => s.configurationId === c.id).map((s) => s.state as CellState), now));
+  const suspended = new Map<string, boolean>();
+  for (const c of standard) suspended.set(c.id, quietPaceSuspended(states.filter((s) => s.configurationId === c.id).map((s) => s.state as CellState), now));
 
   const cells: PlanCell[] = [];
   for (const { p, v } of active) {
@@ -197,7 +197,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
         costPerSample: costOf(c),
         coreProvider: reach >= 0.1 || reach === maxReach,
         maxSamples: getProvider(c.providerId).sampling?.maxSamplesPerCycle,
-        slowWhenQuiet: cellScoring && (wakeUps.get(c.id) ?? 0) < QUIET_WAKE_SUSPEND,
+        slowWhenQuiet: cellScoring && !suspended.get(c.id),
         quietIntervalDays: getProvider(c.providerId).sampling?.quietIntervalDays,
       });
     }
@@ -215,7 +215,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
     now,
     budgetUsd: budget - calibrationBudget,
     // A manual run re-measures every core prompt on every enabled provider (within budget).
-    ...(manual ? { minIntervalDays: 0, coreMaxIntervalDays: 0, nonCoreProviderMaxIntervalDays: 0 } : {}),
+    ...(manual ? { minIntervalDays: 0, coreMaxIntervalDays: 0, nonCoreProviderMaxIntervalDays: 0, ignoreQuietPace: true } : {}),
   });
 
   const plannedStandard = plan.items.reduce((a, i) => a + i.samples, 0);

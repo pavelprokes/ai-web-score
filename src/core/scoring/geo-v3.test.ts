@@ -102,7 +102,7 @@ describe("geo-v3 weights", () => {
     expect(w[1]).toBeCloseTo(w[2]!);
   });
 
-  it("give each assistant its share whatever it answered, for branded and unbranded prompts apart", () => {
+  it("give each assistant its share whatever it answered", () => {
     const rows = [
       ...Array.from({ length: 40 }, (_, i) => ({ promptId: `p${i % 8}`, providerId: "big", promptWeight: 0.5, branded: false })),
       ...Array.from({ length: 3 }, (_, i) => ({ promptId: `p${i}`, providerId: "small", promptWeight: 0.5, branded: false })),
@@ -111,10 +111,35 @@ describe("geo-v3 weights", () => {
     ];
     const w = cellWeights(rows, (p) => (p === "big" ? 0.8 : 0.2));
     const sum = (pick: (r: (typeof rows)[number]) => boolean) => rows.reduce((a, r, i) => a + (pick(r) ? w[i]! : 0), 0);
-    expect(sum((r) => r.providerId === "big" && !r.branded)).toBeCloseTo(0.8);
-    expect(sum((r) => r.providerId === "small" && !r.branded)).toBeCloseTo(0.2);
-    expect(sum((r) => r.providerId === "big" && r.branded)).toBeCloseTo(0.8);
-    expect(sum((r) => r.providerId === "small" && r.branded)).toBeCloseTo(0.2);
+    expect(sum((r) => r.providerId === "big")).toBeCloseTo(0.8);
+    expect(sum((r) => r.providerId === "small")).toBeCloseTo(0.2);
+    // A branded cell weighs like an unbranded one of the same prompt weight: here twice a 0.5 prompt.
+    expect(w[43]).toBeCloseTo(2 * sum((r) => r.providerId === "big" && r.promptId === "p0"));
+  });
+
+  it("treat a prompt whose category or weight changed inside the window consistently", () => {
+    const rows = [
+      { promptId: "p", providerId: "x", promptWeight: 0.4, branded: true },
+      { promptId: "p", providerId: "x", promptWeight: 0.8, branded: false },
+      { promptId: "p", providerId: "x", promptWeight: 0.6, branded: false },
+      { promptId: "q", providerId: "x", promptWeight: 0.7, branded: false },
+    ];
+    const w = cellWeights(rows, () => 1);
+    expect(w.every((x) => x > 0)).toBe(true);
+    expect(w.reduce((a, b) => a + b, 0)).toBeCloseTo(1);
+    // The unbranded cell of p weighs the mean of its answers' weights, 0.7 — as much as q.
+    expect(w[1]! + w[2]!).toBeCloseTo(w[3]!);
+  });
+
+  it("do not let a few branded prompts drown the sentiment of unbranded answers", () => {
+    const judged = (sentiment: number) => sig({ brandMentioned: true, brandPosition: 1, sentiment });
+    // 3 branded prompts, praised; 40 unbranded prompts, 5 of them naming the brand, criticised.
+    const answers: Answer[] = [
+      ...Array.from({ length: 3 }, (_, i) => ({ promptId: `b${i}`, providerId: "x", signals: judged(1), branded: true })),
+      ...Array.from({ length: 40 }, (_, i) => ({ promptId: `u${i}`, providerId: "x", signals: i < 5 ? judged(-1) : absent })),
+    ];
+    // 3 praised cells against 5 criticised ones of the same weight: (3 − 5) / 8 = −0.25, reported as 0.375.
+    expect(computeMetrics(v3(answers), "geo-v3").sentimentScore).toBeCloseTo(0.375);
   });
 
   it("leave a cell its weight when some of its answers do not count", () => {

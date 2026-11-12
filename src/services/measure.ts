@@ -335,14 +335,16 @@ async function updateCellState(domainId: string, promptVersionId: string, config
   const [pv] = await db.select().from(promptVersions).where(eq(promptVersions.id, promptVersionId));
   const prev = (row?.state as CellState | undefined) ?? initialCellState(undefined, pv?.expectedVolatility ?? 0.5);
   const { state } = updateCell(prev, [presence], at);
-  const [p] = await db.execute(sql`select role from prompts where id = ${pv?.promptId ?? ""}`);
+  const [p] = await db.execute(
+    sql`select p.role, d.scoring_version from prompts p join domains d on d.id = p.domain_id where p.id = ${pv?.promptId ?? ""}`,
+  );
   const role = ((p?.role as PromptRole | null) ?? "ROTATING") as PromptRole;
   const learned = recommendedIntervalDays(state, TARGET_SD[role] ** 2, { min: 1, max: role === "CORE" ? 7 : 30 });
   // The stored schedule follows the planner: a quiet cell waits for its quiet interval and gets one answer,
-  // and a provider's cap on samples per cycle holds.
-  const [d] = await db.select({ scoringVersion: domains.scoringVersion }).from(domains).where(eq(domains.id, domainId));
+  // and a provider's cap on samples per cycle holds. (While the planner suspends the quiet pace for an
+  // assistant, it measures sooner than this schedule says.)
   const sampling = providerSampling(providerId);
-  const quiet = onQuietPace({ state, slowWhenQuiet: d ? slowsQuietCells(d.scoringVersion) : false });
+  const quiet = onQuietPace({ state, slowWhenQuiet: slowsQuietCells(String(p?.scoring_version ?? "")) });
   const interval = quiet ? Math.max(learned, sampling?.quietIntervalDays ?? DEFAULT_PLAN_OPTIONS.quietIntervalDays) : learned;
   const samples = recommendedSampleCount(state, new Date(at.getTime() + interval * 86_400_000), TARGET_SD[role]);
   const values = {

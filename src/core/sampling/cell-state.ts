@@ -30,7 +30,10 @@ export interface CellState {
   /** Two-sided CUSUM statistics of standardized innovations (change detection). */
   cusumUp?: number;
   cusumDown?: number;
-  /** Measurement cycles folded in (answers of one cycle count once). Absent on states stored before it existed. */
+  /**
+   * Measurement cycles folded in (answers of one cycle count once). States stored before it existed start
+   * counting at 0, so an old cell becomes quiet after four further cycles.
+   */
   cycles?: number;
   /** When the cell last stopped being quiet (`isQuietCell`): the brand appeared after a long run without it. */
   wokeAt?: string | null;
@@ -187,7 +190,7 @@ export function updateCell(state: CellState, observations: number[], now: Date):
     responseVariance,
     cusumUp,
     cusumDown,
-    cycles: (state.cycles ?? state.n) + (isFirst || !sameCycle ? 1 : 0),
+    cycles: (state.cycles ?? 0) + (isFirst || !sameCycle ? 1 : 0),
     wokeAt: state.wokeAt ?? null,
   };
   if (isQuietCell(state) && !isQuietCell(next)) next.wokeAt = now.toISOString();
@@ -248,5 +251,5 @@ export const QUIET_MEAN = 0.01;
  * repeats within a cycle are not independent looks.
  */
 export function isQuietCell(state: CellState): boolean {
-  return state.n >= QUIET_MIN_OBSERVATIONS && (state.cycles ?? state.n) >= QUIET_MIN_CYCLES && state.mean < QUIET_MEAN;
+  return state.n >= QUIET_MIN_OBSERVATIONS && (state.cycles ?? 0) >= QUIET_MIN_CYCLES && state.mean < QUIET_MEAN;
 }
