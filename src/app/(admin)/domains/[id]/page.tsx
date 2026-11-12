@@ -523,12 +523,15 @@ function ScoreTiles({ detail }: { detail: Detail }) {
           detail={
             <>
               {num(s.samples)} unbranded answers · {num(s.prompts)} prompts
+              {s.insufficientData && (
+                <span className="tile__sub">The Mentioned interval is still too wide to read a level. Approving more prompts narrows it.</span>
+              )}
               {mix && <span className="tile__sub">Weighted by reach: {mix}</span>}
             </>
           }
         />
         <StatTile label={<>Mentioned <MetricInfo id="mention-rate" /></>} value={<Rate value={s.mentionRate} ci={ci} />} detail="Unbranded questions where AI names you" />
-        <StatTile label={<>Cited <MetricInfo id="citation-rate" /></>} value={<Rate value={s.citationRate} />} detail="Unbranded answers linking your site" />
+        <StatTile label={<>Cited <MetricInfo id="citation-rate" /></>} value={<Rate value={s.citationRate} />} detail="Of unbranded answers that searched the web" />
         <StatTile
           label={<>In a recommendation list <MetricInfo id="recommendation-rate" /></>}
           value={<Rate value={s.recommendationRate} />}
@@ -548,7 +551,7 @@ function ScoreTiles({ detail }: { detail: Detail }) {
           <h2 className="tiles__heading">When AI is asked about you by name</h2>
           <dl className="tiles tiles--4" aria-label="Answers to questions that name the brand, last 28 days">
             <StatTile
-              label={<>Knows you <MetricInfo id="brand-check" /></>}
+              label={<>Named when asked by name <MetricInfo id="brand-check" /></>}
               value={<Rate value={brand.mentionRate} ci={brand.mentionRateCi as [number | null, number | null]} />}
               detail={`${num(brand.samples)} answers to questions that name you`}
             />
@@ -1071,7 +1074,7 @@ const QUALITY_LABELS: Record<string, string> = {
   commercialCoverage: "Commercial coverage",
   providerCoverage: "Provider coverage",
   promptRedundancy: "Prompt redundancy (lower is better)",
-  measurementConfidence: "Measurement confidence",
+  measurementConfidence: "Certainty of the estimates",
 };
 
 const PROPOSAL_KIND: Record<string, string> = {
@@ -1278,7 +1281,7 @@ function Schedule({ detail, now, open }: { detail: Detail; now: Date; open: bool
         <dt>Cycles per day</dt>
         <dd>{s.cyclesPerDay}</dd>
         <dt>
-          Average measurement confidence <MetricInfo id="measurement-confidence" />
+          Average certainty of the estimates <MetricInfo id="measurement-confidence" />
         </dt>
         <dd>{pct(detail.measurementConfidence)}</dd>
       </dl>
@@ -1292,10 +1295,10 @@ function Schedule({ detail, now, open }: { detail: Detail; now: Date; open: bool
                 <th scope="col">Provider</th>
                 <th scope="col">Due</th>
                 <th scope="col" className="num">
-                  Interval <MetricInfo id="measurement-interval" />
+                  Re-check every <MetricInfo id="measurement-interval" />
                 </th>
                 <th scope="col" className="num">
-                  Confidence <MetricInfo id="measurement-confidence" />
+                  Certainty <MetricInfo id="measurement-confidence" />
                 </th>
               </tr>
             </thead>
@@ -1349,7 +1352,7 @@ function Prompts({ prompts, detail }: { prompts: PromptRow[]; detail: Detail }) 
                   Presence <MetricInfo id="presence" />
                 </th>
                 <th scope="col" className="num">
-                  Confidence <MetricInfo id="measurement-confidence" />
+                  Certainty <MetricInfo id="measurement-confidence" />
                 </th>
               </tr>
             </thead>

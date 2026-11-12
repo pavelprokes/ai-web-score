@@ -319,6 +319,14 @@ describe.skipIf(!url)("e2e: se-vezmou.cz", () => {
       ctx({ id: domainId }),
     );
     expect(res.status).toBe(200);
+    // Re-reading stored answers can be asked for without a new profile version (after a matcher or alias fix).
+    const reextract = await actionsRoute.POST(
+      new Request(`http://t/api/domains/${domainId}/actions`, { ...auth, method: "POST", body: JSON.stringify({ action: "reextract-signals" }) }),
+      ctx({ id: domainId }),
+    );
+    expect(reextract.status).toBe(200);
+    const queued = await getDb().execute(sql`select count(*)::int as n from jobs where type = 'signals.reextract' and payload->>'domainId' = ${domainId}`);
+    expect(Number(queued[0]!.n)).toBeGreaterThan(0);
     const bad = await actionsRoute.POST(
       new Request(`http://t/api/domains/${domainId}/actions`, { ...auth, method: "POST", body: JSON.stringify({ action: "nope" }) }),
       ctx({ id: domainId }),

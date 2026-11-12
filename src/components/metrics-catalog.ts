@@ -58,7 +58,7 @@ export const METRICS: MetricDefinition[] = [
     short: "One 0–100 summary of all visibility metrics, weighted by how much they matter for the brand. Use it for trends; decide on the individual rates.",
     formula:
       `Overall = 100 × Σ (weight × component) / Σ weights of available components\n\n` +
-      `Weights (${DEFAULT_SCORING_VERSION}): mentioned ${pctW(w.mention)}, recommended ${pctW(w.recommendation)}, cited ${pctW(w.citation)}, ` +
+      `Weights (${DEFAULT_SCORING_VERSION}): mentioned ${pctW(w.mention)}, in a recommendation list ${pctW(w.recommendation)}, cited ${pctW(w.citation)}, ` +
       `share of voice ${pctW(w.shareOfVoice)}, position ${pctW(w.position)}, sentiment ${pctW(w.sentiment)}, accuracy ${pctW(w.accuracy)}.\n` +
       `Position component = average of 1 / position (1st = 1, 2nd = 0.5, 3rd = 0.33, not recommended = 0).\n` +
       `A missing component (e.g. no answer searched the web, so nothing could be cited) is left out and the remaining weights are re-normalised.\n\n` +
@@ -69,7 +69,7 @@ export const METRICS: MetricDefinition[] = [
       "The individual metrics are industry-standard (GEO tools and research use the same ones); the weighting is this project's own and versioned. " +
       "When the weights change, a new scoring version is created and the whole history is recalculated from the stored answers, so trends stay comparable.",
     example:
-      "Mentioned 62 %, recommended 62 %, cited 37 %, share of voice 19 %, position component 0.5, sentiment 0.80, accuracy 0.85 → " +
+      "Mentioned 62 %, in a recommendation list 62 %, cited 37 %, share of voice 19 %, position component 0.5, sentiment 0.80, accuracy 0.85 → " +
       "100 × (0.25·0.62 + 0.2·0.62 + 0.15·0.37 + 0.15·0.19 + 0.1·0.5 + 0.075·0.80 + 0.075·0.85) ≈ 54/100.",
     reading: "Compare the score with itself over time and across providers, not with scores from other tools — every vendor weighs differently.",
   },
@@ -77,7 +77,7 @@ export const METRICS: MetricDefinition[] = [
     id: "mention-rate",
     group: "visibility",
     name: "Mentioned",
-    short: "Share of AI answers to questions that do not name the brand where the answer names it (or its domain). The most basic visibility signal.",
+    short: "How often AI names the brand (or its domain) when the question does not contain it. The most basic visibility signal.",
     formula:
       "Mentioned = Σ weight of answers that mention the brand / Σ weight of all valid answers to unbranded questions\n\n" +
       "Weight of an answer = prompt importance (60 % business importance + 40 % commercial value) × provider reach. " +
@@ -121,7 +121,7 @@ export const METRICS: MetricDefinition[] = [
     formula: "Average position = weighted mean of the brand's position in recommendation lists (only answers where it is recommended)",
     description: "Readers pay most attention to the first items. The overall score uses 1 / position, so moving from 3rd to 1st triples that component.",
     example: "Positions 1, 2 and 3 in three answers → average 2.0.",
-    reading: "Always read it together with Recommended: position 1.0 in 2 % of answers is worse than position 2.5 in 60 %.",
+    reading: "Always read it together with In a recommendation list: position 1.0 in 2 % of answers is worse than position 2.5 in 60 %.",
   },
   {
     id: "share-of-voice",
@@ -140,14 +140,14 @@ export const METRICS: MetricDefinition[] = [
   {
     id: "brand-check",
     group: "visibility",
-    name: "Knows you (asked by name)",
+    name: "Named when asked by name",
     short: "Share of answers to questions that name the brand (“is X a good choice?”) where the answer actually talks about it.",
-    formula: "Knows you = Σ weight of answers that mention the brand / Σ weight of valid answers to questions naming the brand",
+    formula: "Named when asked by name = Σ weight of answers that mention the brand / Σ weight of valid answers to questions naming the brand",
     description:
       "Questions that already contain the brand say little about whether AI recommends it unprompted, so they are kept out of visibility. " +
-      "They show whether AI knows the brand and what it says about it — the sentiment and accuracy next to it.",
+      "They show whether AI has anything to say about the brand and what it says — the sentiment and accuracy next to it.",
     example: "50 answers to “is Se vezmou worth it?”, 42 describe the service → 84 %.",
-    reading: "Low values mean AI does not know the brand even when asked directly — work on the site and listings before anything else.",
+    reading: "Low values mean the answers do not talk about the brand even when asked directly — work on the site and listings before anything else.",
   },
   {
     id: "citation-share",
@@ -229,20 +229,21 @@ export const METRICS: MetricDefinition[] = [
   {
     id: "measurement-confidence",
     group: "reliability",
-    name: "Confidence",
+    name: "Certainty",
     short: "How certain the estimate for a prompt × provider is right now (0–100 %). It drops as time passes since the last answer.",
     formula:
-      "Confidence = 1 − (predicted standard deviation / standard deviation of a complete guess)\n" +
+      "Certainty = 1 − (predicted standard deviation / standard deviation of a complete guess)\n" +
       "The predicted uncertainty grows each day by the learned volatility of that prompt and provider, and shrinks with each new answer.",
-    description: "The planner spends the budget where confidence is lowest relative to the prompt's importance.",
+    description:
+      "The planner spends the budget where certainty is lowest relative to the prompt's importance. Not the same thing as the confidence interval of a rate.",
     example: "Freshly measured stable prompt → 60–80 %; not measured for weeks → towards 0 %.",
   },
   {
     id: "measurement-interval",
     group: "reliability",
-    name: "Interval",
+    name: "Re-check every",
     short: "How many days until a prompt × provider needs measuring again, learned from how volatile its answers are.",
-    formula: "Interval = (target variance − variance after measuring) / daily volatility, limited to 1–7 days for core prompts and 1–30 days for others",
+    formula: "Re-check every = (target variance − variance after measuring) / daily volatility, limited to 1–7 days for core prompts and 1–30 days for others",
     description: "Stable answers are measured rarely, volatile ones often. This is the main way the system saves money without losing information.",
     example: "Answers that rarely change → every 14 days; answers that flip often → daily.",
   },
@@ -285,7 +286,7 @@ export const METRICS: MetricDefinition[] = [
     short: "0–100 rating of the prompt portfolio: does it cover the business and give reliable data?",
     formula:
       "100 × (25 % topic coverage + 15 % intent coverage + 20 % commercial coverage + 15 % provider coverage " +
-      "+ 10 % (1 − prompt redundancy) + 15 % measurement confidence)",
+      "+ 10 % (1 − prompt redundancy) + 15 % certainty of the estimates)",
     description: "Below 60 the portfolio needs re-analysis: re-run discovery or regenerate prompts.",
     example: "All coverages 100 %, redundancy 0 %, confidence 33 % → 100 × (0.25 + 0.15 + 0.2 + 0.15 + 0.1 + 0.15 × 0.33) ≈ 90.",
   },

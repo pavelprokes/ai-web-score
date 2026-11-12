@@ -10,7 +10,7 @@
  *   prompts <domainId> [STATUS]          prompt portfolio
  *   measurements <domainId> [limit]      recent measurements with evidence
  *   action <domainId> <action> [json]    run-now | pause | resume | rediscover | regenerate-prompts |
- *                                        explore-prompts | optimize-portfolio | recalculate-schedule |
+ *                                        explore-prompts | optimize-portfolio | recalculate-schedule | reextract-signals |
  *                                        recalculate-scores | approve-proposals | reject-proposals
  *   providers                            AI providers, configurations, costs, value
  *   enable <providerId> | disable <providerId>

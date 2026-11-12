@@ -115,8 +115,13 @@ Done on the branch of that review (2026-11-12, tests and the cost simulation onl
   because pooled answers would read the missing zeros as a higher rate. After the switch check on production:
   answers per day by provider, and that woken cells return to the normal pace.
 - Perplexity takes one sample per cycle; a new cell starts at the measured prior 0.13.
+- Metric labels unified, "Not enough data" says what narrows it, `docs/ROADMAP.md` follows the plan's phases.
+- `pnpm prod:check` runs the production checks listed further down in one read-only pass with thresholds —
+  **never run against production yet**, so read its first output critically. The domain action
+  `reextract-signals` (API, `pnpm cli action <id> reextract-signals`) re-reads stored answers with the current
+  profile and rebuilds the score history without a new profile version: use it after the alias fix.
 - Not done: the domain × provider change detector (the planner has a simpler guard: at least three wake-ups
-  and 15 % of an assistant's quiet cells in a week suspend the slow pace), labels, `pnpm prod:check`,
+  and 15 % of an assistant's quiet cells in a week suspend the slow pace) and
   raw-response slimming. Recommendation diagnostics, the answer viewer and competitor counts still count
   answers one by one; give the diagnostics a per-cell reading before or with the switch to `geo-v3`, and do not
   switch a domain back to geo-v2 afterwards (its quiet cells are thinned).

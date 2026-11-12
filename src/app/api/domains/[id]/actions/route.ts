@@ -20,6 +20,7 @@ const Action = z.discriminatedUnion("action", [
   z.object({ action: z.literal("explore-prompts") }),
   z.object({ action: z.literal("optimize-portfolio") }),
   z.object({ action: z.literal("recalculate-schedule") }),
+  z.object({ action: z.literal("reextract-signals") }),
   z.object({ action: z.literal("recalculate-scores"), scoringVersion: z.string().optional(), weeks: z.number().int().min(0).max(104).default(12) }),
   z.object({ action: z.literal("approve-proposals"), ids: z.array(z.string()).optional() }),
   z.object({ action: z.literal("reject-proposals"), ids: z.array(z.string()).optional() }),
@@ -60,6 +61,11 @@ export const POST = adminRoute<{ id: string }>(async (req, { params, actor }) =>
     case "recalculate-schedule":
       // The schedule is derived from cell states; planning now re-evaluates every cell's value of information.
       await enqueue("measurement.plan", { domainId: id, trigger: "MANUAL" }, { dedupeKey: `plan:${id}` });
+      break;
+    case "reextract-signals":
+      // After a change to how the brand or competitors are matched (aliases, the matcher): re-read the stored
+      // answers with the current profile and rebuild the score history. LLM judgements are kept.
+      await enqueue("signals.reextract", { domainId: id }, { dedupeKey: `reextract:${id}:manual` });
       break;
     case "recalculate-scores": {
       const { getDb } = await import("@/db");
