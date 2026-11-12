@@ -186,9 +186,11 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
         role: (p.role ?? "ROTATING") as PromptRole,
         promptWeight: 0.6 * v.importance + 0.4 * v.commercialValue,
         providerWeight: 0.25 + (0.75 * reach) / maxReach,
-        state: stateOf.get(`${v.id}|${c.id}`) ?? initialCellState(0.3, v.expectedVolatility),
+        state: stateOf.get(`${v.id}|${c.id}`) ?? initialCellState(undefined, v.expectedVolatility),
         costPerSample: costOf(c),
         coreProvider: reach >= 0.1 || reach === maxReach,
+        maxSamples: getProvider(c.providerId).sampling?.maxSamplesPerCycle,
+        quietIntervalDays: getProvider(c.providerId).sampling?.quietIntervalDays,
       });
     }
   }

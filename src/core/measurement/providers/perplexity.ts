@@ -156,6 +156,9 @@ export const perplexityApi: ProviderAdapter = {
   kind: "OFFICIAL_API",
   requiredEnv: ["PERPLEXITY_API_KEY"],
   defaultReach: 0.05,
+  // A repeat within a cycle is close to a copy (cited-domain Jaccard 0.74, a third of the expected
+  // disagreement; RESEARCH §7.3), so it buys almost no information.
+  sampling: { maxSamplesPerCycle: 1 },
   warnings: ["Consumer perplexity.ai uses its own routing; the `fast` preset is Perplexity's documented replacement for Sonar / Sonar Pro."],
   mode: "SYNC",
   configurations: [

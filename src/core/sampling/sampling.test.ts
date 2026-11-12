@@ -3,6 +3,7 @@ import {
   type CellState,
   confidence,
   initialCellState,
+  isQuietCell,
   PRIOR_VARIANCE,
   predictedVariance,
   recommendedIntervalDays,
@@ -10,7 +11,7 @@ import {
   updateCell,
 } from "./cell-state";
 import { rng } from "../scoring/stats";
-import { cycleBudget, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS } from "./planner";
+import { cycleBudget, minIntervalOf, type PlanCell, planCycle, DEFAULT_PLAN_OPTIONS } from "./planner";
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, 1 + n, 6));
 
@@ -190,6 +191,57 @@ describe("VOI planner", () => {
       cell({ cellKey: k, role: "CORE", providerWeight: 0.28, coreProvider: false, costPerSample: 0.05, state: measured(daysAgo) });
     const plan = planCycle([lowReach("recent", 10), lowReach("stale", 30)], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 1 });
     expect(plan.items.map((i) => [i.cellKey, i.reason])).toEqual([["stale", "CORE_GUARANTEE"]]);
+  });
+
+  describe("quiet cells (brand absent for a long run of answers)", () => {
+    // Ten answers without the brand, one a day, the last one `daysAgo` days before `now`.
+    const quiet = (daysAgo: number) => feed(initialCellState(), Array(10).fill(0), 10 - daysAgo - 9);
+    // Priced like a UI capture: at this price the value floors do not hold a confident cell back.
+    const cheap = (over: Parameters<typeof cell>[0]) => cell({ costPerSample: 0.0012, promptWeight: 1, ...over });
+    const opts = { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 };
+
+    it("needs eight answers and an estimate near zero", () => {
+      expect(isQuietCell(feed(initialCellState(), Array(7).fill(0)))).toBe(false);
+      expect(isQuietCell(feed(initialCellState(), Array(8).fill(0)))).toBe(true);
+      expect(isQuietCell(feed(initialCellState(), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(false);
+    });
+
+    it("are re-measured weekly with a single answer", () => {
+      expect(planCycle([cheap({ cellKey: "q", state: quiet(2) })], opts).items).toEqual([]);
+      expect(planCycle([cheap({ cellKey: "q", state: quiet(6) })], opts).items).toEqual([]);
+      const due = planCycle([cheap({ cellKey: "q", state: quiet(8) })], opts).items;
+      expect(due.map((i) => [i.cellKey, i.samples])).toEqual([["q", 1]]);
+    });
+
+    it("follow the provider's own pace when it sets one", () => {
+      const c = (daysAgo: number) => cheap({ cellKey: "q", state: quiet(daysAgo), quietIntervalDays: 3 });
+      expect(planCycle([c(2)], opts).items).toEqual([]);
+      expect(planCycle([c(4)], opts).items.map((i) => i.samples)).toEqual([1]);
+    });
+
+    it("return to the normal pace after one answer that shows the brand", () => {
+      const woke = feed(quiet(2), [1], 9);
+      expect(isQuietCell(woke)).toBe(false);
+      expect(minIntervalOf(cheap({ cellKey: "w", state: woke }), DEFAULT_PLAN_OPTIONS)).toBe(DEFAULT_PLAN_OPTIONS.minIntervalDays);
+      expect(minIntervalOf(cheap({ cellKey: "q", state: quiet(2) }), DEFAULT_PLAN_OPTIONS)).toBe(7);
+    });
+
+    it("keep the core guarantee", () => {
+      const core = cheap({ cellKey: "core", role: "CORE", state: quiet(8) });
+      expect(planCycle([core], opts).items.map((i) => i.reason)).toEqual(["CORE_GUARANTEE"]);
+    });
+
+    it("are still measured by a manual run", () => {
+      const plan = planCycle([cheap({ cellKey: "q", state: quiet(1) })], { ...opts, minIntervalDays: 0 });
+      expect(plan.items.map((i) => i.cellKey)).toEqual(["q"]);
+    });
+  });
+
+  it("honours a provider's cap on samples per cycle", () => {
+    const capped = planCycle([cell({ cellKey: "p", maxSamples: 1 })], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 });
+    const free = planCycle([cell({ cellKey: "p" })], { ...DEFAULT_PLAN_OPTIONS, now, budgetUsd: 10 });
+    expect(capped.items.map((i) => i.samples)).toEqual([1]);
+    expect(free.items[0]!.samples).toBeGreaterThan(1);
   });
 
   it("paces the monthly budget across remaining cycles", () => {

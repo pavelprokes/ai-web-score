@@ -333,7 +333,7 @@ async function updateCellState(domainId: string, promptVersionId: string, config
     .from(cellStates)
     .where(and(eq(cellStates.domainId, domainId), eq(cellStates.promptVersionId, promptVersionId), eq(cellStates.configurationId, configurationId)));
   const [pv] = await db.select().from(promptVersions).where(eq(promptVersions.id, promptVersionId));
-  const prev = (row?.state as CellState | undefined) ?? initialCellState(0.3, pv?.expectedVolatility ?? 0.5);
+  const prev = (row?.state as CellState | undefined) ?? initialCellState(undefined, pv?.expectedVolatility ?? 0.5);
   const { state } = updateCell(prev, [presence], at);
   const [p] = await db.execute(sql`select role from prompts where id = ${pv?.promptId ?? ""}`);
   const role = ((p?.role as PromptRole | null) ?? "ROTATING") as PromptRole;

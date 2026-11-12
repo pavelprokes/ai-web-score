@@ -2,6 +2,7 @@ import type { PromptRole } from "../prompt";
 import {
   type CellState,
   daysBetween,
+  isQuietCell,
   posteriorVarianceAfter,
   predictedVariance,
   recommendedIntervalDays,
@@ -33,6 +34,13 @@ export interface PlanCell {
   costPerSample: number;
   /** Provider configuration is one of the domain's "important" providers (core coverage). */
   coreProvider: boolean;
+  /**
+   * Cap on samples of this cell in one cycle (below `maxSamplesPerCell`). For providers whose repeats
+   * within a cycle are near copies of the first answer and so carry little new information.
+   */
+  maxSamples?: number;
+  /** Days between two measurements while the cell is quiet (`isQuietCell`); default `quietIntervalDays`. */
+  quietIntervalDays?: number;
 }
 
 export interface PlanOptions {
@@ -45,6 +53,11 @@ export interface PlanOptions {
   minVarianceReduction: number;
   /** Minimum days between two measurements of the same cell (unless a change was detected). */
   minIntervalDays: number;
+  /**
+   * Minimum days between two measurements of a quiet cell — one where the brand has not appeared for a
+   * long run of answers. Kept at or below `coreMaxIntervalDays`, so the core guarantee still holds.
+   */
+  quietIntervalDays: number;
   /** Core prompts on core providers must be measured at least this often. */
   coreMaxIntervalDays: number;
   /**
@@ -65,6 +78,7 @@ export const DEFAULT_PLAN_OPTIONS: Omit<PlanOptions, "now" | "budgetUsd"> = {
   explorationBudgetShare: 0.15,
   minVarianceReduction: 0.0015,
   minIntervalDays: 0.9,
+  quietIntervalDays: 7,
   coreMaxIntervalDays: 7,
   nonCoreProviderMaxIntervalDays: 28,
   minValuePerDollar: 0.3,
@@ -124,7 +138,21 @@ function eligible(cell: PlanCell, opts: PlanOptions): boolean {
   const since = daysBetween(cell.state.lastObservedAt, opts.now);
   const recentChange =
     cell.state.changeDetectedAt !== null && daysBetween(cell.state.changeDetectedAt, opts.now) < 3;
-  return since >= opts.minIntervalDays || recentChange;
+  return since >= minIntervalOf(cell, opts) || recentChange;
+}
+
+/** Days that must pass before the cell is measured again: longer while it is quiet. */
+export function minIntervalOf(cell: PlanCell, opts: Pick<PlanOptions, "minIntervalDays" | "quietIntervalDays">): number {
+  if (!isQuietCell(cell.state)) return opts.minIntervalDays;
+  // A manual run sets the minimum to 0 and measures everything; do not hold quiet cells back then.
+  if (opts.minIntervalDays === 0) return 0;
+  return Math.max(opts.minIntervalDays, cell.quietIntervalDays ?? opts.quietIntervalDays);
+}
+
+function sampleCap(cell: PlanCell, opts: PlanOptions): number {
+  // A quiet cell is re-checked with one answer: a repeat adds nothing to "still not there".
+  if (isQuietCell(cell.state)) return 1;
+  return Math.min(opts.maxSamplesPerCell, cell.maxSamples ?? opts.maxSamplesPerCell);
 }
 
 function coreGuaranteeDue(cell: PlanCell, opts: PlanOptions): boolean {
@@ -180,7 +208,7 @@ export function planCycle(cells: PlanCell[], opts: PlanOptions): Plan {
   const heap = new MaxHeap<{ cell: PlanCell; k: number; value: number; ratio: number }>((x) => x.ratio);
   for (const cell of pool) {
     const k = (taken.get(cell.cellKey)?.samples ?? 0) + 1;
-    if (k > opts.maxSamplesPerCell) continue;
+    if (k > sampleCap(cell, opts)) continue;
     const value = marginalValue(cell, now, k);
     heap.push({ cell, k, value, ratio: value / cell.costPerSample });
   }
@@ -195,7 +223,7 @@ export function planCycle(cells: PlanCell[], opts: PlanOptions): Plan {
     if (cell.role === "EXPLORATION" && explorationSpent + cell.costPerSample > explorationCap) continue;
     take(cell, "VALUE_OF_INFORMATION", value);
     const nextK = k + 1;
-    if (nextK <= opts.maxSamplesPerCell) {
+    if (nextK <= sampleCap(cell, opts)) {
       const nextValue = marginalValue(cell, now, nextK);
       heap.push({ cell, k: nextK, value: nextValue, ratio: nextValue / cell.costPerSample });
     }
@@ -235,7 +263,8 @@ export function cycleBudget(args: {
 /** Human-readable schedule hint per cell — the learned frequency shown in the admin. */
 export function cellScheduleHint(cell: PlanCell, now: Date) {
   const target = TARGET_SD[cell.role] ** 2;
-  const interval = recommendedIntervalDays(cell.state, target, { min: 1, max: cell.role === "CORE" ? 7 : 30 });
+  const learned = recommendedIntervalDays(cell.state, target, { min: 1, max: cell.role === "CORE" ? 7 : 30 });
+  const interval = Math.max(learned, minIntervalOf(cell, DEFAULT_PLAN_OPTIONS));
   return {
     predictedSd: Math.sqrt(predictedVariance(cell.state, now)),
     recommendedIntervalDays: interval,
