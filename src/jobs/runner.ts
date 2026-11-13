@@ -38,7 +38,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "recommendations.generate": (p) => generateRecommendations(s(p.domainId)),
   "signals.reextract": (p) => reextractSignals(s(p.domainId), p.after ? s(p.after) : null),
   "sources.classify": () => classifyCitedHosts(),
-  "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false }),
+  "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false, recheck: p.recheck === true }),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
@@ -222,7 +222,8 @@ async function tick() {
   const checked = await db
     .selectDistinct({ domainId: siteSnapshots.domainId })
     .from(siteSnapshots)
-    .where(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)));
+    // A 24 h re-check is not the weekly check: counting it would push the week forward by a day each time.
+    .where(and(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)), sql`coalesce((${siteSnapshots.robots}->>'recheck')::boolean, false) = false`));
   const siteFresh = new Set(checked.map((r) => r.domainId));
   // A check that keeps failing must not hold the recommendations back for good: past twice the interval they are
   // written from the last snapshot (or the discovery crawl) anyway.

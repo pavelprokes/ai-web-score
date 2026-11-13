@@ -650,9 +650,16 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await schedulerTick();
       expect((await jobs()).filter((j) => j.status === "QUEUED").map((j) => j.dedupeKey).sort()).toEqual(all);
 
-      // A domain whose website was not checked this week gets the check, which queues the recommendations itself.
+      // A domain whose website was not checked this week gets the check, which queues the recommendations itself. A
+      // 24 h re-check is not the weekly check.
       await db.delete(s.jobs).where(inArray(s.jobs.type, ["recommendations.generate", "site.check"]));
       await db.execute(sql`update site_snapshots set created_at = now() - interval '8 days' where domain_id = ${demo!.id}`);
+      snapshots.push(
+        ...(await db
+          .insert(s.siteSnapshots)
+          .values({ domainId: demo!.id, checkVersion: 1, robots: { status: 404, groups: [], recheck: true }, pages: [] })
+          .returning({ id: s.siteSnapshots.id })),
+      );
       await schedulerTick();
       expect(await keys()).toEqual(all.filter((k) => !k.includes(demo!.id)));
       const checks = await db.select().from(s.jobs).where(eq(s.jobs.type, "site.check"));
@@ -669,7 +676,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
     const { checkSite, latestSiteSnapshot } = await import("@/services/site-check");
-    const { generateRecommendations, latestRecommendations } = await import("@/services/recommendations");
+    const { generateRecommendations, latestRecommendations, setRecommendationStatus } = await import("@/services/recommendations");
     const { KEEP_SNAPSHOTS } = await import("@/core/site/check");
     const db = getDb();
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
@@ -711,6 +718,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(JSON.stringify(snap).length).toBeLessThan(20_000);
       expect(JSON.stringify(snap)).not.toContain("slovo slovo");
 
+      // /kurzy has noindex: seen once, so "possible", and the site is checked again in 24 hours.
+      expect(result.recheckQueued).toBe(true);
+      const [recheck] = await db.select().from(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`));
+      expect(recheck!.payload).toMatchObject({ domainId: demo!.id, recheck: true });
+      const hours = (recheck!.runAt.getTime() - Date.now()) / 3600_000;
+      expect(hours).toBeGreaterThan(23.9);
+      expect(hours).toBeLessThan(24.1);
+
       // The recommendations read the snapshot: no live robots.txt request, the blocked section is found.
       requests.length = 0;
       await generateRecommendations(demo!.id);
@@ -718,6 +733,30 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       const set = (await latestRecommendations(demo!.id))!.set;
       const robots = (set.diagnostics as Array<{ key: string; evidence: { blockedPaths?: string[] } }>).find((f) => f.key === "robots:OAI-SearchBot");
       expect(robots?.evidence.blockedPaths).toEqual(["/kurzy"]);
+      const state = async () =>
+        ((await latestRecommendations(demo!.id))!.set.diagnostics as Array<{ key: string; evidence: { state?: string } }>).find((f) => f.key === "eligibility:noindex")?.evidence
+          .state;
+      expect(await state()).toBe("possible");
+
+      // A second check minutes later (a double Refresh) does not confirm it.
+      await checkSite(demo!.id, { thenRecommend: false });
+      await generateRecommendations(demo!.id);
+      expect(await state()).toBe("possible");
+      // The owner dismisses the possible finding…
+      const noindexItem = async () =>
+        (await latestRecommendations(demo!.id))!.items.find((i) => (i.findingKeys as string[]).includes("eligibility:noindex"))!;
+      await setRecommendationStatus((await noindexItem()).id, "DISMISSED");
+
+      // …the re-check a day later sees it again: confirmed, the dismissal of the weaker claim no longer holds, and a
+      // re-check does not schedule another.
+      await db.execute(sql`update site_snapshots set created_at = created_at - interval '25 hours' where domain_id = ${demo!.id}`);
+      await db.delete(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`));
+      expect((await checkSite(demo!.id, { thenRecommend: false, recheck: true })).recheckQueued).toBe(false);
+      await generateRecommendations(demo!.id);
+      expect(await state()).toBe("confirmed");
+      expect((await noindexItem()).status).toBe("OPEN");
+      expect((await latestSiteSnapshot(demo!.id))!.robots).toMatchObject({ recheck: true, origin: "https://kodovani-pro-deti.example" });
+      expect(await db.select().from(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`))).toHaveLength(0);
 
       // A gallery site is checked on its homepage only.
       await db.update(s.domains).set({ siteCheckHomepageOnly: true }).where(eq(s.domains.id, demo!.id));
@@ -733,6 +772,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     } finally {
       globalThis.fetch = realFetch;
       await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+      await db.delete(s.jobs).where(inArray(s.jobs.type, ["site.check", "recommendations.generate"]));
     }
   });
 

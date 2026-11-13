@@ -97,8 +97,8 @@ and the team meeting on phases B and C (`docs/meetings/2026-11-13-phases-b-c-tea
 reviews 50 LLM-labelled hosts, ≤ 5 wrong). B1 `site.check` is merged as #79 (migration 0014 `site_snapshots` and `domains.site_check_homepage_only`, set for the
 photos site;
 on production: one snapshot per ACTIVE domain within a day of the deploy, ≤ 20 kB each, `select domain_id,
-pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). Next, in order: B2 eligibility findings
-(possible / confirmed, 24 h re-check) → "Fixed on the site" + B3 → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
+pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). B2 site findings (possible / confirmed, 24 h
+re-check) are in the PR after #80. Next, in order: "Fixed on the site" + B3 → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
 Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
 carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 

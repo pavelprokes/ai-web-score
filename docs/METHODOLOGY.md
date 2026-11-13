@@ -230,6 +230,17 @@ On demand per domain (domain page → Recommendations, or `POST /api/domains/{id
    not read keep the discovery crawl's facts (no finding from a page that did not answer). The check runs before the
    weekly recommendations and before every manual Refresh, and queues them; recommendations older than 14 days are
    written without a new check if checks keep failing.
+   **Site findings** (`src/core/site/findings.ts`, one key per check type, the pages in the evidence): noindex (or
+   `none`) for Googlebot, nosnippet / max-snippet:0, max-snippet under 160, text only after JavaScript (< 50 words
+   **and** an app-shell marker), a canonical pointing elsewhere, a bot challenge (information only: a firewall may still
+   let verified crawlers through). Directives come from meta robots, meta googlebot and `X-Robots-Tag` (parts scoped
+   to another bot are skipped; the most restrictive max-snippet counts). A bot challenge's own page is never read as
+   the site's, even with status 200. A page hitting a rule in one check is *possible* (noindex / nosnippet 0.5,
+   JavaScript-only 0.5) and the site is checked again in 24 hours; hitting it in two checks at least 20 hours apart it
+   is *confirmed* (0.8, 0.7) — a double Refresh is one look. A page the latest check could not read keeps what the
+   previous check saw (as possible). A re-check does not schedule another, does not count as the weekly check, and is
+   skipped for a domain paused meanwhile. A Done / Dismissed taken on a possible finding no longer holds once it is
+   confirmed. Schema findings stay ≤ 0.3 (Google: structured data is not needed for its AI features).
 1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
    digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per

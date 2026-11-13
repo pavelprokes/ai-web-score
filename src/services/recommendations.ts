@@ -23,7 +23,8 @@ import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { storedHostLabels } from "@/services/host-types";
-import { latestSiteSnapshot } from "@/services/site-check";
+import { RECENT_FOR_CONFIRMATION, recentSiteSnapshots } from "@/services/site-check";
+import { confirmingSnapshot, findingStates } from "@/core/site/findings";
 import { digestFromSnapshot, robotsText } from "@/core/site/check";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
@@ -62,7 +63,8 @@ async function collectFindings(domainId: string) {
   if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
-  const [answers, clusters, snapshot] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), latestSiteSnapshot(domainId)]);
+  const [answers, clusters, snapshots] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), recentSiteSnapshots(domainId, RECENT_FOR_CONFIRMATION)]);
+  const snapshot = snapshots[0] ?? null;
   const hostLabels = await storedHostLabels(answers.flatMap((a) => a.signals.citedDomains));
   // The weekly site check is the website's state; before the first one, robots.txt is fetched live and the pages come
   // from the discovery crawl (which only changes on a re-discovery).
@@ -82,6 +84,7 @@ async function collectFindings(domainId: string) {
     providerLabels: providerLabels(),
     ignoredCompetitors: domain.ignoredCompetitors,
     hostLabels,
+    site: snapshot ? { latest: snapshot, previous: confirmingSnapshot(snapshots) } : undefined,
   });
   return { domain, profile, answers, clusters, findings };
 }
@@ -97,7 +100,7 @@ export async function generateRecommendations(domainId: string) {
     findings.length === 0 ? { summary: "No issues found in the current data.", items: [], model: null } : await writePlan(domainId, profile, findings, answers.length);
   await throwIfJobCancelled();
 
-  const decided = await ownerDecisions(domainId);
+  const decided = await ownerDecisions(domainId, findingStates(findings));
   const [set] = await db
     .insert(recommendationSets)
     .values({
@@ -147,7 +150,12 @@ const itemId = (keys: string[]) => [...keys].sort().join("|");
  * can still contain answers from before the fix: still there after that, it was not fixed and comes back open.
  * Done on a website finding (crawl, robots.txt, llms.txt) holds until the owner reopens it.
  */
-async function ownerDecisions(domainId: string) {
+async function ownerDecisions(domainId: string, states: Map<string, string> = new Map()) {
+  // A Done / Dismissed taken while a site finding was only "possible" does not hold once it is confirmed: the owner
+  // decided on a weaker claim (B2). Read each set's site-finding states to know what the decision was about.
+  const sets = await getDb().select({ id: recommendationSets.id, diagnostics: recommendationSets.diagnostics }).from(recommendationSets).where(eq(recommendationSets.domainId, domainId));
+  const possibleIn = new Map(sets.map((x) => [x.id, new Set([...findingStates((x.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? [])].filter(([, st]) => st === "possible").map(([k]) => k))]));
+  const escalated = (setId: string, keys: string[]) => keys.some((k) => states.get(k) === "confirmed" && possibleIn.get(setId)?.has(k));
   const rows = await getDb()
     .select({ setId: recommendations.setId, findingKeys: recommendations.findingKeys, status: recommendations.status, statusChangedAt: recommendations.statusChangedAt })
     .from(recommendations)
@@ -168,7 +176,8 @@ async function ownerDecisions(domainId: string) {
   for (const r of rows) {
     if (!r.statusChangedAt) continue;
     const keys = r.findingKeys as string[];
-    const expired = r.status === "DONE" && r.statusChangedAt.getTime() < cutoff && keys.some((k) => ANSWER_BASED.test(k));
+    const expired =
+      (r.status === "DONE" && r.statusChangedAt.getTime() < cutoff && keys.some((k) => ANSWER_BASED.test(k))) || escalated(r.setId, keys);
     const decision = r.status === "OPEN" || expired ? null : { status: r.status, statusChangedAt: r.statusChangedAt };
     if (!byItem.has(itemId(keys))) byItem.set(itemId(keys), decision);
     for (const k of keys) if (!byKey.has(k) && !(decision && openIn.get(r.setId)?.has(k))) byKey.set(k, decision);

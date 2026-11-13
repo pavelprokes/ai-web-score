@@ -8,7 +8,7 @@
  */
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
-import type { CrawlDigest } from "../discovery/crawl";
+import { type CrawlDigest, siteHost } from "../discovery/crawl";
 import { AI_AGENTS } from "../recommendations/ai-agents";
 import { parseRobots, productToken, type RobotsGroup, robotsPath } from "../recommendations/robots";
 
@@ -54,10 +54,19 @@ export interface PageCheck {
 }
 
 export interface SiteSnapshotData {
-  /** robots.txt status (null = no answer) and the groups that concern AI agents or `*`. */
-  robots: { status: number | null; groups: RobotsGroup[] };
+  /**
+   * robots.txt status (null = no answer) and the groups that concern AI agents or `*`. Also the check's site-level
+   * facts: the origin the pages were fetched from (after the homepage's redirect) and whether it was a 24 h re-check.
+   */
+  robots: { status: number | null; groups: RobotsGroup[]; origin?: string; recheck?: boolean };
   pages: PageCheck[];
 }
+
+/** A page whose answer can be read: it answered 2xx and was not a bot-protection challenge. */
+export const answered = (p: PageCheck) => p.status !== null && p.status < 300 && !p.challenge;
+
+/** Markers of a page that only renders in the browser — not the platform names, which also serve static HTML. */
+export const APP_SHELL_MARKER = /^(empty #|asks to enable JavaScript)/;
 
 const clean = (s: string, max: number) => s.replace(/[\s\0]+/g, " ").trim().slice(0, max).replace(/[\ud800-\udbff]$/, "");
 
@@ -155,7 +164,7 @@ export function robotsText(groups: RobotsGroup[]): string {
  * slash go, and www. and the bare host are one page. `homepageOnly` keeps just the homepage.
  */
 export function selectPages(origin: string, navigation: string[], citedPages: string[], opts: { homepageOnly?: boolean; priority: RegExp }): string[] {
-  const bare = (h: string) => h.toLowerCase().replace(/^www\./, "");
+  const bare = siteHost;
   const host = bare(new URL(origin).hostname);
   const parse = (u: string) => {
     try {
@@ -191,7 +200,6 @@ export function selectPages(origin: string, navigation: string[], citedPages: st
  * could not read keep the crawl's structured data; and a snapshot where nothing answered changes nothing.
  */
 export function digestFromSnapshot(snapshot: SiteSnapshotData, origin: string, base: CrawlDigest | null): CrawlDigest | null {
-  const answered = (p: PageCheck) => p.status !== null && p.status < 300;
   const ok = snapshot.pages.filter(answered);
   if (ok.length === 0) return base;
   const home = snapshot.pages[0];

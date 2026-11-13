@@ -5,6 +5,8 @@ import { competitorHostTest, nameKey, suggestCompetitors } from "../competitors"
 import { AI_AGENTS, type AiAgent } from "./ai-agents";
 import { type HostLabel, KIND_LABEL, labelHost, trustedLabel } from "../sources/host-types";
 import { isAllowed, parseRobots, robotsPath, rulesFor } from "./robots";
+import type { SiteSnapshotData } from "../site/check";
+import { siteFindings } from "../site/findings";
 
 /**
  * RECOMMENDATIONS — step 1: deterministic diagnostics. Pure functions over what we already know about a
@@ -77,6 +79,8 @@ export interface DiagnosticsInput {
   ignoredCompetitors?: string[];
   /** Stored source-type labels (LLM and manual), keyed by host; seed and rule labels come from code. */
   hostLabels?: ReadonlyMap<string, HostLabel>;
+  /** The latest weekly site check and the one before it (absent before the first check). */
+  site?: { latest: SiteSnapshotData; previous: SiteSnapshotData | null };
 }
 
 // ─── robots.txt ──────────────────────────────────────────────────────────────
@@ -131,6 +135,7 @@ export function diagnose(input: DiagnosticsInput): Finding[] {
   const unbranded = { ...input, answers: input.answers.filter((a) => !a.branded) };
   const findings: Finding[] = [
     ...crawlerAccess(input),
+    ...(input.site ? siteFindings(input.site.latest, input.site.previous, input.hostname) : []),
     ...structuredData(input),
     ...topicGaps(unbranded),
     ...citationSources(unbranded),
@@ -221,7 +226,8 @@ function structuredData({ digest, profile }: DiagnosticsInput): Finding[] {
     out.push({
       key: "schema:organization",
       category: "TECHNICAL",
-      severity: 0.45,
+      // ≤ 0.3: Google says structured data is not needed for its AI features (team, 2026-11-13).
+      severity: 0.3,
       title: "No Organization / LocalBusiness structured data",
       detail: `None of the ${pages.length} crawled pages declares who the company is (schema.org Organization or LocalBusiness), so assistants infer name, location and contact details from free text.`,
       evidence: { crawledPages: pages.length, jsonLdTypes: [...types] },
@@ -243,7 +249,7 @@ function structuredData({ digest, profile }: DiagnosticsInput): Finding[] {
     out.push({
       key: "schema:offerings",
       category: "TECHNICAL",
-      severity: 0.35,
+      severity: 0.25,
       title: "Offerings have no Product / Service structured data",
       detail: `The profile lists ${profile.offerings.length} offerings, but no crawled page marks them up (Product, Service, Offer), which makes prices and features harder to quote correctly.`,
       evidence: { offerings: profile.offerings.slice(0, 8).map((o) => o.name), jsonLdTypes: [...types] },
