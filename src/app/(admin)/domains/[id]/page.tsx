@@ -567,7 +567,12 @@ function ScoreTiles({ detail }: { detail: Detail }) {
             {" "}
             Window ends <TimeAgo date={detail.scores.windowEnd} />.
           </>
-        )}
+        )}{" "}
+        Scoring version{" "}
+        <Link href={`/metrics#version-${detail.domain.scoringVersion}`} prefetch={false}>
+          {detail.domain.scoringVersion}
+        </Link>
+        .
       </p>
     </>
   );

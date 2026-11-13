@@ -1242,6 +1242,17 @@ code {
   margin: 0;
   max-width: 75ch;
 }
+/* A dt/dd pair wrapped in a div stays in the grid of the list. */
+.metric-card__version {
+  display: contents;
+}
+.metric-card__fields ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.metric-card__fields li + li {
+  margin-top: 0.35rem;
+}
 .formula {
   margin: 0;
   padding: 0.6rem 0.75rem;

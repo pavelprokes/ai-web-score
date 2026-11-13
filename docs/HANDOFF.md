@@ -123,6 +123,10 @@ reachable, so nothing below is verified there):
   **never run against production yet**, so read its first output critically. The domain action
   `reextract-signals` (API, `pnpm cli action <id> reextract-signals`) re-reads stored answers with the current
   profile and rebuilds the score history without a new profile version: use it after the alias fix.
+- The scoring versions are described in one place each: the table at the top of METHODOLOGY §6, a "Scoring
+  versions" section on the admin's Metrics page (what each changed, why, which domains use it) with "Under
+  geo-v3" notes on the metrics it calculates differently, and the version named under the score tiles of every
+  domain page. There is still no switch in the admin: the version is set through the API.
 - Not done: the domain × provider change detector (the planner has a simpler guard: at least three wake-ups
   and 15 % of an assistant's quiet cells in a week suspend the slow pace) and
   raw-response slimming. Recommendation diagnostics, the answer viewer and competitor counts still count
