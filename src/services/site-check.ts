@@ -11,6 +11,7 @@ import {
   type SiteSnapshotData,
 } from "@/core/site/check";
 import { confirmingSnapshot, needsRecheck, siteFindings } from "@/core/site/findings";
+import { siteChanges } from "@/core/site/changes";
 import { getDb } from "@/db";
 import { domains, siteSnapshots } from "@/db/schema";
 import { enqueue, PermanentJobError } from "@/jobs/queue";
@@ -43,6 +44,11 @@ export async function recentSiteSnapshots(domainId: string, n = 2): Promise<Site
 /** The latest site check of a domain, or null before the first one. */
 export async function latestSiteSnapshot(domainId: string): Promise<SiteSnapshot | null> {
   return (await recentSiteSnapshots(domainId, 1))[0] ?? null;
+}
+
+/** Critical website changes of the last 30 days (B4), from the kept snapshots; computed when read. */
+export async function recentSiteChanges(domainId: string, now = new Date()) {
+  return siteChanges(await recentSiteSnapshots(domainId, KEEP_SNAPSHOTS), now);
 }
 
 /** When the domain's website was last checked (the page shows it; no need to read the snapshot). */

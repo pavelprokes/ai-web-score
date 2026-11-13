@@ -28,6 +28,8 @@ export interface AttentionInput {
   recommendationsOutOfDate: boolean;
   /** Brands named by AI that are not tracked (the service caps the list, so its length is not a count). */
   suggestions: string[];
+  /** Critical website changes found by the site checks (src/core/site/changes.ts), newest first. */
+  siteChanges?: Array<{ at: Date; text: string }>;
   providerLabel: (id: string) => string;
 }
 
@@ -106,6 +108,10 @@ export function attentionItems(input: AttentionInput): AttentionItem[] | null {
   for (const e of input.errors) {
     const text = ERROR_TEXT[e.kind]?.(input.providerLabel(e.providerId), e.count);
     if (text) items.push({ kind: "fix", text, section: "failed-heading", link: "Provider errors" });
+  }
+  // Website changes that can break what assistants see, dated, past tense (copywriter): at most three lines.
+  for (const c of (input.siteChanges ?? []).slice(0, 3)) {
+    items.push({ kind: "fix", text: `${dateFmt.format(c.at)}: ${c.text}.`, section: "recommendations-heading", link: "Recommendations" });
   }
   const run = input.runs.find((r) => r.kind === "MEASUREMENT" && r.status !== "RUNNING");
   // Most runs lose a few answers and end as "Partial"; only a fifth or more is worth a look.

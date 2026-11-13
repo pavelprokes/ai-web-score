@@ -253,6 +253,11 @@ On demand per domain (domain page → Recommendations, or `POST /api/domains/{id
    could have seen it, it is listed under "Fixed on the site". A check counts only when it really looked: robots.txt
    read (2xx / 4xx), the affected page re-read (not carried over), or every selected page read for structured data.
    The owner's latest decision per item wins. The effect on answers is not claimed (B5 waits for geo-v3).
+   **Website changes (B4, `src/core/site/changes.ts`):** computed when read from the kept snapshots; critical only — a
+   page became noindex or nosnippet, a page that answered now fails, structured data removed, a search or grounding
+   agent newly blocked. A change counts when two consecutive checks agree on the new state and the check before had
+   the old one (none from the first check or a page a check could not read). The last 30 days are shown as dated
+   lines in "Needs your attention" (at most three); chart markers wait for the Phase 1 composition markers.
 1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
    digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per

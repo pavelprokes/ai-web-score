@@ -5,7 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
-import { lastSiteCheckAt } from "@/services/site-check";
+import { lastSiteCheckAt, recentSiteChanges } from "@/services/site-check";
 import { competitorStandings, type KindShareRow, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { KIND_LABEL, type SourceKind } from "@/core/sources/host-types";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
@@ -56,7 +56,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus, changes] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -69,6 +69,7 @@ export default async function DomainPage({
     searchQueriesFor(id),
     lastSiteCheckAt(id),
     websiteFixStatus(id),
+    recentSiteChanges(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -89,6 +90,7 @@ export default async function DomainPage({
     autoApply: d.autoApprovePortfolioChanges,
     recommendationsOutOfDate: !!recs && recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now),
     suggestions: suggestions.map((c) => c.name),
+    siteChanges: changes,
     providerLabel,
   });
   const open = (section: string) => opensSection(attention, section);

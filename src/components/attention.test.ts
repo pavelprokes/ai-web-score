@@ -187,3 +187,13 @@ describe("attentionItems", () => {
     expect(out!.map((i) => i.kind)).toEqual(["fix", "down", "budget", "decide"]);
   });
 });
+
+describe("attentionItems: website changes", () => {
+  it("lists critical website changes as dated lines pointing to the recommendations, at most three", () => {
+    const at = new Date("2026-11-11T09:00:00Z");
+    const changes = ["/cenik now has noindex", "/ lost its structured data (JSON-LD)", "/kurzy now answers HTTP 404", "/o-nas now has nosnippet"].map((text) => ({ at, text }));
+    const found = items({ siteChanges: changes })!.filter((i) => i.section === "recommendations-heading");
+    expect(found.map((i) => i.text)).toEqual(["11 Nov: /cenik now has noindex.", "11 Nov: / lost its structured data (JSON-LD).", "11 Nov: /kurzy now answers HTTP 404."]);
+    expect(found.every((i) => i.kind === "fix" && i.link === "Recommendations")).toBe(true);
+  });
+});
