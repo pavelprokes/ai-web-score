@@ -197,3 +197,12 @@ describe("attentionItems: website changes", () => {
     expect(found.every((i) => i.kind === "fix" && i.link === "Recommendations")).toBe(true);
   });
 });
+
+describe("attentionItems: share among tracked rivals", () => {
+  it("asks to track the untracked brand AI names most, instead of the general suggestion line", () => {
+    const found = items({ suggestions: ["Bridge Academy", "Logiscool"], rivalsCaveat: { name: "Bridge Academy", answers: 9 } })!;
+    const decide = found.filter((i) => i.section === "profile-heading");
+    expect(decide).toHaveLength(1);
+    expect(decide[0]!.text).toMatch(/AI names Bridge Academy more often than any competitor you track/);
+  });
+});

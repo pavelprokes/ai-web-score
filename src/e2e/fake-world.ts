@@ -270,13 +270,14 @@ const openAi: Route = async (url, init) => {
 const perplexity: Route = async (url, init) => {
   if (url.hostname !== "api.perplexity.ai") return null;
   if (url.pathname !== "/v1/agent") return new Response(JSON.stringify({ error: { message: "Not found" } }), { status: 404 });
-  const body = JSON.parse(String(init?.body)) as { input: string; preset?: string; service_tier?: string };
-  if (body.preset && !["fast", "low", "medium", "high", "xhigh"].includes(body.preset)) {
-    return new Response(JSON.stringify({ error: { message: `Unknown preset ${body.preset}` } }), { status: 400 });
+  const body = JSON.parse(String(init?.body)) as { input: string; effort?: string; preset?: string; service_tier?: string };
+  const effort = body.effort ?? body.preset;
+  if (effort && !["fast", "low", "medium", "high", "xhigh", "ultra"].includes(effort)) {
+    return new Response(JSON.stringify({ error: { message: `Unknown effort ${effort}` } }), { status: 400 });
   }
   await new Promise((r) => setTimeout(r, 60));
   const a = fakeAnswer("perplexity", body.input, String(Math.random()));
-  // Like the fast preset: numbered inline citations, no annotation objects.
+  // Like the fast effort level: numbered inline citations, no annotation objects.
   const text = `${a.text} ${a.citations.map((_, i) => `[${i + 1}]`).join("")}`;
   const flex = body.service_tier === "flex";
   return json({

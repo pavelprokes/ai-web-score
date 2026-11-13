@@ -107,6 +107,15 @@ per week, `host_types` typed share ≥ 90 %, and the first "Likely reason" / "St
 Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
 carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 
+**Phase 0, code part (2026-11-13, PR after #84):** multi-word brand / competitor aliases need a capital first letter or a
+hyphen (`MATCHER_REVISION` 2; the scheduler re-reads every ACTIVE / PAUSED domain's answers once after the deploy),
+Perplexity sends `effort` instead of `preset`, ChatGPT ads never count as mentions or citations, and a caveat on
+"Share among tracked rivals" when AI names an untracked brand more often than every tracked one (≥ 3 questions).
+Still needs production access (Pavel's Mac, `pnpm prod:sql`): hand-count 30 "named" answers on se-vezmou.cz and on
+vzdelanibudoucnosti.cz after the re-read (named rate before vs after), count `chat_gpt_ad` items in the raw responses of
+the last 7 days, measure what `raw_response` consists of per provider before slimming it, and confirm the role behind
+`PROD_DATABASE_URL` is read-only.
+
 **Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
 (UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept
 90 days or more — so raw must be made small first; `answer_text` without a limit; vzdelanibudoucnosti.cz budget

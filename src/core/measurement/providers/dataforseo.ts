@@ -145,7 +145,21 @@ interface LlmScraperResult {
   sources?: DfsSource[] | null;
   search_results?: DfsSource[] | null;
   fan_out_queries?: string[] | null;
-  items?: Array<{ type: string; sources?: DfsSource[] | null }> | null;
+  items?: Array<{ type: string; sources?: DfsSource[] | null; title?: string | null; snippet?: string | null; url?: string | null }> | null;
+}
+
+/**
+ * ChatGPT ads (`chat_gpt_ad` items since 2026-05-28: title, snippet, url, advertiser). Paid placement is not a
+ * recommendation, so its text must never count as a mention nor its landing page as a citation. DataForSEO does not
+ * document whether `markdown` repeats the ad, so lines carrying an ad's title or snippet are removed as well.
+ */
+function stripAds(result: LlmScraperResult): { markdown: string; adUrls: Set<string> } {
+  const ads = (result.items ?? []).filter((i) => i.type === "chat_gpt_ad");
+  const adUrls = new Set(ads.map((a) => a.url).filter((u): u is string => !!u));
+  const needles = ads.flatMap((a) => [a.title, a.snippet]).filter((t): t is string => !!t && t.trim().length >= 8).map((t) => t.trim());
+  const markdown = result.markdown ?? "";
+  if (needles.length === 0) return { markdown, adUrls };
+  return { markdown: markdown.split("\n").filter((line) => !needles.some((n) => line.includes(n))).join("\n"), adUrls };
 }
 
 interface AiOverviewElement {
@@ -171,12 +185,14 @@ function dedupe<T extends { url: string }>(xs: T[]): T[] {
 }
 
 export function parseLlmScraper(result: LlmScraperResult, fallbackModel: string): NormalizedAnswer {
-  const itemSources = (result.items ?? []).flatMap((i) => i.sources ?? []);
-  const citations = dedupe([...toCitations(result.sources), ...toCitations(itemSources)]);
-  const sources = dedupe([...toSources(result.search_results), ...citations]);
+  const { markdown, adUrls } = stripAds(result);
+  const organic = <T extends { url: string }>(xs: T[]) => xs.filter((x) => !adUrls.has(x.url));
+  const itemSources = (result.items ?? []).filter((i) => i.type !== "chat_gpt_ad").flatMap((i) => i.sources ?? []);
+  const citations = organic(dedupe([...toCitations(result.sources), ...toCitations(itemSources)]));
+  const sources = organic(dedupe([...toSources(result.search_results), ...citations]));
   const queries = result.fan_out_queries ?? [];
   return {
-    answerText: result.markdown ?? "",
+    answerText: markdown,
     citations,
     sources,
     searchWasUsed: citations.length > 0 || sources.length > 0 || queries.length > 0,

@@ -12,7 +12,7 @@ import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate, websiteFixStatus } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
 import { competitorMatchCounts, competitorSuggestions } from "@/services/competitors";
-import type { CompetitorSuggestion } from "@/core/competitors";
+import { type CompetitorSuggestion, rivalsCaveat } from "@/core/competitors";
 import type { ActivityKind } from "@/services/activity";
 import { listProviders } from "@/core/measurement/providers";
 import { ActionButton } from "@/components/ActionButton";
@@ -77,6 +77,7 @@ export default async function DomainPage({
   const returnTo = `/domains/${d.id}`;
   const addedMessage =
     added && (d.status === "NEW" ? "Domain added. Run the discovery when you are ready." : "Domain added. Discovery is running — this page shows the progress.");
+  const caveat = rivalsCaveat(matches.named, suggestions);
   const attention = attentionItems({
     now,
     status: d.status,
@@ -90,6 +91,7 @@ export default async function DomainPage({
     autoApply: d.autoApprovePortfolioChanges,
     recommendationsOutOfDate: !!recs && recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now),
     suggestions: suggestions.map((c) => c.name),
+    rivalsCaveat: caveat,
     siteChanges: changes,
     providerLabel,
   });
@@ -123,7 +125,7 @@ export default async function DomainPage({
 
       {attention && <Attention items={attention} />}
 
-      <ScoreTiles detail={detail} />
+      <ScoreTiles detail={detail} rivalsNote={caveat} />
 
       {detail.domain.lastMeasuredAt && (
         <p>
@@ -551,7 +553,7 @@ const METRIC_LABEL: Record<string, string> = {
 };
 const metricLabel = (id: string) => METRIC_LABEL[id] ?? id;
 
-function ScoreTiles({ detail }: { detail: Detail }) {
+function ScoreTiles({ detail, rivalsNote }: { detail: Detail; rivalsNote: { name: string; answers: number } | null }) {
   const s = detail.scores.domain;
   if (!s) {
     return (
@@ -596,7 +598,15 @@ function ScoreTiles({ detail }: { detail: Detail }) {
           value={s.avgRecommendationPosition == null ? <span className="muted">–</span> : s.avgRecommendationPosition.toFixed(1)}
           detail="Among tracked names in a list (1 = first)"
         />
-        <StatTile label={<>Share among tracked rivals <MetricInfo id="share-of-voice" /></>} value={<Rate value={s.shareOfVoice} />} detail="Only competitors set in the profile" />
+        <StatTile
+          label={<>Share among tracked rivals <MetricInfo id="share-of-voice" /></>}
+          value={<Rate value={s.shareOfVoice} />}
+          detail={
+            rivalsNote
+              ? `Leaves out ${rivalsNote.name}, named in ${num(rivalsNote.answers)} answers — more than any tracked rival`
+              : "Only competitors set in the profile"
+          }
+        />
         <StatTile label={<>Sentiment <MetricInfo id="sentiment" /></>} value={<Score value={s.sentiment == null ? null : s.sentiment * 100} />} detail="How positively it is described" />
         <StatTile label={<>Accuracy <MetricInfo id="accuracy" /></>} value={<Score value={s.accuracy == null ? null : s.accuracy * 100} />} detail="Facts match the website" />
       </dl>

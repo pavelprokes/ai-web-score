@@ -1,7 +1,8 @@
-import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb, runInJobScope } from "@/db";
 import { domains, measurementSignals, measurements, recommendationSets, siteSnapshots } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
+import { MATCHER_REVISION } from "@/core/signals/matcher";
 import { runDiscovery } from "@/services/discovery";
 import { type GenerationMode, generatePortfolio, optimizePortfolio } from "@/services/portfolio";
 import { planMeasurements } from "@/services/planning";
@@ -204,6 +205,12 @@ async function tick() {
   // Daily maintenance (dedupe key per day).
   const day = now.toISOString().slice(0, 10);
   await enqueue("optimizer.run", {}, { dedupeKey: `optimizer:${day}`, oncePerKey: true });
+  // A matching change (MATCHER_REVISION) re-reads every monitored domain's stored answers once, so history and new
+  // answers count mentions the same way. Keyed by revision: runs once per domain, never again for that revision.
+  const tracked = await db.select({ id: domains.id }).from(domains).where(inArray(domains.status, ["ACTIVE", "PAUSED"]));
+  for (const d of tracked) {
+    await enqueue("signals.reextract", { domainId: d.id }, { dedupeKey: `reextract:${d.id}:matcher-${MATCHER_REVISION}`, oncePerKey: true, maxAttempts: 3 });
+  }
   // Source types for "Where AI looks": only hosts nobody labelled yet, so most days this is a no-op.
   await enqueue("sources.classify", {}, { dedupeKey: `sources-classify:${day}`, oncePerKey: true, maxAttempts: 2 });
   // Portfolio rotation (CORE kept, ROTATING slots turn over, new candidates come in) — proposals unless the domain

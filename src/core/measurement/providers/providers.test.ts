@@ -12,10 +12,12 @@ process.env.PERPLEXITY_MIN_INTERVAL_MS = "0"; // no pacing between the stubbed P
 const req = { measurementId: "m1", promptText: "Kde v Brně koupit kolo pro dítě?", language: "cs", country: "cz", location: "Brno" };
 
 describe("provider request builders", () => {
-  it("Perplexity uses the documented fast preset on the flex tier, with location and no retired Sonar fields", () => {
+  it("Perplexity uses the documented fast effort level on the flex tier, with location and no retired Sonar fields", () => {
     const standard = perplexityApi.configurations.find((c) => c.role === "STANDARD")!;
     const body = buildPerplexityBody(req, standard) as Record<string, unknown>;
-    expect(body.preset).toBe("fast");
+    expect(body.effort).toBe("fast");
+    // `preset` is the deprecated name of `effort` (docs.perplexity.ai/changelog, 2026-10).
+    expect(body).not.toHaveProperty("preset");
     expect(body.service_tier).toBe("flex");
     expect(body.model).toBeUndefined();
     const tool = (body.tools as Array<Record<string, unknown>>)[0]!;
@@ -139,6 +141,26 @@ describe("provider response parsers", () => {
     expect(a.sources.map((s) => s.url)).toContain("https://other.cz/");
     expect(a.search.queries).toHaveLength(2);
     expect(a.searchWasUsed).toBe(true);
+  });
+
+  it("DataForSEO ChatGPT scraper: an ad is never a mention or a citation", () => {
+    const ad = "https://www.kola-shop.cz/akce?utm_medium=ai";
+    const a = parseLlmScraper(
+      {
+        markdown: "1. **Kola Brno** – dobrý servis.\nSponzorováno: Kola Shop – Dětská kola se slevou 20 %\n2. **Bike Centrum**",
+        sources: [{ url: "https://kolabrno.cz/", domain: "kolabrno.cz" }, { url: ad, domain: "www.kola-shop.cz" }],
+        items: [
+          { type: "chat_gpt_text", sources: [{ url: "https://kolabrno.cz/" }] },
+          { type: "chat_gpt_ad", title: "Kola Shop – Dětská kola se slevou 20 %", snippet: "Akce jen tento týden.", url: ad },
+        ],
+      },
+      "fallback",
+    );
+    expect(a.answerText).not.toContain("Kola Shop");
+    expect(a.answerText).toContain("Kola Brno");
+    expect(a.answerText).toContain("Bike Centrum");
+    expect(a.citations.map((c) => c.url)).toEqual(["https://kolabrno.cz/"]);
+    expect(a.sources.map((x) => x.url)).not.toContain(ad);
   });
 
   it("DataForSEO AI Mode references (nested)", () => {

@@ -140,3 +140,23 @@ export function competitorHostTest(
       .some((k) => !!k && !skip.has(k) && (keys.has(k) || !!extraNames?.has(k)));
   };
 }
+
+/** Distinct questions an untracked brand needs before it can put "share among tracked rivals" in doubt. */
+export const RIVALS_CAVEAT_MIN_QUESTIONS = 3;
+
+/**
+ * "Share among tracked rivals" ranks the brand only against the tracked competitors. When AI names an untracked
+ * brand more often than every tracked one (in at least RIVALS_CAVEAT_MIN_QUESTIONS questions), the share says little
+ * until that brand is tracked. The untracked count comes from analysed answers only (a sample), so it can only be
+ * under-counted: the caveat errs on the quiet side.
+ */
+export function rivalsCaveat(
+  tracked: ReadonlyMap<string, number>,
+  suggestions: Array<Pick<CompetitorSuggestion, "name" | "answers" | "questions">>,
+): { name: string; answers: number; topTracked: number } | null {
+  const topTracked = Math.max(0, ...tracked.values());
+  const top = suggestions
+    .filter((s) => s.questions >= RIVALS_CAVEAT_MIN_QUESTIONS && s.answers > topTracked)
+    .sort((a, b) => b.answers - a.answers)[0];
+  return top ? { name: top.name, answers: top.answers, topTracked } : null;
+}

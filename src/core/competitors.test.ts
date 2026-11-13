@@ -66,3 +66,26 @@ describe("hostname spellings", () => {
     ]);
   });
 });
+
+describe("rivalsCaveat", () => {
+  const tracked = new Map([
+    ["Robotika", 6],
+    ["Scratch klub", 2],
+  ]);
+
+  it("names the untracked brand AI names more often than every tracked rival, in enough questions", async () => {
+    const { rivalsCaveat } = await import("./competitors");
+    const suggestions = [
+      { name: "Bridge Academy", answers: 9, questions: 4 },
+      { name: "Logiscool", answers: 14, questions: 2 },
+    ];
+    // Logiscool is named more, but in only two questions: not enough to doubt the share.
+    expect(rivalsCaveat(tracked, suggestions)).toEqual({ name: "Bridge Academy", answers: 9, topTracked: 6 });
+  });
+
+  it("stays quiet when the tracked rivals are named at least as often", async () => {
+    const { rivalsCaveat } = await import("./competitors");
+    expect(rivalsCaveat(tracked, [{ name: "Bridge Academy", answers: 6, questions: 5 }])).toBeNull();
+    expect(rivalsCaveat(tracked, [])).toBeNull();
+  });
+});

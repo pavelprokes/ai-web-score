@@ -28,6 +28,8 @@ export interface AttentionInput {
   recommendationsOutOfDate: boolean;
   /** Brands named by AI that are not tracked (the service caps the list, so its length is not a count). */
   suggestions: string[];
+  /** An untracked brand AI names more often than every tracked rival (`rivalsCaveat`), if any. */
+  rivalsCaveat?: { name: string; answers: number } | null;
   /** Critical website changes found by the site checks (src/core/site/changes.ts), newest first. */
   siteChanges?: Array<{ at: Date; text: string }>;
   providerLabel: (id: string) => string;
@@ -157,7 +159,14 @@ export function attentionItems(input: AttentionInput): AttentionItem[] | null {
       link: "Recommendations",
     });
   }
-  if (input.suggestions.length > 0) {
+  if (input.rivalsCaveat) {
+    items.push({
+      kind: "decide",
+      text: `AI names ${input.rivalsCaveat.name} more often than any competitor you track, so "Share among tracked rivals" leaves out your main rival. Track it in the domain profile.`,
+      section: "profile-heading",
+      link: "Domain profile",
+    });
+  } else if (input.suggestions.length > 0) {
     items.push({
       kind: "decide",
       text: `AI names brands you do not track, e.g. ${input.suggestions.slice(0, 2).join(", ")}. Decide whether to track them.`,

@@ -707,6 +707,12 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
     await schedulerTick();
     expect(await keys()).toEqual(all.filter((k) => !k.includes(demo!.id)));
+    // A matching change re-reads every monitored domain's answers once per MATCHER_REVISION, not on every tick.
+    const { MATCHER_REVISION } = await import("@/core/signals/matcher");
+    await schedulerTick();
+    const reextracts = (await db.select().from(s.jobs).where(eq(s.jobs.type, "signals.reextract"))).filter((j) => j.dedupeKey?.endsWith(`:matcher-${MATCHER_REVISION}`));
+    expect(reextracts.filter((j) => j.dedupeKey === `reextract:${demo!.id}:matcher-${MATCHER_REVISION}`)).toHaveLength(1);
+    expect(reextracts.some((j) => j.dedupeKey!.includes(paused.id))).toBe(true);
 
     await shiftSets(-8);
     try {

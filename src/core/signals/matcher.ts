@@ -49,6 +49,40 @@ export function buildEntityPattern(aliases: string[], inflect = true): RegExp | 
   return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alternation})(?![\\p{L}\\p{N}])`, "gu");
 }
 
+/**
+ * Bump when matching changes what counts as a mention: the scheduler then re-reads the stored answers of every
+ * monitored domain once (`signals.reextract`), so history and new answers are matched the same way.
+ * 2 (2026-11-13): multi-word aliases must be written as a name (capital first letter) or joined by a hyphen —
+ * "Se vezmou" no longer matches "páry, které se vezmou", "Vzdělání budoucnosti" not "vzdělání budoucnosti dětí".
+ */
+export const MATCHER_REVISION = 2;
+
+/**
+ * A multi-word alias without a domain form ("Se vezmou", "Vzdělání budoucnosti"): its words can be an ordinary
+ * phrase, so a mention needs the name's capital first letter, or the words joined by a hyphen ("se-vezmou").
+ */
+const isPhraseAlias = (normalized: string) => /\s/.test(normalized) && !/[./]/.test(normalized);
+
+/**
+ * Hits of an entity in an answer: `text` as written (for the capital-letter rule of phrase aliases) and its
+ * `normalizeText` form (what the patterns match).
+ */
+export function findEntityInText(text: string, norm: string, aliases: string[]): EntityHit[] {
+  const phrase = aliases.filter((a) => isPhraseAlias(normalizeText(a).trim()));
+  const other = aliases.filter((a) => !phrase.includes(a));
+  const hits = findEntity(norm, buildEntityPattern(other));
+  if (phrase.length) {
+    // The same transformation as normalizeText without lower-casing, so positions line up with `norm`.
+    const shaped = text.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+    for (const h of findEntity(norm, buildEntityPattern(phrase))) {
+      const first = shaped[h.start] ?? "";
+      const hyphenated = norm.slice(h.start, h.end).includes("-");
+      if (hyphenated || (first !== first.toLowerCase() && first === first.toUpperCase())) hits.push(h);
+    }
+  }
+  return hits.sort((a, b) => a.start - b.start).filter((h, i, all) => i === 0 || h.start !== all[i - 1]!.start);
+}
+
 export interface EntityHit {
   start: number;
   end: number;

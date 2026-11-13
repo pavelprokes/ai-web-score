@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEntityPattern, findEntity, normalizeText } from "./matcher";
+import { buildEntityPattern, findEntity, findEntityInText, normalizeText } from "./matcher";
 import { extractSignals, presenceIndex, type TrackedEntity } from "./extract";
 import { carryJudgement, shouldAnalyze } from "./analyze-llm";
 import type { NormalizedAnswer } from "../measurement/types";
@@ -36,6 +36,33 @@ describe("entity matcher", () => {
   it("matches domain spelling and ignores diacritics/case", () => {
     expect(hits("Zkuste ALZA.CZ")).toBe(1);
     expect(findEntity(normalizeText("Škoda Octavia"), buildEntityPattern(["Skoda"])).length).toBe(1);
+  });
+});
+
+describe("phrase aliases (MATCHER_REVISION 2)", () => {
+  const hits = (text: string, aliases: string[]) => findEntityInText(text, normalizeText(text), aliases).length;
+
+  it("does not read an ordinary phrase as the brand (the two production cases)", () => {
+    expect(hits("Páry, které se vezmou v létě, by měly fotografa zamluvit rok předem.", ["Se vezmou", "se-vezmou.cz"])).toBe(0);
+    expect(hits("Je to investice do vzdělání budoucnosti dětí.", ["Vzdělání budoucnosti", "vzdelanibudoucnosti.cz"])).toBe(0);
+  });
+
+  it("still finds the brand written as a name, hyphenated, inflected or as a domain", () => {
+    expect(hits("Doporučuji portál Se vezmou, který …", ["Se vezmou"])).toBe(1);
+    expect(hits("Na webu se-vezmou najdete fotografy.", ["Se vezmou"])).toBe(1);
+    expect(hits("Kurzy pořádá Vzdělání budoucnosti z Prahy.", ["Vzdělání budoucnosti"])).toBe(1);
+    expect(hits("U Vzdělání budoucnosti se děti učí Python.", ["Vzdělání budoucnosti"])).toBe(1);
+    expect(hits("Viz vzdelanibudoucnosti.cz a se-vezmou.cz.", ["Vzdělání budoucnosti", "vzdelanibudoucnosti.cz"])).toBe(1);
+  });
+
+  it("leaves one-word names and domains as they were (case-insensitive)", () => {
+    expect(hits("objednejte na alza.cz nebo u alzy", ["Alza", "alza.cz"])).toBe(2);
+    expect(hits("Logiscool a logiscool", ["Logiscool"])).toBe(2);
+  });
+
+  it("applies to competitors' names too, through extractSignals", () => {
+    const text = "Kroužky vede Bridge Academy. Mezi lekcemi je bridge academy hra.";
+    expect(hits(text, ["Bridge Academy"])).toBe(1);
   });
 });
 
