@@ -45,8 +45,8 @@ comes next in detail: `docs/HANDOFF.md`. Site checks and fact corrections from t
 3. Broader answer analysis (brand-less answers with a list); DataForSEO `brand_entities` for competitor
    discovery if the field holds what it promises; authority finding per assistant.
 4. Bulk review of proposals by topic.
-5. Weekly site check with snapshots (eligibility, JS-only content, schema / NAP), site-change markers, "fixed on the
-   site" and before / after readout for Done items; source types of cited sites (claude-seo review, phases B–C).
+5. Source types of cited sites per assistant; weekly site check with snapshots (eligibility, JS-only content),
+   "Fixed on the site", critical site-change events (`docs/meetings/2026-11-13-phases-b-c-team.md`).
 
 ## Phase 3 — more surfaces, each with a number
 
