@@ -163,6 +163,21 @@ describe("provider response parsers", () => {
     expect(a.sources.map((x) => x.url)).not.toContain(ad);
   });
 
+  it("DataForSEO ChatGPT scraper: an organic line that only shares the advertiser's name is kept", () => {
+    const parse = (markdown: string) =>
+      parseLlmScraper(
+        {
+          markdown,
+          items: [{ type: "chat_gpt_ad", title: "Svatební studio Lumi", snippet: "Rezervujte termín ještě dnes se slevou.", url: "https://lumi.example/promo" }],
+        },
+        "fallback",
+      ).answerText;
+    expect(parse("1. **Svatební studio Lumi** – fotí v Praze a okolí.")).toContain("Svatební studio Lumi");
+    expect(parse("Ad · Svatební studio Lumi")).not.toContain("Lumi");
+    expect(parse("Svatební studio Lumi (lumi.example)")).not.toContain("Lumi");
+    expect(parse("Rezervujte termín ještě dnes se slevou.")).toBe("");
+  });
+
   it("DataForSEO AI Mode references (nested)", () => {
     const a = parseAiMode({
       items: [

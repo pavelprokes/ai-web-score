@@ -162,7 +162,7 @@ export function attentionItems(input: AttentionInput): AttentionItem[] | null {
   if (input.rivalsCaveat) {
     items.push({
       kind: "decide",
-      text: `AI names ${input.rivalsCaveat.name} more often than any competitor you track, so "Share among tracked rivals" leaves out your main rival. Track it in the domain profile.`,
+      text: `AI names ${input.rivalsCaveat.name} more often than any competitor you track, so "Share among tracked rivals" may leave out your main rival. Track it in the domain profile if it is a competitor.`,
       section: "profile-heading",
       link: "Domain profile",
     });

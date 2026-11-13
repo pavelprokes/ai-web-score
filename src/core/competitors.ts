@@ -1,5 +1,6 @@
 import type { DomainProfile } from "./domain-profile";
 import { normalizeText } from "./signals/matcher";
+import { codeLabel } from "./sources/host-types";
 import type { RawSignals } from "./signals/extract";
 
 /**
@@ -146,17 +147,22 @@ export const RIVALS_CAVEAT_MIN_QUESTIONS = 3;
 
 /**
  * "Share among tracked rivals" ranks the brand only against the tracked competitors. When AI names an untracked
- * brand more often than every tracked one (in at least RIVALS_CAVEAT_MIN_QUESTIONS questions), the share says little
- * until that brand is tracked. The untracked count comes from analysed answers only (a sample), so it can only be
- * under-counted: the caveat errs on the quiet side.
+ * brand more often than every tracked one (in at least RIVALS_CAVEAT_MIN_QUESTIONS questions), the share may say
+ * little until that brand is tracked. The untracked count comes from analysed answers only (a sample), so it can only
+ * be under-counted: the caveat errs on the quiet side. Not shown without tracked competitors (there is no share), nor
+ * for a name that is a website rather than a business, or a directory, magazine, forum or reference site by its
+ * known domain: AI often names those, and they are sources, not rivals.
  */
 export function rivalsCaveat(
   tracked: ReadonlyMap<string, number>,
-  suggestions: Array<Pick<CompetitorSuggestion, "name" | "answers" | "questions">>,
+  suggestions: Array<Pick<CompetitorSuggestion, "name" | "answers" | "questions" | "domains">>,
 ): { name: string; answers: number; topTracked: number } | null {
+  if (tracked.size === 0) return null;
   const topTracked = Math.max(0, ...tracked.values());
+  const isSource = (s: Pick<CompetitorSuggestion, "name" | "domains">) =>
+    s.name.includes(".") || s.domains.some((d) => (codeLabel(d)?.type ?? "other") !== "other");
   const top = suggestions
-    .filter((s) => s.questions >= RIVALS_CAVEAT_MIN_QUESTIONS && s.answers > topTracked)
+    .filter((s) => s.questions >= RIVALS_CAVEAT_MIN_QUESTIONS && s.answers > topTracked && !isSource(s))
     .sort((a, b) => b.answers - a.answers)[0];
   return top ? { name: top.name, answers: top.answers, topTracked } : null;
 }

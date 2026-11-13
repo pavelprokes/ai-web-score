@@ -52,23 +52,31 @@ export function buildEntityPattern(aliases: string[], inflect = true): RegExp | 
 /**
  * Bump when matching changes what counts as a mention: the scheduler then re-reads the stored answers of every
  * monitored domain once (`signals.reextract`), so history and new answers are matched the same way.
- * 2 (2026-11-13): multi-word aliases must be written as a name (capital first letter) or joined by a hyphen —
+ * 2 (2026-11-13): multi-word aliases written as a name need a capital first letter or a hyphen in the answer —
  * "Se vezmou" no longer matches "páry, které se vezmou", "Vzdělání budoucnosti" not "vzdělání budoucnosti dětí".
  */
 export const MATCHER_REVISION = 2;
 
 /**
- * A multi-word alias without a domain form ("Se vezmou", "Vzdělání budoucnosti"): its words can be an ordinary
- * phrase, so a mention needs the name's capital first letter, or the words joined by a hyphen ("se-vezmou").
+ * A multi-word alias written as a name ("Se vezmou", "Vzdělání budoucnosti": capital first letter, no domain form):
+ * its words can be an ordinary phrase, so a mention needs the name's capital first letter, or the words joined by a
+ * hyphen ("se-vezmou"). An alias written in lower case ("eduroam wifi") or starting with a digit is matched as before:
+ * its owner chose that spelling, and the answer's capitalisation says nothing about it.
  */
-const isPhraseAlias = (normalized: string) => /\s/.test(normalized) && !/[./]/.test(normalized);
+function isPhraseAlias(alias: string): boolean {
+  const normalized = normalizeText(alias).trim();
+  if (!/\s/.test(normalized) || /[./]/.test(normalized)) return false;
+  const first = alias.trim().normalize("NFD")[0] ?? "";
+  return first !== first.toLowerCase() && first === first.toUpperCase();
+}
 
 /**
  * Hits of an entity in an answer: `text` as written (for the capital-letter rule of phrase aliases) and its
- * `normalizeText` form (what the patterns match).
+ * `normalizeText` form (what the patterns match). Hits are in order and do not overlap (a hit that starts inside the
+ * previous one is the same mention read through another alias).
  */
 export function findEntityInText(text: string, norm: string, aliases: string[]): EntityHit[] {
-  const phrase = aliases.filter((a) => isPhraseAlias(normalizeText(a).trim()));
+  const phrase = aliases.filter(isPhraseAlias);
   const other = aliases.filter((a) => !phrase.includes(a));
   const hits = findEntity(norm, buildEntityPattern(other));
   if (phrase.length) {
@@ -80,7 +88,10 @@ export function findEntityInText(text: string, norm: string, aliases: string[]):
       if (hyphenated || (first !== first.toLowerCase() && first === first.toUpperCase())) hits.push(h);
     }
   }
-  return hits.sort((a, b) => a.start - b.start).filter((h, i, all) => i === 0 || h.start !== all[i - 1]!.start);
+  hits.sort((a, b) => a.start - b.start || b.end - a.end);
+  const out: EntityHit[] = [];
+  for (const h of hits) if (!out.length || h.start >= out[out.length - 1]!.end) out.push(h);
+  return out;
 }
 
 export interface EntityHit {

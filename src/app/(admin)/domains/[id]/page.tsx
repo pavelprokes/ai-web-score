@@ -77,7 +77,8 @@ export default async function DomainPage({
   const returnTo = `/domains/${d.id}`;
   const addedMessage =
     added && (d.status === "NEW" ? "Domain added. Run the discovery when you are ready." : "Domain added. Discovery is running — this page shows the progress.");
-  const caveat = rivalsCaveat(matches.named, suggestions);
+  // Counts are not shown while stored answers are re-read against a changed competitor list, nor is a caveat built on them.
+  const caveat = matches.pending ? null : rivalsCaveat(matches.named, suggestions);
   const attention = attentionItems({
     now,
     status: d.status,
@@ -603,7 +604,7 @@ function ScoreTiles({ detail, rivalsNote }: { detail: Detail; rivalsNote: { name
           value={<Rate value={s.shareOfVoice} />}
           detail={
             rivalsNote
-              ? `Leaves out ${rivalsNote.name}, named in ${num(rivalsNote.answers)} answers — more than any tracked rival`
+              ? `May leave out ${rivalsNote.name}, named in ${num(rivalsNote.answers)} answers — more than any tracked rival`
               : "Only competitors set in the profile"
           }
         />

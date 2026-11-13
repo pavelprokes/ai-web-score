@@ -60,6 +60,16 @@ describe("phrase aliases (MATCHER_REVISION 2)", () => {
     expect(hits("Logiscool a logiscool", ["Logiscool"])).toBe(2);
   });
 
+  it("leaves a multi-word alias written in lower case or starting with a digit as it was", () => {
+    expect(hits("připojte se přes eduroam wifi nebo Eduroam Wifi", ["eduroam wifi"])).toBe(2);
+    expect(hits("kurz 3d tisk vede 3D Tisk Praha", ["3D tisk"])).toBe(2);
+  });
+
+  it("counts one mention where aliases overlap", () => {
+    const text = "Studio Se vezmou plus nabízí katalog.";
+    expect(findEntityInText(text, normalizeText(text), ["Se vezmou", "Se vezmou plus", "vezmou plus"])).toEqual([{ start: 7, end: 21 }]);
+  });
+
   it("applies to competitors' names too, through extractSignals", () => {
     const text = "Kroužky vede Bridge Academy. Mezi lekcemi je bridge academy hra.";
     expect(hits(text, ["Bridge Academy"])).toBe(1);

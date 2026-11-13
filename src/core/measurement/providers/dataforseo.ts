@@ -151,15 +151,35 @@ interface LlmScraperResult {
 /**
  * ChatGPT ads (`chat_gpt_ad` items since 2026-05-28: title, snippet, url, advertiser). Paid placement is not a
  * recommendation, so its text must never count as a mention nor its landing page as a citation. DataForSEO does not
- * document whether `markdown` repeats the ad, so lines carrying an ad's title or snippet are removed as well.
+ * document whether `markdown` repeats the ad, so a line that reads as the ad is removed: it carries the ad's snippet,
+ * or its title together with an ad label or the ad's link. A title alone is often just the advertiser's name, which an
+ * organic recommendation may carry too, so it never removes a line on its own.
  */
+const AD_LABEL = /\b(sponsored|sponzor\w*|reklama|ad)\b/i;
+const MIN_AD_TEXT = 8;
 function stripAds(result: LlmScraperResult): { markdown: string; adUrls: Set<string> } {
   const ads = (result.items ?? []).filter((i) => i.type === "chat_gpt_ad");
   const adUrls = new Set(ads.map((a) => a.url).filter((u): u is string => !!u));
-  const needles = ads.flatMap((a) => [a.title, a.snippet]).filter((t): t is string => !!t && t.trim().length >= 8).map((t) => t.trim());
   const markdown = result.markdown ?? "";
-  if (needles.length === 0) return { markdown, adUrls };
-  return { markdown: markdown.split("\n").filter((line) => !needles.some((n) => line.includes(n))).join("\n"), adUrls };
+  if (ads.length === 0) return { markdown, adUrls };
+  const text = (t: string | null | undefined) => (t && t.trim().length >= MIN_AD_TEXT ? t.trim() : null);
+  const isAdLine = (line: string) =>
+    ads.some((a) => {
+      const snippet = text(a.snippet);
+      if (snippet && line.includes(snippet)) return true;
+      const title = text(a.title);
+      if (!title || !line.includes(title)) return false;
+      const host = a.url ? safeHost(a.url) : null;
+      return AD_LABEL.test(line) || (!!a.url && line.includes(a.url)) || (!!host && line.includes(host));
+    });
+  return { markdown: markdown.split("\n").filter((line) => !isAdLine(line)).join("\n"), adUrls };
+}
+function safeHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
 
 interface AiOverviewElement {
