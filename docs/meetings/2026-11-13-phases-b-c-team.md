@@ -51,7 +51,7 @@ Cast: owner, principal-engineer, product-manager, seo-geo-specialist, lawyer, ux
 | C1 hand check | qa 100 hosts; owner: not Pavel's time | qa accepted: the main session seeds the hosts covering 80 % of cited volume (regression fixture); seo-geo reviews 50 hosts from the LLM-labelled remainder, seeded draw, ≤ 5 wrong; the 90 % typed volume measured by SQL. LLM-labelled hosts get neutral action wording |
 | Client galleries on photos.* | lawyer: exclude or hash title / H1; owner: exclude | Exclude: the photos subdomain is checked on its homepage and robots.txt only |
 | Czech UI copy | copywriter asked | Owner: stay English (single user, labels unified in #71); revisit with outward use |
-| Done website finding still found | PE asked | Owner recommends "Still found (checked …)" and automatic reopen after two consecutive snapshots — **Pavel to decide** |
+| Done website finding still found | PE asked | **Pavel decided (2026-11-13):** "Still found (checked …)" first, automatic reopen after two consecutive snapshots |
 
 ## Plan
 
@@ -73,7 +73,7 @@ Cast: owner, principal-engineer, product-manager, seo-geo-specialist, lawyer, ux
    **and** a shell marker; `max-snippet` 1–159 → 0.4; fixtures for possible, confirmed, flapping, first snapshot.
    Copy deck first: headline, one sentence of evidence, one action, what it does not prove; name the assistant and
    the page.
-4. **B5a "Fixed on the site" / "Still found" and B3** (S). B3 raises the severity of the robots / eligibility finding
+4. **B5a "Fixed on the site" / "Still found" (reopened automatically after two consecutive snapshots) and B3** (S). B3 raises the severity of the robots / eligibility finding
    when an assistant has ≥ 20 unbranded searched answers and 0 own citations; drops it to 0.2 when that assistant
    cites the page anyway. "Likely reason", never "reason" or "caused".
 5. **B4 critical events** (S; after the Phase 1 composition markers). Became noindex / nosnippet, 2xx → 4xx / 5xx,
