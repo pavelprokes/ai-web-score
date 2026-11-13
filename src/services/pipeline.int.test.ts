@@ -625,6 +625,12 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const all = active.map((d) => `recommendations:${d.id}:${today}`).sort();
     const shiftSets = (days: number) => db.execute(sql`update recommendation_sets set created_at = created_at + make_interval(days => ${days})`);
 
+    // Every domain had its website checked this week (a domain without a check gets the check first, see below).
+    const snapshots = await db
+      .insert(s.siteSnapshots)
+      .values(active.map((d) => ({ domainId: d.id, checkVersion: 1, robots: { status: 404, groups: [] }, pages: [] })))
+      .returning({ id: s.siteSnapshots.id });
+
     // A set from this week: nothing to do for that domain.
     await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
     await schedulerTick();
@@ -643,10 +649,83 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await db.execute(sql`update jobs set dedupe_key = replace(dedupe_key, ${today}, '2000-01-01') where type = 'recommendations.generate'`);
       await schedulerTick();
       expect((await jobs()).filter((j) => j.status === "QUEUED").map((j) => j.dedupeKey).sort()).toEqual(all);
+
+      // A domain whose website was not checked this week gets the check, which queues the recommendations itself.
+      await db.delete(s.jobs).where(inArray(s.jobs.type, ["recommendations.generate", "site.check"]));
+      await db.execute(sql`update site_snapshots set created_at = now() - interval '8 days' where domain_id = ${demo!.id}`);
+      await schedulerTick();
+      expect(await keys()).toEqual(all.filter((k) => !k.includes(demo!.id)));
+      const checks = await db.select().from(s.jobs).where(eq(s.jobs.type, "site.check"));
+      expect(checks.map((j) => j.dedupeKey)).toEqual([`site-check:${demo!.id}:${today}`]);
     } finally {
       await shiftSets(8);
-      await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
+      await db.delete(s.jobs).where(inArray(s.jobs.type, ["recommendations.generate", "site.check"]));
+      await db.delete(s.siteSnapshots).where(inArray(s.siteSnapshots.id, snapshots.map((x) => x.id)));
       await db.delete(s.domains).where(eq(s.domains.id, paused.id));
+    }
+  });
+
+  it("checks the website without a browser retry, keeps a small snapshot, and the recommendations read it", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { checkSite, latestSiteSnapshot } = await import("@/services/site-check");
+    const { generateRecommendations, latestRecommendations } = await import("@/services/recommendations");
+    const { KEEP_SNAPSHOTS } = await import("@/core/site/check");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const home = `<!doctype html><html lang="cs"><head><title>Kódování pro děti</title>
+      <script type="application/ld+json">{"@type":"EducationalOrganization","name":"KPD"}</script></head>
+      <body><header><nav><a href="/kurzy">Kurzy</a><a href="/kontakt">Kontakt</a><a href="https://other.example/x">Jinde</a></nav></header>
+      <main><h1>Programování</h1><p>${"slovo ".repeat(300)}</p></main></body></html>`;
+    const requests: Array<{ url: string; ua: string }> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(input instanceof Request ? input.url : input);
+      requests.push({ url: href, ua: String((init?.headers as Record<string, string>)?.["User-Agent"] ?? "") });
+      const path = new URL(href).pathname;
+      if (path === "/robots.txt") return new Response("User-agent: *\nDisallow: /admin\n\nUser-agent: OAI-SearchBot\nDisallow: /kurzy\n\nUser-agent: SomeSeoBot\nDisallow: /\n");
+      if (path === "/kurzy") return new Response("<html><head><meta name='robots' content='noindex'></head><body><div id='__next'></div></body></html>", { headers: { "content-type": "text/html" } });
+      if (path === "/kontakt") return new Response("blocked", { status: 403 });
+      return new Response(home, { headers: { "content-type": "text/html", "x-robots-tag": "max-snippet:50" } });
+    }) as typeof fetch;
+    try {
+      const result = await checkSite(demo!.id, { thenRecommend: false });
+      expect(result.robotsStatus).toBe(200);
+      // The 403 is recorded, never retried with a browser user agent.
+      expect(requests.filter((r) => r.url.endsWith("/kontakt"))).toHaveLength(1);
+      expect(requests.every((r) => r.ua.includes("AIVisibilityBot"))).toBe(true);
+      // Only the site's own pages are requested.
+      expect(requests.some((r) => r.url.includes("other.example"))).toBe(false);
+
+      const snap = (await latestSiteSnapshot(demo!.id))!;
+      expect(snap.pages.map((p) => [p.path, p.status])).toEqual([
+        ["/", 200],
+        ["/kurzy", 200],
+        ["/kontakt", 403],
+      ]);
+      expect(snap.pages[0]).toMatchObject({ robotsHeader: "max-snippet:50", jsonLdTypes: ["EducationalOrganization"], h1: "Programování" });
+      expect(snap.pages[0]!.words).toBeGreaterThan(300);
+      expect(snap.pages[1]).toMatchObject({ metaRobots: "noindex", shellMarkers: ["empty #__next"] });
+      // robots.txt keeps the groups of AI agents and *, not the rest; no page bodies.
+      expect(snap.robots.groups.flatMap((g) => g.agents).sort()).toEqual(["*", "oai-searchbot"]);
+      expect(JSON.stringify(snap).length).toBeLessThan(20_000);
+      expect(JSON.stringify(snap)).not.toContain("slovo slovo");
+
+      // The recommendations read the snapshot: no live robots.txt request, the blocked section is found.
+      requests.length = 0;
+      await generateRecommendations(demo!.id);
+      expect(requests.filter((r) => r.url.endsWith("/robots.txt"))).toHaveLength(0);
+      const set = (await latestRecommendations(demo!.id))!.set;
+      const robots = (set.diagnostics as Array<{ key: string; evidence: { blockedPaths?: string[] } }>).find((f) => f.key === "robots:OAI-SearchBot");
+      expect(robots?.evidence.blockedPaths).toEqual(["/kurzy"]);
+
+      // Only the latest KEEP_SNAPSHOTS are kept.
+      for (let i = 0; i < KEEP_SNAPSHOTS + 1; i++) await checkSite(demo!.id, { thenRecommend: false });
+      const kept = await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+      expect(kept).toHaveLength(KEEP_SNAPSHOTS);
+    } finally {
+      globalThis.fetch = realFetch;
+      await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
     }
   });
 

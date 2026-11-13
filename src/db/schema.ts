@@ -465,6 +465,26 @@ export const providerBalances = pgTable(
 ).enableRLS();
 
 /**
+ * Weekly site check per domain (src/core/site/check.ts): robots.txt rules for AI agents and, per key page, status,
+ * robots directives, canonical, structured-data types and hash, words without JavaScript. No page bodies, no raw
+ * robots.txt; ≤ 20 kB; the latest KEEP_SNAPSHOTS per domain are kept.
+ */
+export const siteSnapshots = pgTable(
+  "site_snapshots",
+  {
+    id: id(),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    checkVersion: integer("check_version").notNull(),
+    robots: jsonb("robots").notNull(),
+    pages: jsonb("pages").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("site_snapshots_domain").on(t.domainId, t.createdAt)],
+).enableRLS();
+
+/**
  * What kind of site a cited host is (src/core/sources/host-types.ts): labels the code cannot give — an LLM guess from
  * the hostname alone, or the admin's correction. Not per domain: "own" and "competitor" are decided when read.
  */

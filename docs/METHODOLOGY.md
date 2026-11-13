@@ -219,7 +219,16 @@ timestamp.
 On demand per domain (domain page → Recommendations, or `POST /api/domains/{id}/actions` with
 `generate-recommendations`; read back via `GET /api/domains/{id}/recommendations`).
 
-1. **Diagnostics (deterministic, free).** Inputs: the crawl digest, live `robots.txt`, and
+0. **Site check (weekly, free; job `site.check`, `src/core/site/check.ts`).** robots.txt and up to 20 key pages (the
+   homepage, navigation pages with a priority path, the own pages assistants cite), fetched as the crawler's own bot
+   with no retry under another user agent (a challenge is a finding, never bypassed), 8 s per request. Per page: the
+   first status, redirect target, `X-Robots-Tag`, robots / googlebot meta, canonical, `data-nosnippet` elements,
+   JSON-LD types and a hash, title, H1, words in the HTML as served (before JavaScript) and signs of a client-only
+   shell. No page bodies and only the robots.txt groups of AI agents and `*` are stored (≤ 20 kB, the latest 12 per
+   domain). Gallery sites are checked on the homepage only (no client names stored). The check runs before the
+   weekly recommendations and before every manual Refresh, and queues them.
+1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
+   digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per
    RFC 9309 on the homepage and every crawled page, with roles from the vendors' documentation (search agents and
    Google-Extended, which also controls Gemini grounding, weigh far more than user fetchers and training crawlers;

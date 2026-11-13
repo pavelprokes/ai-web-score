@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
+import { latestSiteSnapshot } from "@/services/site-check";
 import { competitorStandings, type KindShareRow, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { KIND_LABEL, type SourceKind } from "@/core/sources/host-types";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
@@ -55,7 +56,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -66,6 +67,7 @@ export default async function DomainPage({
     competitorSuggestions(id),
     competitorMatchCounts(id),
     searchQueriesFor(id),
+    latestSiteSnapshot(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -137,7 +139,7 @@ export default async function DomainPage({
         </Section>
       )}
 
-      <Recommendations detail={detail} recs={recs} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
+      <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck?.checkedAt ?? null} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {/* From here on: reference. Collapsed unless something to fix or a change points into the section. */}
       <div className="grid-2">
@@ -339,7 +341,21 @@ const REC_CATEGORY: Record<string, string> = {
 };
 const EFFORT_LABEL: Record<string, string> = { LOW: "Low effort", MEDIUM: "Medium effort", HIGH: "High effort" };
 
-function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail; recs: Recs; returnTo: string; busy: Set<ActivityKind> | undefined; now: Date }) {
+function Recommendations({
+  detail,
+  recs,
+  siteCheckedAt,
+  returnTo,
+  busy,
+  now,
+}: {
+  detail: Detail;
+  recs: Recs;
+  siteCheckedAt: Date | null;
+  returnTo: string;
+  busy: Set<ActivityKind> | undefined;
+  now: Date;
+}) {
   const d = detail.domain;
   const generate = (
     <ActionButton
@@ -355,8 +371,8 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
         confirmLabel: "Generate",
         body: (
           <p>
-            Checks the website (robots.txt, llms.txt, structured data) and the last 30 days of AI answers, then writes a short prioritised plan with AI
-            (about $0.01–0.05).
+            Checks the website first (robots.txt, the key pages: status, robots directives, structured data, text without JavaScript), then reads
+            the last 28 days of AI answers and writes a short prioritised plan with AI (about $0.01–0.05).
           </p>
         ),
       }}
@@ -388,6 +404,14 @@ function Recommendations({ detail, recs, returnTo, busy, now }: { detail: Detail
         Based on {num(recs.set.answersAnalysed)} answers · generated <TimeAgo date={recs.set.createdAt} now={now} /> ·{" "}
         {recs.set.generatedBy === "llm" ? "written by AI" : "rule-based"}
         {d.status === "ACTIVE" && " · refreshed weekly"}
+        {" · "}
+        {siteCheckedAt ? (
+          <>
+            website checked <TimeAgo date={siteCheckedAt} now={now} />
+          </>
+        ) : (
+          "website not checked yet (findings about the site use the discovery crawl)"
+        )}
         {recommendationsOutOfDate(recs.set, d.status === "ACTIVE", detail.scores.domain?.samples, now) && (
           <>
             {" "}

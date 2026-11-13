@@ -24,7 +24,8 @@ export type JobType =
   | "optimizer.run"
   | "recommendations.generate"
   | "signals.reextract"
-  | "sources.classify";
+  | "sources.classify"
+  | "site.check";
 
 export interface Job {
   id: string;

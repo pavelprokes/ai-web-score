@@ -23,6 +23,8 @@ import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { storedHostLabels } from "@/services/host-types";
+import { latestSiteSnapshot } from "@/services/site-check";
+import { digestFromSnapshot, robotsText } from "@/core/site/check";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
 /**
@@ -60,12 +62,19 @@ async function collectFindings(domainId: string) {
   if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
-  const [answers, clusters, site] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname)]);
+  const [answers, clusters, snapshot] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), latestSiteSnapshot(domainId)]);
   const hostLabels = await storedHostLabels(answers.flatMap((a) => a.signals.citedDomains));
+  // The weekly site check is the website's state; before the first one, robots.txt is fetched live and the pages come
+  // from the discovery crawl (which only changes on a re-discovery).
+  const profileDigest = (profileRow.digest as CrawlDigest | null) ?? null;
+  const site = snapshot
+    ? { robotsTxt: snapshot.robots.status === 200 ? robotsText(snapshot.robots.groups) : null, robotsStatus: snapshot.robots.status }
+    : await fetchSiteFiles(domain.hostname);
+  const digest = snapshot ? digestFromSnapshot(snapshot, `https://${domain.hostname}`, profileDigest) : profileDigest;
   const findings = diagnose({
     hostname: domain.hostname,
     profile,
-    digest: (profileRow.digest as CrawlDigest | null) ?? null,
+    digest,
     robotsTxt: site.robotsTxt,
     robotsStatus: site.robotsStatus,
     answers,
@@ -74,7 +83,7 @@ async function collectFindings(domainId: string) {
     ignoredCompetitors: domain.ignoredCompetitors,
     hostLabels,
   });
-  return { domain, profile, answers, clusters, findings };
+  return { domain, profile, answers, clusters, findings, siteCheckedAt: snapshot?.checkedAt ?? null };
 }
 
 const providerLabels = () => Object.fromEntries(listProviders().map((p) => [p.id, p.label]));

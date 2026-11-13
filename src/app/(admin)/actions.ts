@@ -152,7 +152,8 @@ export async function domainAction(formData: FormData) {
     case "generate-recommendations": {
       const [profile] = await getDb().select({ id: domainProfiles.id }).from(domainProfiles).where(eq(domainProfiles.domainId, id)).limit(1);
       if (!profile) redirect(`${back}?error=${encodeURIComponent("Run the discovery first — recommendations need the domain profile.")}`);
-      await enqueue("recommendations.generate", { domainId: id }, { dedupeKey: `recommendations:${id}`, maxAttempts: 2 });
+      // The website is checked first; the check queues the recommendations, so they read the fresh snapshot.
+      await enqueue("site.check", { domainId: id }, { dedupeKey: `site-check:${id}`, maxAttempts: 2 });
       kickJobs();
       break;
     }
