@@ -175,10 +175,14 @@ The audit of 2026-11-10 (production data, code, provider docs, comparable tools)
 
 ### Owner actions
 
-- **Database is at 380 MB of the 500 MB free tier** (~9 MB/day, `measurements.raw_response` is 298 MB). Set
-  `RAW_RESPONSE_RETENTION_DAYS=30` in Vercel: raw provider JSON older than that is cleared nightly (irreversible;
-  answers, citations and signals stay; only the optional `raw` flag of the measurements API reads it), then run
-  `VACUUM FULL measurements` once. Approving the proposal backlog multiplies answers per day 3–5×, so do this first.
+- **Database cleaned on 2026-11-13: 414 MB → 232 MB** (`measurements` 331 → 148 MB). Full `pg_dump` taken first
+  (owner's Mac, 108 MB, custom format); `raw_response` older than 7 days cleared (18,334 rows), then `VACUUM FULL
+  measurements`. Raw was ≈ 200 MB of 327 MB, mostly DataForSEO `result` (ChatGPT, AI Mode) and Perplexity `output`;
+  answers, citations, signals and scores untouched. `RAW_RESPONSE_RETENTION_DAYS=7` is set in Vercel, so the
+  nightly clean-up (03:00 UTC) keeps it there. Without raw the database still grows ≈ 3 MB/day
+  (`answer_text`, citations, `measurement_signals` 55 MB) — 2–3 months at today's volume, weeks after the proposal
+  backlog is approved; then Supabase Pro (8 GB). Next step: stop storing the parts of raw the columns already hold.
+  Note: the 500 MB is a billing quota per organization (402 above it); read-only mode is at 95 % of the 2 GB disk.
 - Approve or reject the waiting proposals (photographer 122, vzdelanibudoucnosti.cz 138, photos 49), or switch on
   "Apply changes automatically" in the Prompt portfolio. More prompts are the only lever that narrows the scores
   (±9–15 pp today, RESEARCH §7.3); spend stays inside the budgets except vzdelanibudoucnosti.cz, which would need
