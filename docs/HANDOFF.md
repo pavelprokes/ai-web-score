@@ -91,11 +91,12 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 ## Next task
 
-**2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74): facts checked at vendor
-pages, phases A–D. Phase A is implemented (agent table from vendor docs, RFC 9309 robots.txt on key pages, 5xx
-robots.txt, no FAQPage / llms.txt advice, sourced provider hints, plan-writing guardrails, RESEARCH §8). Pavel
-confirmed *Search generative AI* = Include in Search Console. Next from this review: phases B (site check) and C
-(source types) through `/team`; phase D probes (≈ $0.25) still need his go.
+**2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74, phase A merged as #75)
+and the team meeting on phases B and C (`docs/meetings/2026-11-13-phases-b-c-team.md`). Next, in order: C1 source
+types → B1 `site.check` snapshots → B2 eligibility (possible / confirmed) → "Fixed on the site" + B3 → B4 critical
+events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
+Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
+carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 
 **Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
 (UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept
