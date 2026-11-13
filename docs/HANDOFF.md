@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-11-12.
+Read this first in a new session. Last updated 2026-11-13.
 
 ## How to continue in a new session
 
@@ -90,6 +90,10 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #71 | Metric labels ("Named when asked by name", "Re-check every", "Certainty"), actionable "Not enough data"; `pnpm prod:check`; domain action `reextract-signals`; ROADMAP by phases |
 
 ## Next task
+
+**2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`): facts checked at vendor
+pages, seven defects in the recommendation diagnostics, phases A–D. Phase A (one PR, no production access) waits
+for Pavel's go; owner action: confirm Search Console → Settings → *Search generative AI* = Include on each domain.
 
 **Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
 (UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept

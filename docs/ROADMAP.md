@@ -1,7 +1,8 @@
 # Roadmap
 
 The plan and its evidence: `docs/meetings/2026-11-12-project-review-phased-plan.md`. What is merged and what
-comes next in detail: `docs/HANDOFF.md`. The tool is for the owner's own domains; no outward use is planned.
+comes next in detail: `docs/HANDOFF.md`. Site checks and fact corrections from the claude-seo review:
+`docs/meetings/2026-11-13-claude-seo-review-plan.md` (phases A–D there). The tool is for the owner's own domains; no outward use is planned.
 
 ## Done
 
@@ -24,6 +25,9 @@ comes next in detail: `docs/HANDOFF.md`. The tool is for the owner's own domains
    text never counts as a mention.
 4. `pnpm prod:check`: the manual production checks of HANDOFF as one read-only script with thresholds.
 5. Perplexity adapter: `effort` instead of the deprecated `preset`.
+6. Recommendation corrections (claude-seo review, phase A): AI agent table from vendor docs (Google-Extended also
+   controls Gemini grounding), robots.txt per RFC 9309 on key pages, no FAQPage advice, sourced provider hints,
+   the Search Console "Search generative AI" setting as an owner check.
 
 ## Phase 1 — numbers that can be trusted
 
@@ -41,6 +45,8 @@ comes next in detail: `docs/HANDOFF.md`. The tool is for the owner's own domains
 3. Broader answer analysis (brand-less answers with a list); DataForSEO `brand_entities` for competitor
    discovery if the field holds what it promises; authority finding per assistant.
 4. Bulk review of proposals by topic.
+5. Weekly site check with snapshots (eligibility, JS-only content, schema / NAP), site-change markers, "fixed on the
+   site" and before / after readout for Done items; source types of cited sites (claude-seo review, phases B–C).
 
 ## Phase 3 — more surfaces, each with a number
 
