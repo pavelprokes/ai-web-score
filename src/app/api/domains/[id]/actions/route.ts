@@ -81,7 +81,8 @@ export const POST = adminRoute<{ id: string }>(async (req, { params, actor }) =>
       return { decided: n };
     }
     case "generate-recommendations":
-      await enqueue("recommendations.generate", { domainId: id }, { dedupeKey: `recommendations:${id}`, maxAttempts: 2 });
+      // The website is checked first; the check queues the recommendations, so they read the fresh snapshot.
+      await enqueue("site.check", { domainId: id }, { dedupeKey: `site-check:${id}`, maxAttempts: 2 });
       break;
   }
   kickJobs();

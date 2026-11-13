@@ -46,6 +46,8 @@ export const domains = pgTable("domains", {
   providerReach: jsonb("provider_reach"),
   /** Names the admin chose not to track as competitors (hidden from the suggestions from answers). */
   ignoredCompetitors: jsonb("ignored_competitors").$type<string[]>().notNull().default([]),
+  /** The weekly site check reads the homepage and robots.txt only (client galleries: no names stored). */
+  siteCheckHomepageOnly: boolean("site_check_homepage_only").notNull().default(false),
   cyclesPerDay: integer("cycles_per_day").notNull().default(1),
   nextPlanAt: ts("next_plan_at"),
   lastDiscoveryAt: ts("last_discovery_at"),
@@ -462,6 +464,26 @@ export const providerBalances = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("provider_balances_account").on(t.account, t.createdAt)],
+).enableRLS();
+
+/**
+ * Weekly site check per domain (src/core/site/check.ts): robots.txt rules for AI agents and, per key page, status,
+ * robots directives, canonical, structured-data types and hash, words without JavaScript. No page bodies, no raw
+ * robots.txt; ≤ 20 kB; the latest KEEP_SNAPSHOTS per domain are kept.
+ */
+export const siteSnapshots = pgTable(
+  "site_snapshots",
+  {
+    id: id(),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    checkVersion: integer("check_version").notNull(),
+    robots: jsonb("robots").notNull(),
+    pages: jsonb("pages").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("site_snapshots_domain").on(t.domainId, t.createdAt)],
 ).enableRLS();
 
 /**

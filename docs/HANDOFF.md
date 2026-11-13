@@ -93,9 +93,11 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 **2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74, phase A merged as #75)
 and the team meeting on phases B and C (`docs/meetings/2026-11-13-phases-b-c-team.md`, #76). C1 source types is in
-the PR after #76 (migration 0013 `host_types`; check on production: share of cited volume typed ≥ 90 % per domain,
-and seo-geo reviews 50 LLM-labelled hosts, ≤ 5 wrong). Next, in order: B1 `site.check` snapshots → B2 eligibility (possible / confirmed) → "Fixed on the site" + B3 → B4 critical
-events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
+#77 (migration 0013 `host_types`; check on production: share of cited volume typed ≥ 90 % per domain, and seo-geo
+reviews 50 LLM-labelled hosts, ≤ 5 wrong). B1 `site.check` is in the PR after #77 (migration 0014 `site_snapshots`;
+on production: one snapshot per ACTIVE domain within a day of the deploy, ≤ 20 kB each, `select domain_id,
+pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). Next, in order: B2 eligibility findings
+(possible / confirmed, 24 h re-check) → "Fixed on the site" + B3 → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
 Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
 carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 

@@ -217,6 +217,16 @@ export async function latestScores(domainId: string, scoringVersion: string) {
     .where(and(eq(scoreSnapshots.domainId, domainId), eq(scoreSnapshots.scoringVersion, scoringVersion), eq(scoreSnapshots.windowEnd, latest.end)));
 }
 
+/** The domain's own pages AI cites for unbranded questions over the scoring window (the site check reads them). */
+export async function ownCitedPages(domainId: string): Promise<string[]> {
+  const [domain] = await getDb().select().from(domains).where(eq(domains.id, domainId));
+  if (!domain) return [];
+  const profile = await latestProfile(domainId);
+  const end = new Date();
+  const obs = await loadObservations(domainId, new Date(end.getTime() - DEFAULT_WINDOW_DAYS * 86_400_000), end, domain.scoringVersion);
+  return ownPages(obs, [domain.hostname, ...(profile?.profile.ownedDomains ?? [])]).pages.map((p) => p.url);
+}
+
 /** Sites AI cites for the domain's unbranded questions over the scoring window, and its own cited pages (see `topSources`, `ownPages`). */
 export async function sourcesFor(domainId: string) {
   const [domain] = await getDb().select().from(domains).where(eq(domains.id, domainId));

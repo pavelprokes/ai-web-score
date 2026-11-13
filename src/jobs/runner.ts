@@ -1,6 +1,6 @@
 import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb, runInJobScope } from "@/db";
-import { domains, measurementSignals, measurements, recommendationSets } from "@/db/schema";
+import { domains, measurementSignals, measurements, recommendationSets, siteSnapshots } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
 import { runDiscovery } from "@/services/discovery";
 import { type GenerationMode, generatePortfolio, optimizePortfolio } from "@/services/portfolio";
@@ -14,6 +14,7 @@ import { runOptimizer } from "@/services/optimizer";
 import { generateRecommendations } from "@/services/recommendations";
 import { reextractSignals } from "@/services/competitors";
 import { classifyCitedHosts } from "@/services/host-types";
+import { checkSite } from "@/services/site-check";
 import { syncProviderRegistry } from "@/services/registry";
 import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
 
@@ -37,6 +38,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "recommendations.generate": (p) => generateRecommendations(s(p.domainId)),
   "signals.reextract": (p) => reextractSignals(s(p.domainId), p.after ? s(p.after) : null),
   "sources.classify": () => classifyCitedHosts(),
+  "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false }),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
@@ -62,6 +64,7 @@ const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
   "recommendations.generate": 120, // site files + one short LLM call
   "signals.reextract": 120, // 60 s of slices, then the score history rebuild
   "sources.classify": 120, // up to three short hostname-only LLM calls
+  "site.check": 90, // ≤ 20 pages, 8 s each, 6 at a time; stops starting requests after 50 s
 };
 const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
 const DEFAULT_MAX_JOB_SECONDS = 60;
@@ -215,7 +218,24 @@ async function tick() {
     .from(recommendationSets)
     .where(gte(recommendationSets.createdAt, new Date(now.getTime() - RECOMMENDATIONS_EVERY_DAYS * 86_400_000)));
   const upToDate = new Set(fresh.map((r) => r.domainId));
+  // The website is checked weekly too; the check queues the recommendations itself, so they read the new snapshot.
+  const checked = await db
+    .selectDistinct({ domainId: siteSnapshots.domainId })
+    .from(siteSnapshots)
+    .where(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)));
+  const siteFresh = new Set(checked.map((r) => r.domainId));
+  // A check that keeps failing must not hold the recommendations back for good: past twice the interval they are
+  // written from the last snapshot (or the discovery crawl) anyway.
+  const recent = await db
+    .selectDistinct({ domainId: recommendationSets.domainId })
+    .from(recommendationSets)
+    .where(gte(recommendationSets.createdAt, new Date(now.getTime() - 2 * RECOMMENDATIONS_EVERY_DAYS * 86_400_000)));
+  const notOverdue = new Set(recent.map((r) => r.domainId));
   for (const d of monitored) {
+    if (!siteFresh.has(d.id)) {
+      await enqueue("site.check", { domainId: d.id }, { dedupeKey: `site-check:${d.id}:${day}`, oncePerKey: true, maxAttempts: 2 });
+      if (notOverdue.has(d.id)) continue;
+    }
     if (upToDate.has(d.id)) continue;
     await enqueue("recommendations.generate", { domainId: d.id }, { dedupeKey: `recommendations:${d.id}:${day}`, oncePerKey: true, maxAttempts: 2 });
   }
@@ -238,6 +258,7 @@ async function tick() {
 }
 
 const RECOMMENDATIONS_EVERY_DAYS = 7;
+const SITE_CHECK_EVERY_DAYS = 7;
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));

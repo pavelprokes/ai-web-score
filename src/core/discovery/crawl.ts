@@ -46,7 +46,22 @@ export interface CrawlDigest {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
 
-type Fetched = { status: number; text: string; contentType: string; url: string };
+export type Fetched = {
+  status: number;
+  text: string;
+  contentType: string;
+  /** Final URL after redirects. */
+  url: string;
+  /** The `X-Robots-Tag` header (robots directives outside the HTML), null when absent. */
+  robotsTag: string | null;
+};
+
+/** How the crawler fetches. The site check asks for the first answer only: a bot challenge is a finding, never bypassed. */
+export interface FetchOptions {
+  /** Retry a 403 / 429 once with a browser user agent (discovery only). Default true. */
+  browserRetry?: boolean;
+  timeoutMs?: number;
+}
 
 // Loopback, private, link-local (cloud metadata), CGNAT, multicast and reserved ranges; IPv4-mapped IPv6 matches the IPv4 rules.
 const NON_PUBLIC = new BlockList();
@@ -95,9 +110,10 @@ function mayRequest(url: URL, hosts: string[] | null): boolean {
  * is read up to MAX_BODY_BYTES. Polite bot UA first; bot-protection (403/429) gets one retry with a browser UA.
  * Null = not allowed, network error or too many redirects.
  */
-export async function fetchFromSite(url: string, hosts: string[] | null): Promise<Fetched | null> {
-  const first = await fetchOnce(url, UA, hosts);
-  if (first && (first.status === 403 || first.status === 429)) return (await fetchOnce(url, BROWSER_UA, hosts)) ?? first;
+export async function fetchFromSite(url: string, hosts: string[] | null, opts: FetchOptions = {}): Promise<Fetched | null> {
+  const timeout = opts.timeoutMs ?? FETCH_TIMEOUT;
+  const first = await fetchOnce(url, UA, hosts, timeout);
+  if (opts.browserRetry !== false && first && (first.status === 403 || first.status === 429)) return (await fetchOnce(url, BROWSER_UA, hosts, timeout)) ?? first;
   return first;
 }
 
@@ -105,16 +121,16 @@ export async function fetchFromSite(url: string, hosts: string[] | null): Promis
  * Requests the homepage first: the host it redirects to (apex → www, or a new domain) is part of the site for every
  * later request made through `get`.
  */
-export async function openSite(origin: string): Promise<{ home: Fetched | null; get: (url: string) => Promise<Fetched | null> }> {
+export async function openSite(origin: string, opts: FetchOptions = {}): Promise<{ home: Fetched | null; get: (url: string) => Promise<Fetched | null> }> {
   const hosts = [siteHost(new URL(origin).hostname)];
-  const home = await fetchFromSite(origin, null);
+  const home = await fetchFromSite(origin, null, opts);
   if (home) hosts.push(siteHost(new URL(home.url).hostname));
-  return { home, get: (url) => fetchFromSite(url, hosts) };
+  return { home, get: (url) => fetchFromSite(url, hosts, opts) };
 }
 
-async function fetchOnce(url: string, ua: string, hosts: string[] | null): Promise<Fetched | null> {
+async function fetchOnce(url: string, ua: string, hosts: string[] | null, timeoutMs = FETCH_TIMEOUT): Promise<Fetched | null> {
   try {
-    const signal = deadlineSignal(FETCH_TIMEOUT);
+    const signal = deadlineSignal(timeoutMs);
     let target = new URL(url);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       if (!mayRequest(target, hosts)) return null;
@@ -125,7 +141,14 @@ async function fetchOnce(url: string, ua: string, hosts: string[] | null): Promi
         dispatcher,
       });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!location) return { status: res.status, text: await readCapped(res), contentType: res.headers.get("content-type") ?? "", url: target.href };
+      if (!location)
+        return {
+          status: res.status,
+          text: await readCapped(res),
+          contentType: res.headers.get("content-type") ?? "",
+          url: target.href,
+          robotsTag: res.headers.get("x-robots-tag"),
+        };
       void res.body?.cancel().catch(() => {});
       target = new URL(location, target);
     }
@@ -197,7 +220,7 @@ function extractLocs(xml: string): string[] {
   return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]!);
 }
 
-const PRIORITY_PATH = /(about|o-nas|onas|services|sluzby|produkty|products|pricing|cenik|ceny|kontakt|contact|kurzy|courses|reference|portfolio|blog)/i;
+export const PRIORITY_PATH = /(about|o-nas|onas|services|sluzby|produkty|products|pricing|cenik|ceny|kontakt|contact|kurzy|courses|reference|portfolio|blog)/i;
 
 export async function crawlDomain(domain: string): Promise<CrawlDigest> {
   const origin = `https://${domain.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;

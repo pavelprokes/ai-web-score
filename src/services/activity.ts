@@ -48,6 +48,8 @@ const JOB_KINDS: Record<string, ActivityKind> = {
   "measurement.plan": "PLANNING",
   "scores.compute": "SCORING",
   "recommendations.generate": "RECOMMENDATIONS",
+  // The website check runs right before the recommendations it feeds.
+  "site.check": "RECOMMENDATIONS",
 };
 
 /** Work older than this is treated as stale (crashed worker) and not shown as in progress. */
