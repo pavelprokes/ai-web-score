@@ -176,8 +176,8 @@ The audit of 2026-11-10 (production data, code, provider docs, comparable tools)
 - **Database cleaned on 2026-11-13: 414 MB → 232 MB** (`measurements` 331 → 148 MB). Full `pg_dump` taken first
   (owner's Mac, 108 MB, custom format); `raw_response` older than 7 days cleared (18,334 rows), then `VACUUM FULL
   measurements`. Raw was ≈ 200 MB of 327 MB, mostly DataForSEO `result` (ChatGPT, AI Mode) and Perplexity `output`;
-  answers, citations, signals and scores untouched. **Set `RAW_RESPONSE_RETENTION_DAYS=7` in Vercel and redeploy**
-  so the nightly clean-up keeps it there (confirm it is set). Without raw the database still grows ≈ 3 MB/day
+  answers, citations, signals and scores untouched. `RAW_RESPONSE_RETENTION_DAYS=7` is set in Vercel, so the
+  nightly clean-up (03:00 UTC) keeps it there. Without raw the database still grows ≈ 3 MB/day
   (`answer_text`, citations, `measurement_signals` 55 MB) — 2–3 months at today's volume, weeks after the proposal
   backlog is approved; then Supabase Pro (8 GB). Next step: stop storing the parts of raw the columns already hold.
   Note: the 500 MB is a billing quota per organization (402 above it); read-only mode is at 95 % of the 2 GB disk.
