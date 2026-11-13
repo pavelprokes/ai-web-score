@@ -21,7 +21,63 @@ export interface MetricDefinition {
   example: string;
   /** How to read the value: what is good, what to do about it. */
   reading?: string;
+  /** Where a scoring version other than the default calculates this metric differently, keyed by version id. */
+  byVersion?: Record<string, string>;
 }
+
+/**
+ * The scoring versions, oldest first — what each one changed and why. A version is a formula: stored answers
+ * never change, so the history of a domain can be recalculated under any of them. Keep in sync with
+ * `SCORING_VERSIONS` (src/core/scoring/scoring.ts) and docs/METHODOLOGY.md §6; a test checks the ids.
+ */
+export interface ScoringVersionNote {
+  id: string;
+  /** Date the version became available. */
+  since: string;
+  summary: string;
+  /** What it changed against the version before it. */
+  changes: string[];
+  /** Why: the evidence that led to it. */
+  why: string;
+}
+
+export const SCORING_VERSION_NOTES: ScoringVersionNote[] = [
+  {
+    id: "geo-v1",
+    since: "2026-10-06",
+    summary: "The first formula: rates of being mentioned, cited and recommended, position, share of voice, sentiment and accuracy, combined into one overall score.",
+    changes: [
+      "Every valid answer counts, including answers to questions that name the brand.",
+      "In a recommendation list is counted only over answers where a list with a tracked name was detected.",
+    ],
+    why: "Starting point before any production data.",
+  },
+  {
+    id: "geo-v2",
+    since: "2026-10-12",
+    summary: "Visibility is measured only on questions that do not name the brand, for topics the current profile still has.",
+    changes: [
+      "Questions that name the brand no longer count in Mentioned, Cited, In a recommendation list, share among rivals or the overall score. They feed Sentiment and Accuracy and are shown separately as \u201cWhen AI is asked about you by name\u201d.",
+      "In a recommendation list is counted over all answers to unbranded questions.",
+      "Only prompts of active topics count.",
+      "An assistant that has just been added phases in over 7 days, so the score does not jump when the mix changes.",
+      "\u201cNot enough data\u201d replaces the overall score when the Mentioned interval is wider than ±10 points.",
+    ],
+    why: "The first 5,000 production answers: branded questions inflated visibility, and the recommendation rate had a biased base.",
+  },
+  {
+    id: "geo-v3",
+    since: "2026-11-12",
+    summary: "The same metrics, counted per question instead of per answer, with intervals that match how answers really vary, and no points for a brand that is almost never named.",
+    changes: [
+      "One weight per question and assistant, shared by its answers. A question measured twenty times counts like one measured twice. (geo-v2 weighs each answer, and questions that show the brand are measured more often — rates came out about 7 points too high on two domains.)",
+      "Confidence intervals are computed over questions, because answers to the same question resemble each other. They are wider and honest; geo-v2 intervals were 4–5× too narrow where the brand appears.",
+      "In the overall score, position, sentiment and accuracy count in proportion to how often the brand is named. A brand that is never named scores 0. (geo-v2 averaged them over the few answers naming the brand: 19 points at a mention rate of 0.8 %.) The Sentiment and Accuracy tiles themselves do not change.",
+      "Questions where the brand has not appeared for a long run of answers are re-measured weekly (every 3 days on ChatGPT) instead of every other day.",
+    ],
+    why: "21,483 production answers over five weeks (docs/RESEARCH.md §7).",
+  },
+];
 
 export const METRIC_GROUPS: Array<{ id: MetricGroup; name: string; intro: string }> = [
   {
@@ -72,6 +128,11 @@ export const METRICS: MetricDefinition[] = [
       "Mentioned 62 %, in a recommendation list 62 %, cited 37 %, share of voice 19 %, position component 0.5, sentiment 0.80, accuracy 0.85 → " +
       "100 × (0.25·0.62 + 0.2·0.62 + 0.15·0.37 + 0.15·0.19 + 0.1·0.5 + 0.075·0.80 + 0.075·0.85) ≈ 54/100.",
     reading: "Compare the score with itself over time and across providers, not with scores from other tools — every vendor weighs differently.",
+    byVersion: {
+      "geo-v3":
+        "Same weights. Position component = average of 1 / position over all answers (0 where the brand is not in a list). " +
+        "Sentiment and accuracy components = their score × Mentioned. So a brand that is never named scores 0, and the score is lower than under geo-v2 for the same answers.",
+    },
   },
   {
     id: "mention-rate",
@@ -86,6 +147,11 @@ export const METRICS: MetricDefinition[] = [
       "If an assistant never names the brand, the customer never hears of it. Answers that failed or contained no real answer are excluded.",
     example: "100 answers in 28 days, 62 of them name “Se vezmou” → 62 %. With weights the value can differ slightly from the plain count.",
     reading: "The small numbers next to it (e.g. 57–66) are the 95 % confidence interval — see Confidence interval.",
+    byVersion: {
+      "geo-v3":
+        "Mentioned = weighted mean of the per-question rates. Each question on each assistant has one weight (prompt importance × the assistant's reach share) " +
+        "that its answers share equally, so how often a question was measured does not change how much it counts.",
+    },
   },
   {
     id: "citation-rate",
@@ -100,6 +166,9 @@ export const METRICS: MetricDefinition[] = [
       "Answers produced without search cannot cite anything, so they are left out instead of counting as zero.",
     example: "Of 80 answers that searched the web, 30 link se-vezmou.cz → 37.5 %.",
     reading: "Low citations with high mentions usually means the brand is known but its pages are not the best source for the question.",
+    byVersion: {
+      "geo-v3": "Per question, as Mentioned: the answers of a question that searched the web share the question's whole weight.",
+    },
   },
   {
     id: "recommendation-rate",
@@ -112,6 +181,7 @@ export const METRICS: MetricDefinition[] = [
       "Questions like “which wedding photographer in Prague?” end with a list. Being on that list is the closest thing to winning the customer. " +
       "Every answer counts in the denominator, so this can never be higher than Mentioned.",
     example: "200 answers to unbranded questions, the brand is in the recommendation list of 12 → 6 %.",
+    byVersion: { "geo-v3": "Per question, as Mentioned: the weighted mean of each question's share of answers that list the brand." },
   },
   {
     id: "average-position",
@@ -170,6 +240,9 @@ export const METRICS: MetricDefinition[] = [
       "Being mentioned negatively can hurt more than not being mentioned. To keep cost low, a judgement is reused for up to 7 days when the answer's outcome has not changed; a reused judgement counts once.",
     example: "Mean judgement +0.6 → 100 × 1.6 / 2 = 80/100.",
     reading: "Below 50 means the answers lean negative — read the evidence in the measurements before acting.",
+    byVersion: {
+      "geo-v3": "The tile is calculated the same way, per question. In the overall score it counts as Sentiment × Mentioned.",
+    },
   },
   {
     id: "accuracy",
@@ -181,6 +254,9 @@ export const METRICS: MetricDefinition[] = [
       "Accuracy = 100 × weighted mean of the available parts",
     description: "Assistants sometimes invent prices or services. Low accuracy means customers are told wrong things about the business.",
     example: "Description 1.0, products 0.8, pricing 0.75 → 0.85 → 85/100.",
+    byVersion: {
+      "geo-v3": "The tile is calculated the same way, per question. In the overall score it counts as Accuracy × Mentioned.",
+    },
   },
 
   // ── Reliability ────────────────────────────────────────────────────
@@ -196,6 +272,13 @@ export const METRICS: MetricDefinition[] = [
       "The same question asked twice can get different answers. The interval shows how much of a difference is just this noise.",
     example: "Mentioned 62 % with interval 57–66: the true rate is very likely between 57 % and 66 %.",
     reading: "Two values whose intervals overlap a lot are probably not really different. Treat a change as real when it is outside the earlier interval.",
+    byVersion: {
+      "geo-v3":
+        "The question, not the answer, is the independent unit. The variance of the rate is estimated from how much the questions differ from each other, " +
+        "converted to an effective number of independent answers for the Wilson interval, and widened by the Student t quantile when there are few questions. " +
+        "When no question (or every question) names the brand, the number of questions is the sample. " +
+        "Expect wider intervals than under geo-v2: with 25–35 questions, about ±10–15 points where the brand appears.",
+    },
   },
   {
     id: "answers",
@@ -246,6 +329,11 @@ export const METRICS: MetricDefinition[] = [
     formula: "Re-check every = (target variance − variance after measuring) / daily volatility, limited to 1–7 days for core prompts and 1–30 days for others",
     description: "Stable answers are measured rarely, volatile ones often. This is the main way the system saves money without losing information.",
     example: "Answers that rarely change → every 14 days; answers that flip often → daily.",
+    byVersion: {
+      "geo-v3":
+        "A question where the brand has not appeared in at least eight answers from four or more cycles is re-checked weekly with one answer (every 3 days on ChatGPT). " +
+        "One answer that shows the brand returns it to the learned interval. Under geo-v2 this rule is off, because fewer answers without the brand would raise the rates.",
+    },
   },
 
   // ── Portfolio ──────────────────────────────────────────────────────

@@ -122,6 +122,23 @@ Signals are versioned (`extract-v1`, `analyze-v1`) and can be recomputed from ra
 
 ## 6. Scoring
 
+Scoring versions are this project's own formulas, not an external standard: the single metrics (mention,
+citation and recommendation rates, share of voice, sentiment) are the ones the field uses, the way they are
+weighted, combined and given intervals is ours. A version is never edited. A change is a new version, a domain
+names the version it uses (`domains.scoring_version`), and its history is recalculated from the stored signals,
+so a trend never mixes two formulas.
+
+| Version | Since | Used by | What it changed | Why |
+|---|---|---|---|---|
+| `geo-v1` | 2026-10-06 | no domain | First formula: all valid answers; recommendation rate over answers with a detected list | Starting point |
+| `geo-v2` | 2026-10-12 (#30) | every domain (default) | Unbranded questions of active topics only; branded questions feed sentiment and accuracy; recommendation rate over all answers; new providers phase in over 7 days; "Not enough data" floor | First 5,000 production answers (`docs/meetings/2026-10-12-first-production-data.md`) |
+| `geo-v3` | 2026-11-12 (#70) | no domain yet | One weight per prompt × assistant; intervals over prompts; no floor in the overall score; quiet cells measured weekly | 21,483 production answers (`docs/RESEARCH.md` §7, `docs/meetings/2026-11-12-project-review-phased-plan.md`) |
+
+Where a version is described: this section (the method), `SCORING_VERSIONS` in `src/core/scoring/scoring.ts`
+(weights and rules), and the admin's Metrics page (`SCORING_VERSION_NOTES` and the per-metric `byVersion` notes
+in `src/components/metrics-catalog.ts`; a test keeps the three lists in step). Each domain page states its
+version. Adding a version means all three places plus this table.
+
 `geo-v1`: mention rate, citation rate (only where search happened), recommendation rate (only where a
 recommendation list exists), average position, citation share, share of voice (1/position weighted),
 sentiment, accuracy, search rate, and a configurable weighted overall score (missing components
