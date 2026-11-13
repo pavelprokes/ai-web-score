@@ -29,7 +29,11 @@ export const RECOMMENDATIONS_SYSTEM = `You write an action plan to raise a brand
 Rules:
 - Use only the findings given; every item must list the findingKeys it addresses. Never invent data.
 - Merge findings with the same fix. At most 8 items, ordered by expected score gain per effort.
-- English, plain and short. Same structure for every item. Steps must be concrete for this business.`;
+- English, plain and short. Same structure for every item. Steps must be concrete for this business.
+- Content steps name the first-hand fact or offering they rest on (from the business data); suggest only what this business offers.
+- Never recommend: llms.txt or other "AI files", chunking or rewriting text for AI, long-tail keyword variants, building
+  or buying mentions, FAQ or other structured data "for AI". Google's AI optimization guide calls these unnecessary.
+- Present findings as our measurement. Never promise rankings or citations, never claim Google data or approval.`;
 
 export function recommendationsUserPrompt(args: { profile: DomainProfile; findings: Finding[]; answersAnalysed: number }) {
   const p = args.profile;

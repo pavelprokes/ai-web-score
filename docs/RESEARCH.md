@@ -435,6 +435,29 @@ Recommendations for the owner; no code or constant changes in this change.
    count, and `photographer` got four profile versions on 11-10. Uncertainty: none on the count; the right
    remedy (carry prompts over, or re-discover less often) is a product decision.
 
+## 8. External facts register (checked 2026-11-13)
+
+Facts the recommendations rely on, from the vendors' own pages (P) or third parties (T). Re-check a row older than 60
+days before relying on it; the code keeps the same date in `CHECKED_ON` (`src/core/recommendations/ai-agents.ts`), and
+`ai-agents.test.ts` locks out the easy mix-ups. Evidence and the claude-seo review: `docs/meetings/2026-11-13-claude-seo-review-plan.md`.
+
+| Fact | Grade | Source |
+|---|---|---|
+| OAI-SearchBot decides ChatGPT search; GPTBot is training only; ChatGPT-User is user-initiated, robots.txt "may not apply" | P | developers.openai.com/api/docs/bots |
+| Claude-SearchBot (search), ClaudeBot (training), Claude-User (user fetch) honour robots.txt; `anthropic-ai` is no longer listed | P | support.claude.com/en/articles/8896518 |
+| PerplexityBot surfaces sites in Perplexity search, not training; Perplexity-User generally ignores robots.txt | P | docs.perplexity.ai/guides/bots |
+| Google-Extended controls Gemini training **and grounding in Gemini Apps**; it does not affect Google Search, AI Overviews or AI Mode (Googlebot does) | P | developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers |
+| AI Overviews / AI Mode: indexed and snippet-eligible; controls are noindex, nosnippet, data-nosnippet, max-snippet | P | developers.google.com/search/docs/appearance/ai-features |
+| Since 2026-08-31 a site must be included under Search Console → *Search generative AI* (no API) | P | AI optimization guide; support.google.com/webmasters/answer/16908024 |
+| Google Search ignores llms.txt; chunking, rewriting for AI, mention building and structured data "for AI" are unnecessary | P | developers.google.com/search/docs/fundamentals/ai-optimization-guide |
+| FAQ rich results gone from 2026-05-07 | P | developers.google.com/search/updates |
+| robots.txt: groups of one token merge, longest rule wins, allow on a tie; a 5xx stops Google for 12 h, then the last good copy for 30 days | P | developers.google.com/crawling/docs/robots-txt/robots-txt-spec; RFC 9309 |
+| Applebot follows Googlebot's rules when no group names it; Applebot-Extended only marks training use | P | support.apple.com/en-us/119829 |
+| Bing: NOARCHIVE keeps a page out of Copilot answers, NOCACHE limits it to URL / title / snippet | P (2023), T (2026 extension) | blogs.bing.com, 2023-09 |
+| GPTBot, ClaudeBot, PerplexityBot do not render JavaScript | T | Vercel / MERJ, 2024-12-17 |
+| AI Mode and AI Overviews cite the same URL 13.7 % of the time | T (US) | Ahrefs, 2025-12 |
+| 44 % of ChatGPT citations come from the first 30 % of a page; pages updated within 3 months ≈ 1.7× the citations (not 3×) | T (ChatGPT only) | Kevin Indig, SEJ 2026-02-17; SE Ranking 2025-11-24 |
+
 ## Open verification items
 
 1. Live-check DataForSEO CZ/`cs` support for the ChatGPT and Gemini scrapers (`/locations`, `/languages`).
