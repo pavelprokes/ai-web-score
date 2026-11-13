@@ -38,7 +38,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "recommendations.generate": (p) => generateRecommendations(s(p.domainId)),
   "signals.reextract": (p) => reextractSignals(s(p.domainId), p.after ? s(p.after) : null),
   "sources.classify": () => classifyCitedHosts(),
-  "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false }),
+  "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false, recheck: p.recheck === true }),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */

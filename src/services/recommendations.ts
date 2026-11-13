@@ -23,7 +23,7 @@ import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { storedHostLabels } from "@/services/host-types";
-import { latestSiteSnapshot } from "@/services/site-check";
+import { recentSiteSnapshots } from "@/services/site-check";
 import { digestFromSnapshot, robotsText } from "@/core/site/check";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
@@ -62,7 +62,8 @@ async function collectFindings(domainId: string) {
   if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
-  const [answers, clusters, snapshot] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), latestSiteSnapshot(domainId)]);
+  const [answers, clusters, snapshots] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), recentSiteSnapshots(domainId, 2)]);
+  const snapshot = snapshots[0] ?? null;
   const hostLabels = await storedHostLabels(answers.flatMap((a) => a.signals.citedDomains));
   // The weekly site check is the website's state; before the first one, robots.txt is fetched live and the pages come
   // from the discovery crawl (which only changes on a re-discovery).
@@ -82,6 +83,7 @@ async function collectFindings(domainId: string) {
     providerLabels: providerLabels(),
     ignoredCompetitors: domain.ignoredCompetitors,
     hostLabels,
+    site: snapshot ? { latest: snapshot, previous: snapshots[1] ?? null } : undefined,
   });
   return { domain, profile, answers, clusters, findings };
 }

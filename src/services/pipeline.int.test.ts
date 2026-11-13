@@ -711,6 +711,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(JSON.stringify(snap).length).toBeLessThan(20_000);
       expect(JSON.stringify(snap)).not.toContain("slovo slovo");
 
+      // /kurzy has noindex: seen once, so "possible", and the site is checked again in 24 hours.
+      expect(result.recheckQueued).toBe(true);
+      const [recheck] = await db.select().from(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`));
+      expect(recheck!.payload).toMatchObject({ domainId: demo!.id, recheck: true });
+      const hours = (recheck!.runAt.getTime() - Date.now()) / 3600_000;
+      expect(hours).toBeGreaterThan(23.9);
+      expect(hours).toBeLessThan(24.1);
+
       // The recommendations read the snapshot: no live robots.txt request, the blocked section is found.
       requests.length = 0;
       await generateRecommendations(demo!.id);
@@ -718,6 +726,17 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       const set = (await latestRecommendations(demo!.id))!.set;
       const robots = (set.diagnostics as Array<{ key: string; evidence: { blockedPaths?: string[] } }>).find((f) => f.key === "robots:OAI-SearchBot");
       expect(robots?.evidence.blockedPaths).toEqual(["/kurzy"]);
+      const state = async () =>
+        ((await latestRecommendations(demo!.id))!.set.diagnostics as Array<{ key: string; evidence: { state?: string } }>).find((f) => f.key === "eligibility:noindex")?.evidence
+          .state;
+      expect(await state()).toBe("possible");
+
+      // The re-check sees it again: confirmed, and a re-check does not schedule another.
+      await db.delete(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`));
+      expect((await checkSite(demo!.id, { thenRecommend: false, recheck: true })).recheckQueued).toBe(false);
+      await generateRecommendations(demo!.id);
+      expect(await state()).toBe("confirmed");
+      expect(await db.select().from(s.jobs).where(eq(s.jobs.dedupeKey, `site-recheck:${demo!.id}`))).toHaveLength(0);
 
       // A gallery site is checked on its homepage only.
       await db.update(s.domains).set({ siteCheckHomepageOnly: true }).where(eq(s.domains.id, demo!.id));
@@ -733,6 +752,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     } finally {
       globalThis.fetch = realFetch;
       await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+      await db.delete(s.jobs).where(inArray(s.jobs.type, ["site.check", "recommendations.generate"]));
     }
   });
 
