@@ -100,8 +100,10 @@ on production: one snapshot per ACTIVE domain within a day of the deploy, ≤ 20
 pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). B2 site findings (possible / confirmed, 24 h
 re-check) are merged as #81; "Fixed on the site" / "Still found" (Done reopens after two checks) and B3 (likely reason /
 contradicted by citations) are merged as #82 (migration 0015 `recommendation_sets.site_checked_at`). B4 critical website
-changes as dated lines in "Needs your attention" are in the PR after #82; chart markers wait for the Phase 1 markers.
-Phases B and C of the claude-seo review are then done except the postponed parts. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
+changes as dated lines in "Needs your attention" are merged as #83 (snapshots now kept 45 days); chart markers wait for
+the Phase 1 markers. Phases B and C of the claude-seo review are done except the postponed parts (B5 metric after
+geo-v3; C2 page types; phase D probes need Pavel's go). On production verify with SQL: one snapshot per ACTIVE domain
+per week, `host_types` typed share ≥ 90 %, and the first "Likely reason" / "Still found" lines. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
 Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
 carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 
