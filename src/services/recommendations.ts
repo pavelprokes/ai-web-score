@@ -22,6 +22,7 @@ import { type BriefExample, pickExamples, renderAgentBrief } from "@/core/recomm
 import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
+import { storedHostLabels } from "@/services/host-types";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
 /**
@@ -59,7 +60,7 @@ async function collectFindings(domainId: string) {
   if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
-  const [answers, clusters, site] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname)]);
+  const [answers, clusters, site, hostLabels] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname), storedHostLabels()]);
   const findings = diagnose({
     hostname: domain.hostname,
     profile,
@@ -70,6 +71,7 @@ async function collectFindings(domainId: string) {
     clusters,
     providerLabels: providerLabels(),
     ignoredCompetitors: domain.ignoredCompetitors,
+    hostLabels,
   });
   return { domain, profile, answers, clusters, findings };
 }

@@ -554,6 +554,45 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
+  it("labels unknown cited hosts once from the hostname alone; seed hosts and manual labels are never sent or overwritten", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { setLlmOverride } = await import("@/lib/llm");
+    const { classifyCitedHosts, setHostType, storedHostLabels } = await import("@/services/host-types");
+    const db = getDb();
+    // One answer cites a seed host, an unknown host and an unknown host the admin already labelled.
+    await db.execute(sql`update measurement_signals set signals = jsonb_set(signals, '{citedDomains}',
+      coalesce(signals->'citedDomains', '[]'::jsonb) || '["firmy.cz", "www.nejlepsi-svatby.example", "manual-label.example"]'::jsonb)
+      where measurement_id = (select measurement_id from measurement_signals order by created_at limit 1)`);
+    await setHostType("manual-label.example", "listing", "pavel@example.cz");
+    const sent: string[] = [];
+    setLlmOverride(({ purpose, user }) => {
+      expect(purpose).toBe("sources");
+      const hosts = (JSON.parse(user) as { hosts: string[] }).hosts;
+      sent.push(...hosts);
+      return { labels: hosts.map((host) => ({ host, type: host.includes("svatby") ? "editorial" : "other" })) };
+    });
+    try {
+      const first = await classifyCitedHosts();
+      expect(sent).toContain("nejlepsi-svatby.example");
+      expect(sent).not.toContain("firmy.cz");
+      expect(sent).not.toContain("manual-label.example");
+      expect(first.labelled).toBe(sent.length);
+      const labels = await storedHostLabels();
+      expect(labels.get("nejlepsi-svatby.example")).toEqual({ type: "editorial", source: "llm" });
+      expect(labels.get("manual-label.example")).toEqual({ type: "listing", source: "manual" });
+      const [row] = await db.select().from(s.hostTypes).where(eq(s.hostTypes.host, "nejlepsi-svatby.example"));
+      expect(row!.labelledBy).toBe("claude-haiku-5-5");
+
+      // Second run: nothing left to ask.
+      sent.length = 0;
+      expect((await classifyCitedHosts()).labelled).toBe(0);
+      expect(sent).toEqual([]);
+    } finally {
+      setLlmOverride(null);
+    }
+  });
+
   it("schedules a recommendations refresh for ACTIVE domains whose latest set is a week old, once a day", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

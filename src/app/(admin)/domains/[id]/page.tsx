@@ -5,7 +5,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
-import { competitorStandings, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
+import { competitorStandings, type KindShareRow, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
+import { KIND_LABEL, type SourceKind } from "@/core/sources/host-types";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
 import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
@@ -54,7 +55,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, ownPages, ownPagesTotal }, suggestions, matches, searches] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -150,7 +151,7 @@ export default async function DomainPage({
       </div>
 
       <Standings detail={detail} matches={matches} />
-      <Sources rows={sources} ownPages={ownPages} ownPagesTotal={ownPagesTotal} />
+      <Sources rows={sources} kindShares={kindShares} ownPages={ownPages} ownPagesTotal={ownPagesTotal} />
       <Searches topics={searches} detail={detail} />
       <ClusterScores detail={detail} />
       <Schedule detail={detail} now={now} open={open("schedule-heading")} />
@@ -696,7 +697,7 @@ function Searches({ topics, detail }: { topics: SearchQueryTopic[]; detail: Deta
   );
 }
 
-function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPages: PageRow[]; ownPagesTotal: number }) {
+function Sources({ rows, kindShares, ownPages, ownPagesTotal }: { rows: SourceRow[]; kindShares: KindShareRow[]; ownPages: PageRow[]; ownPagesTotal: number }) {
   return (
     <Section
       title="Where AI looks"
@@ -737,6 +738,7 @@ function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPage
           The {num(ownPages.length)} most cited of {num(ownPagesTotal)} pages.
         </p>
       )}
+      <SourceKinds rows={kindShares} />
       <h3 className="subhead">Other sites</h3>
       <p className="note">
         Sites the assistants cite when answering the questions that do not name you, last 28 days. A directory or portal high on this list where
@@ -757,6 +759,7 @@ function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPage
                 <th scope="col" className="num">
                   Answers
                 </th>
+                <th scope="col">Type</th>
                 <th scope="col">Assistants</th>
                 <th scope="col" className="num">
                   You named alongside
@@ -779,6 +782,7 @@ function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPage
                   </th>
                   <td className="num">{pct(r.share)}</td>
                   <td className="num">{num(r.answers)}</td>
+                  <td>{r.kind ? KIND_LABEL[r.kind] : "—"}</td>
                   <td>{r.providers.map(providerLabel).join(", ")}</td>
                   <td className="num">{pct(r.brandMentionedWith)}</td>
                 </tr>
@@ -788,6 +792,53 @@ function Sources({ rows, ownPages, ownPagesTotal }: { rows: SourceRow[]; ownPage
         </TableScroll>
       )}
     </Section>
+  );
+}
+
+/** Order of the kinds in the table: what Pavel can act on first, then the rest. */
+const KIND_ORDER: SourceKind[] = ["listing", "editorial", "ugc", "competitor", "own", "reference", "other", "unclassified"];
+
+/** What kinds of sites each assistant cites (C1): rows are kinds, columns assistants; a text table, not colour. */
+function SourceKinds({ rows }: { rows: KindShareRow[] }) {
+  if (rows.length === 0) return null;
+  const kinds = KIND_ORDER.filter((k) => rows.some((r) => (r.shares[k] ?? 0) > 0));
+  return (
+    <>
+      <h3 className="subhead" id="source-kinds-heading">
+        Kinds of sites cited
+      </h3>
+      <p className="note">
+        Share of the sites each assistant cites for the questions that do not name you, last 28 days; a site cited for the same question counts
+        once. Directories and review sites are places to get listed and reviewed; news and magazines take a story or a quote.
+      </p>
+      <TableScroll label="Kinds of sites cited (scrollable)">
+        <table className="hig-table" aria-labelledby="source-kinds-heading">
+          <thead>
+            <tr>
+              <th scope="col">Kind of site</th>
+              {rows.map((r) => (
+                <th scope="col" className="num" key={r.providerId}>
+                  {providerLabel(r.providerId)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {kinds.map((k) => (
+              <tr key={k}>
+                <th scope="row">{KIND_LABEL[k]}</th>
+                {rows.map((r) => (
+                  <td className="num" key={r.providerId}>
+                    {r.shares[k] ? pct(r.shares[k]!) : "—"}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+      <p className="note">Sites cited, counted once per question: {rows.map((r) => `${providerLabel(r.providerId)} ${num(r.citations)}`).join(", ")}.</p>
+    </>
   );
 }
 

@@ -21,11 +21,13 @@ export function mockAnswer(prompt: string, measurementId: string, brand = "Examp
   const names = ["Alpha Studio", "Beta Works", "Gamma Group"];
   if (mentioned) names.splice(Math.floor(noise * 3), 0, brand);
   const text = `Here are some options:\n\n${names.map((n, i) => `${i + 1}. **${n}** – a well-reviewed choice.`).join("\n")}`;
-  const citations = mentioned && noise < base / 2 ? [{ url: `https://${brandDomain}/`, title: brandDomain }] : [];
+  // Like real answers, the review site is cited, not only searched (the third-party-sources finding counts citations).
+  const review = { url: "https://example.org/review", title: "example.org" };
+  const citations = [...(mentioned && noise < base / 2 ? [{ url: `https://${brandDomain}/`, title: brandDomain }] : []), review];
   return {
     answerText: text,
     citations,
-    sources: [...citations, { url: "https://example.org/review", title: "example.org" }],
+    sources: citations,
     searchWasUsed: true,
     usage: { ...EMPTY_USAGE, inputTokens: 40, outputTokens: 120 },
     search: { billableUnits: 1, queries: [prompt.slice(0, 60)] },

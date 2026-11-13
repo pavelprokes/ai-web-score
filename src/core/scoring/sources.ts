@@ -1,7 +1,8 @@
+import type { SourceKind } from "../sources/host-types";
 import { hostMatches, hostOf } from "../signals/matcher";
 import type { ScoringObservation } from "./scoring";
 
-type Observation = Pick<ScoringObservation, "signals" | "providerId" | "branded">;
+type Observation = Pick<ScoringObservation, "signals" | "providerId" | "branded"> & { promptId?: string };
 
 export interface PageRow {
   /** Host without "www." plus path and query string (tracking parameters removed), as shown. */
@@ -22,6 +23,8 @@ export interface SourceRow {
   brandMentionedWith: number;
   /** Its most cited pages. */
   pages: PageRow[];
+  /** What kind of site it is (when the caller classifies hosts). */
+  kind?: SourceKind;
 }
 
 const SOURCE_PAGES = 3;
@@ -66,7 +69,7 @@ function citedPages(answers: Observation[], keep: (host: string) => boolean): Ar
  * high on this list where the brand is rarely named is a place to get listed; a brand site is a competitor.
  * Own domains are left out (they are the Cited metric).
  */
-export function topSources(obs: Observation[], ownDomains: string[], limit = 15): SourceRow[] {
+export function topSources(obs: Observation[], ownDomains: string[], limit = 15, kindOf?: (host: string) => SourceKind): SourceRow[] {
   const answers = unbranded(obs);
   const own = (d: string) => ownDomains.some((o) => hostMatches(d, o));
   const by = new Map<string, { answers: number; withBrand: number; providers: Set<string> }>();
@@ -89,7 +92,43 @@ export function topSources(obs: Observation[], ownDomains: string[], limit = 15)
     providers: [...r.providers].sort(),
     brandMentionedWith: r.withBrand / r.answers,
     pages: pages.filter((p) => p.host === domain).slice(0, SOURCE_PAGES).map(({ host: _host, ...p }) => p),
+    ...(kindOf ? { kind: kindOf(domain) } : {}),
   }));
+}
+
+export interface KindShareRow {
+  providerId: string;
+  /** Distinct (question, cited site) pairs of this assistant: the base of `shares`. */
+  citations: number;
+  /** Share of those pairs by kind of site; kinds without a citation are left out. */
+  shares: Partial<Record<SourceKind, number>>;
+}
+
+/**
+ * What kinds of sites each assistant cites for unbranded questions. A site cited for the same question by the same
+ * assistant counts once (questions the planner samples more often would otherwise weigh more), only cited domains
+ * count (not search results the assistant saw), and assistants are kept apart: they share few cited domains
+ * (RESEARCH §7.1, Jaccard 0.10–0.11).
+ */
+export function sourceKindShares(obs: Observation[], kindOf: (host: string) => SourceKind): KindShareRow[] {
+  const pairs = new Map<string, Set<string>>();
+  for (const o of unbranded(obs)) {
+    const set = pairs.get(o.providerId) ?? new Set<string>();
+    for (const d of o.signals.citedDomains) set.add(`${o.promptId ?? ""}\u0000${d}`);
+    pairs.set(o.providerId, set);
+  }
+  return [...pairs.entries()]
+    .filter(([, set]) => set.size > 0)
+    .map(([providerId, set]) => {
+      const counts: Partial<Record<SourceKind, number>> = {};
+      for (const key of set) {
+        const kind = kindOf(key.slice(key.indexOf("\u0000") + 1));
+        counts[kind] = (counts[kind] ?? 0) + 1;
+      }
+      const shares = Object.fromEntries(Object.entries(counts).map(([k, n]) => [k, n! / set.size])) as Partial<Record<SourceKind, number>>;
+      return { providerId, citations: set.size, shares };
+    })
+    .sort((a, b) => a.providerId.localeCompare(b.providerId));
 }
 
 /** "Your pages AI cites": pages of the own domains cited in answers to unbranded questions, most cited first; `total` counts them all. */
