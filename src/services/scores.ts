@@ -5,6 +5,7 @@ import { domains, measurementSignals, measurements, prompts, promptVersions, pro
 import { throwIfJobCancelled } from "@/jobs/queue";
 import { ownPages, sourceKindShares, topSources } from "@/core/scoring/sources";
 import { typeOfHost } from "@/core/sources/host-types";
+import { competitorHostTest } from "@/core/competitors";
 import { storedHostLabels } from "@/services/host-types";
 import { latestProfile } from "./discovery";
 import { computeMetrics, getScoringVersion, type ScoringObservation } from "@/core/scoring/scoring";
@@ -226,8 +227,9 @@ export async function sourcesFor(domainId: string) {
   const own = [domain.hostname, ...(profile?.profile.ownedDomains ?? [])];
   const { pages, total } = ownPages(obs, own);
   const p = profile?.profile;
-  const competitorDomains = [...(p?.competitors ?? []), ...(p?.removedCompetitors ?? [])].flatMap((c) => c.domains ?? []);
-  const stored = await storedHostLabels();
-  const kindOf = (host: string) => typeOfHost(host, { ownDomains: own, competitorDomains, stored }).kind;
+  // The same competitor rule as the recommendations (#46): a rival's domain, or a host spelling a rival's name.
+  const isCompetitor = competitorHostTest([...(p?.competitors ?? []), ...(p?.removedCompetitors ?? [])], domain.ignoredCompetitors);
+  const stored = await storedHostLabels(obs.flatMap((o) => o.signals.citedDomains));
+  const kindOf = (host: string) => typeOfHost(host, { ownDomains: own, isCompetitor: (h) => isCompetitor(h), stored }).kind;
   return { sources: topSources(obs, own, 15, kindOf), kindShares: sourceKindShares(obs, kindOf), ownPages: pages, ownPagesTotal: total };
 }

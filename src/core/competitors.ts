@@ -117,3 +117,26 @@ export function suggestCompetitors(
       return { name, aliases, domains, answers: r.answers, questions: r.prompts.size, providers: [...r.providers].sort() };
     });
 }
+
+/**
+ * Whether a cited host is a competitor's own site (#46): it is on a rival's domain, or the host or one of its parents
+ * spells a rival's name, alias or domain ("bridgeacademy.cz" and "blog.bridgeacademy.cz" for "Bridge Academy").
+ * One rule for the recommendation diagnostics and for "Where AI looks". `ignored` names are never competitors.
+ */
+export function competitorHostTest(
+  rivals: Array<{ name: string; aliases?: string[]; domains?: string[] }>,
+  ignored: string[] = [],
+): (host: string, extraNames?: ReadonlySet<string>) => boolean {
+  const skip = new Set(ignored.map(nameKey));
+  const domains = rivals.flatMap((c) => c.domains ?? []).map((d) => d.toLowerCase().replace(/^www\./, ""));
+  const keys = new Set(rivals.flatMap((c) => [c.name, ...(c.aliases ?? []), ...(c.domains ?? [])]).map(nameKey));
+  return (host, extraNames) => {
+    const h = host.toLowerCase().replace(/^www\./, "");
+    if (domains.some((d) => h === d || h.endsWith(`.${d}`))) return true;
+    const labels = h.split(".");
+    return labels
+      .slice(0, -1)
+      .map((_, i) => nameKey(labels.slice(i).join(".")))
+      .some((k) => !!k && !skip.has(k) && (keys.has(k) || !!extraNames?.has(k)));
+  };
+}

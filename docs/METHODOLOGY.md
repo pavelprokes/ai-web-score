@@ -238,8 +238,10 @@ Each run stores a new set (findings + items); items can be marked Done or Dismis
 
 **Source types** (`src/core/sources/host-types.ts`, "Where AI looks"): every cited host is a directory or review site,
 news or magazine, forum or social, reference or public body, or other — from a hand-made Czech / Australian seed
-list, suffix rules (gov, edu), the admin's correction, or else a cached LLM label from the hostname alone (job
-`sources.classify`, daily, Haiku; no answer text is sent). Own and competitor sites are decided per domain when read.
+list, suffix rules (gov, edu), the admin's correction (`POST /api/host-types` `{host, type}`; `host_types` is
+append-only, the latest row of a host wins), or else a cached LLM label from the hostname alone (job
+`sources.classify`, daily, most cited hosts first, Haiku; no answer text is sent). Own and competitor sites are decided per domain when read, with the same rule as the recommendations (a rival's
+domain, or a host spelling a rival's name; `competitorHostTest`).
 Shares are per assistant and count a site once per question, because assistants share few cited domains
 (RESEARCH §7.1) and the planner samples some questions more often. Only seed, rule and manual labels word a
 type-specific action; an LLM label is shown but its action stays neutral.

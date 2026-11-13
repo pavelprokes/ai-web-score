@@ -1,5 +1,5 @@
 {
-  "id": "6dbf93a9-9b78-479c-aef7-dc96d405bc82",
+  "id": "8520cef5-56d3-480d-a62f-1cfda54c7747",
   "prevId": "dbe960d7-dc4d-4dd6-b0ae-7b758db0b687",
   "version": "7",
   "dialect": "postgresql",
@@ -497,10 +497,17 @@
       "name": "host_types",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
         "host": {
           "name": "host",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "type": {
@@ -521,13 +528,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -536,7 +536,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "host_types_host": {
+          "name": "host_types_host",
+          "columns": [
+            {
+              "expression": "host",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

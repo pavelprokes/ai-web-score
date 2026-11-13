@@ -60,7 +60,8 @@ async function collectFindings(domainId: string) {
   if (!profileRow) throw new RecommendationsUnavailable(409, "Run the discovery first — recommendations need the domain profile");
   const profile = DomainProfile.parse(profileRow.profile);
 
-  const [answers, clusters, site, hostLabels] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname), storedHostLabels()]);
+  const [answers, clusters, site] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname)]);
+  const hostLabels = await storedHostLabels(answers.flatMap((a) => a.signals.citedDomains));
   const findings = diagnose({
     hostname: domain.hostname,
     profile,

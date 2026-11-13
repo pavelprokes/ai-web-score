@@ -1,7 +1,7 @@
 import type { CrawlDigest } from "../discovery/crawl";
 import type { DomainProfile } from "../domain-profile";
 import type { RawSignals } from "../signals/extract";
-import { nameKey, suggestCompetitors } from "../competitors";
+import { competitorHostTest, nameKey, suggestCompetitors } from "../competitors";
 import { AI_AGENTS, type AiAgent } from "./ai-agents";
 import { type HostLabel, KIND_LABEL, labelHost, trustedLabel } from "../sources/host-types";
 import { isAllowed, parseRobots, robotsPath, rulesFor } from "./robots";
@@ -311,46 +311,46 @@ function citationSources({ answers, profile, hostname, ignoredCompetitors, hostL
   const own = new Set([hostname, ...profile.ownedDomains].map(hostOf));
   // A removed competitor is no longer ranked against, but it is still a rival.
   const rivals = [...profile.competitors, ...(profile.removedCompetitors ?? [])];
-  const competitorHosts = new Set(rivals.flatMap((c) => (c.domains ?? []).map(hostOf)));
   // A competitor's own site is not a place to get listed: a host spelling a tracked or suggested competitor
   // (bridgeacademy.cz for "Bridge Academy", also blog.bridgeacademy.cz), or a business the same answer recommends
   // (petr-dolezal.cz next to "Petr Doležal"; only analysed answers name those). Directories cited for others still
   // count, and an ignored name is never a competitor: ignoring "MyWed" keeps mywed.com as a source.
-  const ignored = new Set((ignoredCompetitors ?? []).map(nameKey));
   const suggested = suggestCompetitors(answers, profile, ignoredCompetitors ?? [], Infinity);
-  const competitorNames = new Set(
-    [...rivals, ...suggested].flatMap((c) => [c.name, ...c.aliases, ...(c.domains ?? [])]).map(nameKey),
-  );
+  const isCompetitor = competitorHostTest([...rivals, ...suggested], ignoredCompetitors ?? []);
   const domains = missing.flatMap((a) => {
     const named = new Set((a.signals.untrackedEntities ?? []).map(nameKey));
-    const isCompetitor = (k: string) => !ignored.has(k) && (competitorNames.has(k) || named.has(k));
     // Cited domains only: search results an assistant saw but did not cite are not where it found its answer.
-    return [...new Set(a.signals.citedDomains.map(hostOf))].filter((d) => {
-      const labels = d.split(".");
-      const keys = labels.slice(0, -1).map((_, i) => nameKey(labels.slice(i).join("."))); // the host and its parents
-      return d && !own.has(d) && !competitorHosts.has(d) && !keys.some(isCompetitor);
-    });
+    return [...new Set(a.signals.citedDomains.map(hostOf))].filter((d) => d && !own.has(d) && !isCompetitor(d, named));
   });
-  // Encyclopedias and public bodies are not places to get listed.
-  const label = (d: string) => labelHost(d, hostLabels ?? new Map());
+  const labels = new Map<string, ReturnType<typeof labelHost>>();
+  const label = (d: string) => {
+    if (!labels.has(d)) labels.set(d, labelHost(d, hostLabels ?? new Map()));
+    return labels.get(d)!;
+  };
+  // Encyclopedias and public bodies are not places to get listed — only when the code or the admin says so: an LLM
+  // guess must not hide a host.
   const third = topCounts(domains, 12)
-    .filter((d) => d.count >= 2 && label(d.value)?.type !== "reference")
+    .filter((d) => d.count >= 2 && !(label(d.value)?.type === "reference" && trustedLabel(label(d.value)!.source)))
     .slice(0, 8)
-    .map((d) => ({ ...d, kind: label(d.value)?.type ?? null, labelSource: label(d.value)?.source ?? null }));
+    .map((d) => {
+      const l = label(d.value);
+      // A type-specific step only for hosts labelled by the seed list, a rule or the admin (an LLM label may be wrong).
+      return { ...d, kind: l?.type ?? null, trusted: !!l && trustedLabel(l.source) };
+    });
   if (third.length === 0) return [];
   const share = third[0]!.count / missing.length;
-  // A type-specific step only for hosts labelled by the seed list, a rule or the admin (an LLM label may be wrong).
-  const of = (kind: string) => third.filter((d) => d.kind === kind && trustedLabel(d.labelSource)).map((d) => d.value);
-  const listings = of("listing");
-  const editorial = of("editorial");
-  const ugc = of("ugc");
-  const rest = third.filter((d) => !listings.includes(d.value) && !editorial.includes(d.value) && !ugc.includes(d.value)).map((d) => d.value);
+  const group = (kind: string | null) => third.filter((d) => (kind ? d.trusted && d.kind === kind : !(d.trusted && ["listing", "editorial", "ugc"].includes(d.kind ?? ""))));
+  const step = (hosts: typeof third, n: number, text: (list: string) => string) =>
+    hosts.length ? [{ top: hosts[0]!.count, text: text(hosts.slice(0, n).map((d) => d.value).join(", ")) }] : [];
+  // Ordered by the most cited host each step is about, so the step for the main source is never cut.
   const steps = [
-    ...(listings.length ? [`Create or complete your profile on ${listings.slice(0, 4).join(", ")} and ask satisfied customers for reviews there.`] : []),
-    ...(editorial.length ? [`Offer a story, data or a quote to ${editorial.slice(0, 3).join(", ")}, which cover your topics.`] : []),
-    ...(ugc.length ? [`Answer the questions people ask on ${ugc.slice(0, 3).join(", ")} where it fits (lower priority).`] : []),
-    ...(rest.length ? [`See what ${rest.slice(0, 4).join(", ")} publish about your topics and whether you can be featured.`] : []),
-  ];
+    ...step(group("listing"), 4, (l) => `Create or complete your profile on ${l} and ask satisfied customers for reviews there.`),
+    ...step(group("editorial"), 3, (l) => `Offer a story, data or a quote to ${l}, which cover your topics.`),
+    ...step(group("ugc"), 3, (l) => `Answer the questions people ask on ${l} where it fits (lower priority).`),
+    ...step(group(null), 4, (l) => `See what ${l} publish about your topics and whether you can be featured.`),
+  ]
+    .sort((x, y) => y.top - x.top)
+    .map((x) => x.text);
   return [
     {
       key: "authority:third-party-sources",
@@ -359,7 +359,7 @@ function citationSources({ answers, profile, hostname, ignoredCompetitors, hostL
       title: "Assistants rely on third-party sites where you are not featured",
       detail: `In ${missing.length} answers that recommend competitors but not you, assistants cited ${third
         .slice(0, 4)
-        .map((d) => `${d.value} (${d.count}×${d.kind && trustedLabel(d.labelSource) ? `, ${KIND_LABEL[d.kind].toLowerCase()}` : ""})`)
+        .map((d) => `${d.value} (${d.count}×${d.kind && d.trusted ? `, ${KIND_LABEL[d.kind].toLowerCase()}` : ""})`)
         .join(", ")}.`,
       evidence: { answersWithoutBrand: missing.length, sources: third.map(({ value, count, kind }) => ({ value, count, ...(kind ? { kind } : {}) })) },
       metric: "mention-rate",

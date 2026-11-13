@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawSignals } from "../signals/extract";
 import { sourceKindShares, topSources } from "../scoring/sources";
+import { competitorHostTest } from "../competitors";
 import { codeLabel, type HostLabel, labelHost, SEED_HOST_TYPES, typeOfHost } from "./host-types";
 
 describe("host labels", () => {
@@ -30,6 +31,10 @@ describe("host labels", () => {
     expect(codeLabel("svatebni-salon.cz")).toBeNull();
     // A name merely ending like a seed host is not that host.
     expect(codeLabel("notfirmy.cz")).toBeNull();
+    // google.com is not seeded: its subdomains are not directories; Maps is.
+    expect(codeLabel("developers.google.com")).toBeNull();
+    expect(codeLabel("sites.google.com")).toBeNull();
+    expect(codeLabel("maps.google.com")).toEqual({ type: "listing", source: "seed" });
   });
 
   it("lets a manual label beat the seed list, and the code beat an LLM label", () => {
@@ -44,9 +49,18 @@ describe("host labels", () => {
   });
 
   it("decides own and competitor per domain, before any stored type (#46)", () => {
-    const ctx = { ownDomains: ["se-vezmou.cz"], competitorDomains: ["vezmemese.cz"], stored: new Map<string, HostLabel>() };
+    const isCompetitor = competitorHostTest([
+      { name: "Vezmeme se", domains: ["vezmemese.cz"] },
+      // No domain in the profile: the host still spells the name.
+      { name: "Bridge Academy" },
+      { name: "MyWed" },
+    ], ["MyWed"]);
+    const ctx = { ownDomains: ["se-vezmou.cz"], isCompetitor: (h: string) => isCompetitor(h), stored: new Map<string, HostLabel>() };
     expect(typeOfHost("blog.se-vezmou.cz", ctx).kind).toBe("own");
     expect(typeOfHost("vezmemese.cz", ctx).kind).toBe("competitor");
+    expect(typeOfHost("blog.bridgeacademy.cz", ctx).kind).toBe("competitor");
+    // An ignored name is never a competitor: its site stays a directory.
+    expect(typeOfHost("mywed.com", ctx)).toEqual({ kind: "listing", source: "seed" });
     expect(typeOfHost("firmy.cz", ctx)).toEqual({ kind: "listing", source: "seed" });
     expect(typeOfHost("unknown-host.cz", ctx)).toEqual({ kind: "unclassified", source: null });
   });
@@ -57,7 +71,8 @@ function sig(citedDomains: string[], over: Partial<RawSignals> = {}): RawSignals
 }
 
 describe("sourceKindShares", () => {
-  const kindOf = (h: string) => typeOfHost(h, { ownDomains: ["me.cz"], competitorDomains: ["rival.cz"], stored: new Map() }).kind;
+  const rival = competitorHostTest([{ name: "Rival", domains: ["rival.cz"] }]);
+  const kindOf = (h: string) => typeOfHost(h, { ownDomains: ["me.cz"], isCompetitor: (x) => rival(x), stored: new Map() }).kind;
 
   it("counts a site once per question and assistant, cited domains only, assistants apart", () => {
     const obs = [
@@ -77,7 +92,7 @@ describe("sourceKindShares", () => {
   });
 
   it("adds the kind to the rows of Where AI looks", () => {
-    const rows = topSources([{ providerId: "chatgpt-ui", promptId: "p1", signals: sig(["firmy.cz", "rival.cz"]) }], ["me.cz"], 15, kindOf);
+    const rows = topSources([{ providerId: "chatgpt-ui", signals: sig(["firmy.cz", "rival.cz"]) }], ["me.cz"], 15, kindOf);
     expect(rows.map((r) => [r.domain, r.kind])).toEqual([
       ["firmy.cz", "listing"],
       ["rival.cz", "competitor"],

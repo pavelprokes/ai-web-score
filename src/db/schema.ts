@@ -468,16 +468,22 @@ export const providerBalances = pgTable(
  * What kind of site a cited host is (src/core/sources/host-types.ts): labels the code cannot give — an LLM guess from
  * the hostname alone, or the admin's correction. Not per domain: "own" and "competitor" are decided when read.
  */
-export const hostTypes = pgTable("host_types", {
-  host: text("host").primaryKey(),
-  type: text("type").notNull(),
-  /** "llm" or "manual" (seed and rule labels live in code). */
-  source: text("source").notNull(),
-  /** Model id for an LLM label, the admin's e-mail for a manual one. */
-  labelledBy: text("labelled_by"),
-  version: integer("version").notNull().default(1),
-  createdAt: createdAt(),
-}).enableRLS();
+export const hostTypes = pgTable(
+  "host_types",
+  {
+    id: id(),
+    host: text("host").notNull(),
+    type: text("type").notNull(),
+    /** "llm" or "manual" (seed and rule labels live in code). */
+    source: text("source").notNull(),
+    /** Model id for an LLM label, the admin's e-mail for a manual one. */
+    labelledBy: text("labelled_by"),
+    createdAt: createdAt(),
+  },
+  // Append-only: a correction is a new row and the latest row of a host is its label (an LLM label is written only
+  // for a host without any row, so it never follows a manual one).
+  (t) => [index("host_types_host").on(t.host, t.createdAt)],
+).enableRLS();
 
 /** Admin-editable settings (key → JSON value), e.g. the internal LLM model per task. */
 export const appSettings = pgTable("app_settings", {

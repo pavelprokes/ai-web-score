@@ -2,7 +2,7 @@ import type { SourceKind } from "../sources/host-types";
 import { hostMatches, hostOf } from "../signals/matcher";
 import type { ScoringObservation } from "./scoring";
 
-type Observation = Pick<ScoringObservation, "signals" | "providerId" | "branded"> & { promptId?: string };
+type Observation = Pick<ScoringObservation, "signals" | "providerId" | "branded">;
 
 export interface PageRow {
   /** Host without "www." plus path and query string (tracking parameters removed), as shown. */
@@ -110,19 +110,22 @@ export interface KindShareRow {
  * count (not search results the assistant saw), and assistants are kept apart: they share few cited domains
  * (RESEARCH §7.1, Jaccard 0.10–0.11).
  */
-export function sourceKindShares(obs: Observation[], kindOf: (host: string) => SourceKind): KindShareRow[] {
+export function sourceKindShares(obs: Array<Observation & Pick<ScoringObservation, "promptId">>, kindOf: (host: string) => SourceKind): KindShareRow[] {
   const pairs = new Map<string, Set<string>>();
   for (const o of unbranded(obs)) {
     const set = pairs.get(o.providerId) ?? new Set<string>();
-    for (const d of o.signals.citedDomains) set.add(`${o.promptId ?? ""}\u0000${d}`);
+    for (const d of o.signals.citedDomains) set.add(`${o.promptId}\u0000${d}`);
     pairs.set(o.providerId, set);
   }
   return [...pairs.entries()]
     .filter(([, set]) => set.size > 0)
     .map(([providerId, set]) => {
       const counts: Partial<Record<SourceKind, number>> = {};
+      const memo = new Map<string, SourceKind>();
       for (const key of set) {
-        const kind = kindOf(key.slice(key.indexOf("\u0000") + 1));
+        const host = key.slice(key.indexOf("\u0000") + 1);
+        if (!memo.has(host)) memo.set(host, kindOf(host));
+        const kind = memo.get(host)!;
         counts[kind] = (counts[kind] ?? 0) + 1;
       }
       const shares = Object.fromEntries(Object.entries(counts).map(([k, n]) => [k, n! / set.size])) as Partial<Record<SourceKind, number>>;

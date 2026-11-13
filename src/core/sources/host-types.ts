@@ -15,9 +15,6 @@ export type HostType = (typeof HOST_TYPES)[number];
 export type SourceKind = HostType | "competitor" | "own" | "unclassified";
 export type LabelSource = "manual" | "seed" | "rule" | "llm";
 
-/** Bump when the seed list or the rules change meaning (stored LLM labels stay valid). */
-export const HOST_TYPES_VERSION = 1;
-
 export const KIND_LABEL: Record<SourceKind, string> = {
   listing: "Directory or review site",
   editorial: "News or magazine",
@@ -53,7 +50,7 @@ export const SEED_HOST_TYPES: Record<string, HostType> = {
   "weddingwire.com": "listing",
   "theknot.com": "listing",
   "easyweddings.com.au": "listing",
-  "google.com": "listing",
+  // Not google.com itself: its subdomains (developers., sites., support.) are not directories.
   "maps.google.com": "listing",
   "yelp.com": "listing",
   "tripadvisor.com": "listing",
@@ -122,11 +119,12 @@ export interface HostLabel {
 /** The label from code alone (seed list, then rules), or null when only a stored label could say. */
 export function codeLabel(host: string): HostLabel | null {
   const h = host.toLowerCase().replace(/^www\./, "");
-  // The most specific seed entry wins (maps.google.com before google.com).
-  const seed = Object.keys(SEED_HOST_TYPES)
-    .filter((s) => hostMatches(h, s))
-    .sort((a, b) => b.length - a.length)[0];
-  if (seed) return { type: SEED_HOST_TYPES[seed]!, source: "seed" };
+  // The host, then its parents: the most specific seed entry wins (maps.google.com before any parent).
+  const labels = h.split(".");
+  for (let i = 0; i < labels.length - 1; i++) {
+    const type = SEED_HOST_TYPES[labels.slice(i).join(".")];
+    if (type) return { type, source: "seed" };
+  }
   if (REFERENCE_SUFFIX.test(h)) return { type: "reference", source: "rule" };
   return null;
 }
@@ -141,13 +139,13 @@ export function labelHost(host: string, stored: ReadonlyMap<string, HostLabel>):
   return codeLabel(h) ?? saved ?? null;
 }
 
-/** What a cited host is for one monitored domain. */
+/** What a cited host is for one monitored domain; `isCompetitor` is `competitorHostTest` of the domain's rivals. */
 export function typeOfHost(
   host: string,
-  ctx: { ownDomains: string[]; competitorDomains: string[]; stored: ReadonlyMap<string, HostLabel> },
+  ctx: { ownDomains: string[]; isCompetitor: (host: string) => boolean; stored: ReadonlyMap<string, HostLabel> },
 ): { kind: SourceKind; source: LabelSource | null } {
   if (ctx.ownDomains.some((d) => hostMatches(host, d))) return { kind: "own", source: null };
-  if (ctx.competitorDomains.some((d) => hostMatches(host, d))) return { kind: "competitor", source: null };
+  if (ctx.isCompetitor(host)) return { kind: "competitor", source: null };
   const label = labelHost(host, ctx.stored);
   return label ? { kind: label.type, source: label.source } : { kind: "unclassified", source: null };
 }

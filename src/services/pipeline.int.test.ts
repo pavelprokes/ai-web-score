@@ -588,6 +588,21 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       sent.length = 0;
       expect((await classifyCitedHosts()).labelled).toBe(0);
       expect(sent).toEqual([]);
+
+      // A correction is a new row: the latest wins, the earlier label stays on record.
+      await setHostType("www.nejlepsi-svatby.example", "listing", "pavel@example.cz");
+      expect((await storedHostLabels(["nejlepsi-svatby.example"])).get("nejlepsi-svatby.example")).toEqual({ type: "listing", source: "manual" });
+      const history = await db.select().from(s.hostTypes).where(eq(s.hostTypes.host, "nejlepsi-svatby.example"));
+      expect(history.map((r) => r.source).sort()).toEqual(["llm", "manual"]);
+
+      // A failing batch is skipped, not fatal.
+      await db.execute(sql`update measurement_signals set signals = jsonb_set(signals, '{citedDomains}',
+        signals->'citedDomains' || '["another-unknown.example"]'::jsonb)
+        where measurement_id = (select measurement_id from measurement_signals order by created_at limit 1)`);
+      setLlmOverride(() => {
+        throw new Error("LLM output truncated (sources)");
+      });
+      expect(await classifyCitedHosts()).toMatchObject({ labelled: 0, failedBatches: 1 });
     } finally {
       setLlmOverride(null);
     }
