@@ -98,7 +98,8 @@ reviews 50 LLM-labelled hosts, ≤ 5 wrong). B1 `site.check` is merged as #79 (m
 photos site;
 on production: one snapshot per ACTIVE domain within a day of the deploy, ≤ 20 kB each, `select domain_id,
 pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). B2 site findings (possible / confirmed, 24 h
-re-check) are in the PR after #80. Next, in order: "Fixed on the site" + B3 → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
+re-check) are merged as #81; "Fixed on the site" / "Still found" (Done reopens after two checks) and B3 (likely reason /
+contradicted by citations) are in the PR after #81 (migration 0015 `recommendation_sets.site_checked_at`). Next: → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
 Include; phase D probes (≈ $0.25) still need his go. Production SQL cannot run from a cloud session: the proxy
 carries HTTPS only, not the Postgres protocol (`PROD_DATABASE_URL` is set, the TCP connection is refused).
 

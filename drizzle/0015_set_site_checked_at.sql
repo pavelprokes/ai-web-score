@@ -1,0 +1,1 @@
+ALTER TABLE "recommendation_sets" ADD COLUMN "site_checked_at" timestamp with time zone;

@@ -241,6 +241,14 @@ On demand per domain (domain page → Recommendations, or `POST /api/domains/{id
    previous check saw (as possible). A re-check does not schedule another, does not count as the weekly check, and is
    skipped for a domain paused meanwhile. A Done / Dismissed taken on a possible finding no longer holds once it is
    confirmed. Schema findings stay ≤ 0.3 (Google: structured data is not needed for its AI features).
+   **Next to the answers (B3, `src/core/recommendations/causal.ts`):** a robots or site finding is read against the
+   assistants it concerns (robots → the agent's providers; eligibility → AI Mode, Gemini; JavaScript-only → ChatGPT,
+   Claude, Perplexity). With ≥ 20 searched unbranded answers of such an assistant in 28 days: no citation of the
+   site at all → "Likely reason: …" (raised to 0.9 for robots and confirmed findings; a possible one only gets the
+   sentence); every such assistant cites the affected pages anyway → "Not what keeps the site out" (0.2).
+   **Done on a website finding:** each set records the site check it came from (`site_checked_at`). Seen by one
+   check after it was marked, the item shows "Still found"; seen by two, it reopens; no longer seen, it is listed
+   under "Fixed on the site". The effect on answers is not claimed (B5 waits for geo-v3).
 1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
    digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per
