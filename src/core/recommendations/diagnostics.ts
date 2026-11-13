@@ -7,6 +7,7 @@ import { type HostLabel, KIND_LABEL, labelHost, trustedLabel } from "../sources/
 import { isAllowed, parseRobots, robotsPath, rulesFor } from "./robots";
 import type { SiteSnapshotData } from "../site/check";
 import { siteFindings } from "../site/findings";
+import { joinWithAnswers } from "./causal";
 
 /**
  * RECOMMENDATIONS — step 1: deterministic diagnostics. Pure functions over what we already know about a
@@ -147,7 +148,9 @@ export function diagnose(input: DiagnosticsInput): Finding[] {
     ...untrackedCompetitors(unbranded),
     ...markets(input),
   ];
-  return findings.sort((a, b) => b.severity - a.severity || a.key.localeCompare(b.key));
+  // B3: a website finding next to what its assistants do (likely reason, or contradicted by their citations).
+  const joined = joinWithAnswers(findings, unbranded.answers, { hostname: input.hostname, providerLabels: input.providerLabels });
+  return joined.sort((a, b) => b.severity - a.severity || a.key.localeCompare(b.key));
 }
 
 function crawlerAccess({ robotsTxt, robotsStatus, hostname, digest }: DiagnosticsInput): Finding[] {

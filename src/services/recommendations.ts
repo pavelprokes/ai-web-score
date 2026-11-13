@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import {
@@ -24,6 +24,8 @@ import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { storedHostLabels } from "@/services/host-types";
 import { RECENT_FOR_CONFIRMATION, recentSiteSnapshots } from "@/services/site-check";
+import { KEEP_SNAPSHOTS } from "@/core/site/check";
+import { couldSee, findingPages, freshSighting } from "@/core/site/evidence";
 import { confirmingSnapshot, findingStates } from "@/core/site/findings";
 import { digestFromSnapshot, robotsText } from "@/core/site/check";
 import { throwIfJobCancelled } from "@/jobs/queue";
@@ -86,21 +88,21 @@ async function collectFindings(domainId: string) {
     hostLabels,
     site: snapshot ? { latest: snapshot, previous: confirmingSnapshot(snapshots) } : undefined,
   });
-  return { domain, profile, answers, clusters, findings };
+  return { domain, profile, answers, clusters, findings, siteCheckedAt: snapshot?.checkedAt ?? null };
 }
 
 const providerLabels = () => Object.fromEntries(listProviders().map((p) => [p.id, p.label]));
 
 export async function generateRecommendations(domainId: string) {
   const db = getDb();
-  const { profile, answers, findings } = await collectFindings(domainId);
+  const { profile, answers, findings, siteCheckedAt } = await collectFindings(domainId);
   await throwIfJobCancelled();
 
   const plan: { summary: string; items: PlanItem[]; model: string | null } =
     findings.length === 0 ? { summary: "No issues found in the current data.", items: [], model: null } : await writePlan(domainId, profile, findings, answers.length);
   await throwIfJobCancelled();
 
-  const decided = await ownerDecisions(domainId, findingStates(findings));
+  const decided = await ownerDecisions(domainId, findingStates(findings), { findings, siteCheckedAt });
   const [set] = await db
     .insert(recommendationSets)
     .values({
@@ -110,6 +112,7 @@ export async function generateRecommendations(domainId: string) {
       generatedBy: plan.model ? "llm" : "rules",
       model: plan.model ?? null,
       answersAnalysed: answers.length,
+      siteCheckedAt,
     })
     .returning({ id: recommendationSets.id });
   if (plan.items.length) {
@@ -132,8 +135,12 @@ export async function generateRecommendations(domainId: string) {
   return { setId: set!.id, findings: findings.length, items: plan.items.length };
 }
 
-/** Findings read from measured answers; the others come from the crawl or from robots.txt / llms.txt. */
+/** Findings read from measured answers; the others come from the website (site check, crawl, robots.txt). */
 const ANSWER_BASED = /^(topic-gap|accuracy|authority|citation|position|reputation|provider-gap|competition):/;
+export const isWebsiteFinding = (key: string) => !ANSWER_BASED.test(key);
+
+/** Done on a website finding reopens once the finding is seen in this many site checks after it was marked. */
+export const REOPEN_AFTER_CHECKS = 2;
 const itemId = (keys: string[]) => [...keys].sort().join("|");
 
 /**
@@ -148,14 +155,34 @@ const itemId = (keys: string[]) => [...keys].sort().join("|");
  *
  * Dismissed holds while the finding recurs. Done on a finding measured from answers holds only while the window
  * can still contain answers from before the fix: still there after that, it was not fixed and comes back open.
- * Done on a website finding (crawl, robots.txt, llms.txt) holds until the owner reopens it.
+ * Done on a website finding holds until REOPEN_AFTER_CHECKS site checks after it still see it, then reopens.
  */
-async function ownerDecisions(domainId: string, states: Map<string, string> = new Map()) {
+async function ownerDecisions(
+  domainId: string,
+  states: Map<string, string> = new Map(),
+  current: { findings: Array<{ key: string; evidence?: unknown }>; siteCheckedAt: Date | null } = { findings: [], siteCheckedAt: null },
+) {
   // A Done / Dismissed taken while a site finding was only "possible" does not hold once it is confirmed: the owner
   // decided on a weaker claim (B2). Read each set's site-finding states to know what the decision was about.
-  const sets = await getDb().select({ id: recommendationSets.id, diagnostics: recommendationSets.diagnostics }).from(recommendationSets).where(eq(recommendationSets.domainId, domainId));
-  const possibleIn = new Map(sets.map((x) => [x.id, new Set([...findingStates((x.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? [])].filter(([, st]) => st === "possible").map(([k]) => k))]));
+  const sets = await getDb()
+    .select({ id: recommendationSets.id, diagnostics: recommendationSets.diagnostics, siteCheckedAt: recommendationSets.siteCheckedAt })
+    .from(recommendationSets)
+    .where(eq(recommendationSets.domainId, domainId));
+  const diag = (x: { diagnostics: unknown }) => (x.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? [];
+  const possibleIn = new Map(sets.map((x) => [x.id, new Set([...findingStates(diag(x))].filter(([, st]) => st === "possible").map(([k]) => k))]));
   const escalated = (setId: string, keys: string[]) => keys.some((k) => states.get(k) === "confirmed" && possibleIn.get(setId)?.has(k));
+  // Done on a website finding reopens when site checks after it still see the finding (Pavel, 2026-11-13: after two).
+  // A sighting counts only when that check really looked again (robots.txt read, the page re-read): a timeout or a
+  // finding carried over from an earlier check is no evidence.
+  const snapshots = new Map((await recentSiteSnapshots(domainId, KEEP_SNAPSHOTS)).map((x) => [x.checkedAt.getTime(), x]));
+  const fresh = (findings: Array<{ key: string; evidence?: unknown }>, at: Date) =>
+    new Set(findings.filter((f) => freshSighting(f, snapshots.get(at.getTime()) ?? null)).map((f) => f.key));
+  const sightings = [
+    ...sets.filter((x) => x.siteCheckedAt).map((x) => ({ at: x.siteCheckedAt!, keys: fresh(diag(x), x.siteCheckedAt!) })),
+    ...(current.siteCheckedAt ? [{ at: current.siteCheckedAt, keys: fresh(current.findings, current.siteCheckedAt) }] : []),
+  ];
+  const stillSeen = (keys: string[], since: Date) =>
+    new Set(sightings.filter((x) => x.at > since && keys.some((k) => x.keys.has(k))).map((x) => x.at.getTime())).size >= REOPEN_AFTER_CHECKS;
   const rows = await getDb()
     .select({ setId: recommendations.setId, findingKeys: recommendations.findingKeys, status: recommendations.status, statusChangedAt: recommendations.statusChangedAt })
     .from(recommendations)
@@ -177,7 +204,9 @@ async function ownerDecisions(domainId: string, states: Map<string, string> = ne
     if (!r.statusChangedAt) continue;
     const keys = r.findingKeys as string[];
     const expired =
-      (r.status === "DONE" && r.statusChangedAt.getTime() < cutoff && keys.some((k) => ANSWER_BASED.test(k))) || escalated(r.setId, keys);
+      (r.status === "DONE" && r.statusChangedAt.getTime() < cutoff && keys.some((k) => ANSWER_BASED.test(k))) ||
+      (r.status === "DONE" && keys.every(isWebsiteFinding) && stillSeen(keys, r.statusChangedAt)) ||
+      escalated(r.setId, keys);
     const decision = r.status === "OPEN" || expired ? null : { status: r.status, statusChangedAt: r.statusChangedAt };
     if (!byItem.has(itemId(keys))) byItem.set(itemId(keys), decision);
     for (const k of keys) if (!byKey.has(k) && !(decision && openIn.get(r.setId)?.has(k))) byKey.set(k, decision);
@@ -305,6 +334,62 @@ export async function latestRecommendations(domainId: string) {
   if (!set) return null;
   const items = await db.select().from(recommendations).where(eq(recommendations.setId, set.id)).orderBy(recommendations.priority);
   return { set, items };
+}
+
+/**
+ * What the site checks say about Done website findings: items of the latest set still found by a check taken after
+ * they were marked ("Still found"), and items marked Done earlier whose findings the latest check could have seen and
+ * no longer does ("Fixed on the site"). Only the owner's latest decision per item counts (a Reopen or Dismiss after a
+ * Done wins). Only from site checks — the discovery crawl cannot tell.
+ */
+export async function websiteFixStatus(domainId: string): Promise<{
+  checkedAt: Date | null;
+  stillFound: string[];
+  fixed: Array<{ title: string; doneAt: Date }>;
+}> {
+  const db = getDb();
+  const [latest] = await db.select().from(recommendationSets).where(eq(recommendationSets.domainId, domainId)).orderBy(desc(recommendationSets.createdAt)).limit(1);
+  if (!latest?.siteCheckedAt) return { checkedAt: null, stillFound: [], fixed: [] };
+  const checkedAt = latest.siteCheckedAt;
+  const snapshot = (await recentSiteSnapshots(domainId, KEEP_SNAPSHOTS)).find((x) => x.checkedAt.getTime() === checkedAt.getTime()) ?? null;
+  const latestFindings = (latest.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? [];
+  const present = new Set(latestFindings.map((f) => f.key));
+  const decisions = await db
+    .select({ id: recommendations.id, setId: recommendations.setId, title: recommendations.title, keys: recommendations.findingKeys, status: recommendations.status, at: recommendations.statusChangedAt })
+    .from(recommendations)
+    .where(and(eq(recommendations.domainId, domainId), isNotNull(recommendations.statusChangedAt)))
+    .orderBy(desc(recommendations.statusChangedAt))
+    .limit(500);
+  // The newest decision per item.
+  const seen = new Set<string>();
+  const newest = decisions.filter((r) => {
+    const id = itemId(r.keys as string[]);
+    return !seen.has(id) && (seen.add(id), true);
+  });
+  const website = newest.filter(
+    (r) => r.status === "DONE" && r.at! < checkedAt && (r.keys as string[]).length > 0 && (r.keys as string[]).every(isWebsiteFinding),
+  );
+  // The latest set's own rows are the items' current state (carried copies keep the decision's time, so they can tie
+  // with the original row in `newest`).
+  const stillFound = decisions
+    .filter((r) => r.setId === latest.id && r.status === "DONE" && r.at! < checkedAt && (r.keys as string[]).every(isWebsiteFinding))
+    .filter((r) => (r.keys as string[]).some((k) => present.has(k)))
+    .map((r) => r.id);
+  const gone = website.filter((r) => !(r.keys as string[]).some((k) => present.has(k)));
+  // What each finding was about when it was marked Done (its pages), to know whether the latest check could see it.
+  const setIds = [...new Set(gone.map((r) => r.setId))];
+  const decidedOn = setIds.length
+    ? new Map(
+        (await db.select({ id: recommendationSets.id, diagnostics: recommendationSets.diagnostics }).from(recommendationSets).where(inArray(recommendationSets.id, setIds))).map(
+          (x) => [x.id, (x.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? []],
+        ),
+      )
+    : new Map<string, Array<{ key: string; evidence?: unknown }>>();
+  const fixed = gone
+    .filter((r) => (r.keys as string[]).every((k) => couldSee(k, findingPages(decidedOn.get(r.setId)?.find((f) => f.key === k)), snapshot)))
+    .slice(0, 10)
+    .map((r) => ({ title: r.title, doneAt: r.at! }));
+  return { checkedAt, stillFound, fixed };
 }
 
 export class RecommendationNotFound extends Error {}

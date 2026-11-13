@@ -190,7 +190,12 @@ export function siteFindings(latest: SiteSnapshotData, previous: SiteSnapshotDat
   for (const rule of RULES) {
     const now = hits(latest, rule, hostname);
     const before = previous ? hits(previous, rule, hostname) : new Map<string, string>();
-    for (const [path, why] of before) if (unread.has(path) && !now.has(path)) now.set(path, `${why} (not re-read in the latest check)`);
+    const carried: string[] = [];
+    for (const [path, why] of before)
+      if (unread.has(path) && !now.has(path)) {
+        now.set(path, `${why} (not re-read in the latest check)`);
+        carried.push(path);
+      }
     if (now.size === 0) continue;
     const pages = [...now.keys()];
     const confirmedPages = pages.filter((p) => before.has(p) && !unread.has(p));
@@ -209,7 +214,13 @@ export function siteFindings(latest: SiteSnapshotData, previous: SiteSnapshotDat
       severity: rule.severity[state],
       title: (state === "possible" ? "Possibly: " : "") + rule.title(where),
       detail: rule.detail(where, hostname) + seen,
-      evidence: { state, pages: Object.fromEntries([...now.entries()].slice(0, 20)), confirmedPages: confirmedPages.slice(0, 20), possiblePages: possiblePages.slice(0, 20) },
+      evidence: {
+        state,
+        pages: Object.fromEntries([...now.entries()].slice(0, 20)),
+        confirmedPages: confirmedPages.slice(0, 20),
+        possiblePages: possiblePages.slice(0, 20),
+        ...(carried.length ? { carriedPages: carried.slice(0, 20) } : {}),
+      },
       metric: rule.metric ?? "citation-rate",
       action: rule.action(list(pages)),
     });

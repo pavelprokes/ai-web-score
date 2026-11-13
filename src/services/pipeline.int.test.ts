@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -605,6 +605,56 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(await classifyCitedHosts()).toMatchObject({ labelled: 0, failedBatches: 1 });
     } finally {
       setLlmOverride(null);
+    }
+  });
+
+  it("follows a Done website finding through the site checks: still found, reopened after two checks, fixed on the site", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { generateRecommendations, latestRecommendations, setRecommendationStatus, websiteFixStatus } = await import("@/services/recommendations");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const blocked = { status: 200, groups: [{ agents: ["oai-searchbot"], rules: [{ allow: false, path: "/" }] }], origin: "https://kodovani-pro-deti.example" };
+    const open = { status: 200, groups: [], origin: "https://kodovani-pro-deti.example" };
+    const check = async (robots: object, daysAgo: number) => {
+      const at = new Date(Date.now() - daysAgo * 86_400_000);
+      await db.insert(s.siteSnapshots).values({ domainId: demo!.id, checkVersion: 1, robots, pages: [{ path: "/", status: 200 }], createdAt: at });
+      await generateRecommendations(demo!.id);
+      return at;
+    };
+    const item = async () => (await latestRecommendations(demo!.id))!.items.find((i) => (i.findingKeys as string[]).includes("robots:OAI-SearchBot"));
+    try {
+      const first = await check(blocked, 4);
+      expect((await latestRecommendations(demo!.id))!.set.siteCheckedAt?.getTime()).toBe(first.getTime());
+      // Done right after the first check (the decision is newer than that check).
+      await db.update(s.recommendations).set({ status: "DONE", statusChangedAt: new Date(Date.now() - 3.5 * 86_400_000) }).where(eq(s.recommendations.id, (await item())!.id));
+
+      // One later check still sees it: still Done, shown as "Still found".
+      await check(blocked, 3);
+      expect((await item())!.status).toBe("DONE");
+      expect((await websiteFixStatus(demo!.id)).stillFound).toEqual([(await item())!.id]);
+
+      // A second later check sees it too: reopened.
+      await check(blocked, 2);
+      expect((await item())!.status).toBe("OPEN");
+
+      // Done again; a check that could not read robots.txt says nothing: not fixed, and no sighting.
+      await setRecommendationStatus((await item())!.id, "DONE");
+      await db
+        .update(s.recommendations)
+        .set({ statusChangedAt: new Date(Date.now() - 1.5 * 86_400_000) })
+        .where(and(eq(s.recommendations.domainId, demo!.id), eq(s.recommendations.status, "DONE")));
+      await check({ status: null, groups: [], origin: "https://kodovani-pro-deti.example" }, 1.2);
+      expect((await websiteFixStatus(demo!.id)).fixed.map((f) => f.title)).not.toContain("Allow OAI-SearchBot in robots.txt");
+      // Then a check reads it and the block is gone: fixed on the site.
+      await check(open, 1);
+      expect(await item()).toBeUndefined();
+      const status = await websiteFixStatus(demo!.id);
+      expect(status.fixed.map((f) => f.title)).toContain("Allow OAI-SearchBot in robots.txt");
+      expect(status.stillFound).toEqual([]);
+    } finally {
+      await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+      await db.delete(s.recommendationSets).where(and(eq(s.recommendationSets.domainId, demo!.id), isNotNull(s.recommendationSets.siteCheckedAt)));
     }
   });
 

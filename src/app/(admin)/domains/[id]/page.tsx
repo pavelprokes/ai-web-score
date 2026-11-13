@@ -9,7 +9,7 @@ import { lastSiteCheckAt } from "@/services/site-check";
 import { competitorStandings, type KindShareRow, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { KIND_LABEL, type SourceKind } from "@/core/sources/host-types";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
-import { latestRecommendations, recommendationsOutOfDate } from "@/services/recommendations";
+import { latestRecommendations, recommendationsOutOfDate, websiteFixStatus } from "@/services/recommendations";
 import { domainAction, recommendationAction } from "@/app/(admin)/actions";
 import { competitorMatchCounts, competitorSuggestions } from "@/services/competitors";
 import type { CompetitorSuggestion } from "@/core/competitors";
@@ -56,7 +56,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -68,6 +68,7 @@ export default async function DomainPage({
     competitorMatchCounts(id),
     searchQueriesFor(id),
     lastSiteCheckAt(id),
+    websiteFixStatus(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -139,7 +140,7 @@ export default async function DomainPage({
         </Section>
       )}
 
-      <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
+      <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck} fixStatus={fixStatus} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {/* From here on: reference. Collapsed unless something to fix or a change points into the section. */}
       <div className="grid-2">
@@ -345,6 +346,7 @@ function Recommendations({
   detail,
   recs,
   siteCheckedAt,
+  fixStatus,
   returnTo,
   busy,
   now,
@@ -352,6 +354,7 @@ function Recommendations({
   detail: Detail;
   recs: Recs;
   siteCheckedAt: Date | null;
+  fixStatus: Awaited<ReturnType<typeof websiteFixStatus>>;
   returnTo: string;
   busy: Set<ActivityKind> | undefined;
   now: Date;
@@ -453,6 +456,24 @@ function Recommendations({
           ))}
         </ol>
       )}
+      {fixStatus.fixed.length > 0 && fixStatus.checkedAt && (
+        <details>
+          <summary>Fixed on the site ({fixStatus.fixed.length})</summary>
+          <p className="note">
+            Marked done and no longer found by the website check <TimeAgo date={fixStatus.checkedAt} now={now} />. The effect on AI answers shows over the
+            following weeks.
+          </p>
+          <ul className="proposals">
+            {fixStatus.fixed.map((f) => (
+              <li key={f.title + f.doneAt.toISOString()}>
+                <span>
+                  <Badge tone="good">Fixed on the site</Badge> {f.title}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {closed.length > 0 && (
         <details>
           <summary>Done or dismissed ({closed.length})</summary>
@@ -461,6 +482,12 @@ function Recommendations({
               <li key={r.id}>
                 <span>
                   <Badge tone={r.status === "DONE" ? "good" : "neutral"}>{r.status === "DONE" ? "Done" : "Dismissed"}</Badge> {r.title}
+                  {fixStatus.stillFound.includes(r.id) && fixStatus.checkedAt && (
+                    <span className="cell-sub">
+                      <Badge tone="warning">Still found</Badge> by the website check <TimeAgo date={fixStatus.checkedAt} now={now} />; reopens if the next
+                      check finds it too.
+                    </span>
+                  )}
                 </span>
                 <RecommendationStatus id={r.id} status="OPEN" label="Reopen" title={r.title} />
               </li>

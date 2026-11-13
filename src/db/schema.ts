@@ -414,6 +414,8 @@ export const recommendationSets = pgTable(
     model: text("model"),
     /** Answers the diagnostics were computed from (0 = website only). */
     answersAnalysed: integer("answers_analysed").notNull().default(0),
+    /** When the site check the website findings come from was taken (null = discovery crawl / live robots.txt). */
+    siteCheckedAt: ts("site_checked_at"),
     createdAt: createdAt(),
   },
   (t) => [index("recommendation_sets_domain").on(t.domainId, t.createdAt)],
