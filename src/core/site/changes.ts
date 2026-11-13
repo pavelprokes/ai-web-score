@@ -5,88 +5,106 @@
  *
  * Critical only (owner, PM: warnings such as a changed title would train the owner to ignore the list): a page became
  * noindex or nosnippet, a page that answered now fails, structured data was removed, a search agent was newly blocked.
- * A change counts only when two consecutive checks agree on the new state and the check before them had the old one
- * (qa: no events from one flapping check, none from the first check, none from pages a check could not read).
+ *
+ * Each of these is followed as a series over the checks (oldest first): a change is the last switch from the old to
+ * the new state, confirmed by a check at least CONFIRM_GAP_MS later (a double Refresh is one look), and listed only
+ * while the latest check still shows it (a reverted change disappears). Checks that could not read the page or
+ * robots.txt are skipped, and a bot challenge is not a failure (a firewall may still let verified crawlers through).
+ * Only checks of the latest check version are compared: a parser change must not read as a website change.
  */
-import { AI_AGENTS } from "../recommendations/ai-agents";
-import { isAllowed, parseRobots, rulesFor } from "../recommendations/robots";
-import { answered, type PageCheck, robotsText, type SiteSnapshotData } from "./check";
+import { SEARCH_AGENTS, AI_AGENTS } from "../recommendations/ai-agents";
+import { isAllowed, rulesFor } from "../recommendations/robots";
+import { answered, type PageCheck, type SiteSnapshotData } from "./check";
 import { robotsReadable } from "./evidence";
-import { googleDirectives } from "./findings";
+import { CONFIRM_GAP_MS, pageHits } from "./findings";
 
 export interface SiteChange {
-  /** When the change was first seen (the earlier of the two agreeing checks). */
+  /** When the new state was first seen. */
   at: Date;
   /** One past-tense line, e.g. "/cenik now has noindex". */
   text: string;
-  /** Stable identity, for de-duplication. */
+  /** Stable identity: the kind of change and the page or agent. */
   key: string;
 }
 
-type Dated = SiteSnapshotData & { checkedAt: Date };
+type Dated = SiteSnapshotData & { checkedAt: Date; checkVersion?: number };
+/** true = the new (bad) state, false = the old one, null = this check could not tell. */
+type State = boolean | null;
 
-const noindex = (p: PageCheck) => {
-  const d = googleDirectives(p);
-  return d.has("noindex") || d.has("none");
-};
-const nosnippet = (p: PageCheck) => {
-  const d = googleDirectives(p);
-  return d.has("nosnippet") || d.has("max-snippet:0");
-};
+/** The last switch to `true` that is confirmed and still current, or null. */
+function change(series: Array<{ at: Date; state: State }>): Date | null {
+  const read = series.filter((x) => x.state !== null);
+  const last = read.at(-1);
+  if (!last?.state) return null;
+  // Back from the latest reading to the first of the current run of `true`.
+  let i = read.length - 1;
+  while (i > 0 && read[i - 1]!.state) i--;
+  if (i === 0) return null; // never seen in the old state (the first check, or always so)
+  const start = read[i]!.at;
+  return last.at.getTime() - start.getTime() >= CONFIRM_GAP_MS ? start : null;
+}
 
-/** Per-page changes: the old state in `a`, the new one in both `b` and `c` (a page must have been read in all three). */
-const PAGE_RULES: Array<{ key: string; from: (p: PageCheck) => boolean; to: (p: PageCheck) => boolean; text: (path: string, p: PageCheck) => string; read?: boolean }> = [
-  { key: "noindex", from: (p) => !noindex(p), to: noindex, text: (path) => `${path} now has noindex (hidden from Google and its AI answers)` },
-  { key: "nosnippet", from: (p) => !nosnippet(p), to: nosnippet, text: (path) => `${path} now has nosnippet (Google's AI answers cannot quote it)` },
+const PAGE_RULES: Array<{ key: string; state: (p: PageCheck, origin: string) => State; text: (path: string, p: PageCheck | undefined) => string }> = [
+  {
+    key: "noindex",
+    state: (p, origin) => (answered(p) ? pageHits("eligibility:noindex", p, origin) : null),
+    text: (path) => `${path} now has noindex (hidden from Google and its AI answers)`,
+  },
+  {
+    key: "nosnippet",
+    state: (p, origin) => (answered(p) ? pageHits("eligibility:nosnippet", p, origin) : null),
+    text: (path) => `${path} now has nosnippet (Google's AI answers cannot quote it)`,
+  },
   {
     key: "structured-data",
-    from: (p) => (p.jsonLdTypes?.length ?? 0) > 0,
-    to: (p) => (p.jsonLdTypes?.length ?? 0) === 0,
+    state: (p) => (answered(p) ? (p.jsonLdTypes?.length ?? 0) === 0 : null),
     text: (path) => `${path} lost its structured data (JSON-LD)`,
+  },
+  {
+    // A challenge or no answer says nothing; any other 4xx / 5xx is a failure.
+    key: "error",
+    state: (p) => (p.status === null || p.challenge ? null : p.status >= 400),
+    text: (path, p) => `${path} now answers HTTP ${p?.status ?? "an error"}`,
   },
 ];
 
-function pageChanges(a: Dated, b: Dated, c: Dated): SiteChange[] {
-  const out: SiteChange[] = [];
-  const at = (s: Dated, path: string) => s.pages.find((p) => p.path === path);
-  for (const pa of a.pages) {
-    const pb = at(b, pa.path);
-    const pc = at(c, pa.path);
-    if (!pb || !pc) continue;
-    // A page that answered and now fails in two checks in a row (a challenge is a failure from our side too).
-    if (answered(pa) && pb.status !== null && pc.status !== null && pb.status >= 400 && pc.status >= 400) {
-      out.push({ at: b.checkedAt, key: `error:${pa.path}`, text: `${pa.path} now answers HTTP ${pc.status}` });
-      continue;
-    }
-    if (!answered(pa) || !answered(pb) || !answered(pc)) continue;
-    for (const r of PAGE_RULES) if (r.from(pa) && r.to(pb) && r.to(pc)) out.push({ at: b.checkedAt, key: `${r.key}:${pa.path}`, text: r.text(pa.path, pc) });
-  }
-  return out;
-}
-
-/** Search and grounding agents allowed at "/" in `a` and blocked in `b` and `c` (robots.txt read in all three). */
-function robotsChanges(a: Dated, b: Dated, c: Dated): SiteChange[] {
-  if (![a, b, c].every(robotsReadable)) return [];
-  const blocked = (s: Dated, agent: string, fallback?: string) =>
-    s.robots.status === 200 && !isAllowed(rulesFor(parseRobots(robotsText(s.robots.groups)), agent, fallback), "/");
-  return AI_AGENTS.filter((x) => x.role === "search" || x.role === "grounding-opt-out")
-    .filter((x) => !blocked(a, x.agent, x.fallback) && blocked(b, x.agent, x.fallback) && blocked(c, x.agent, x.fallback))
-    .map((x) => ({ at: b.checkedAt, key: `robots:${x.agent}`, text: `robots.txt now blocks ${x.agent} (${x.governs})` }));
-}
-
 /**
- * Critical changes over the given checks (newest first), newest first, each once. Only changes first seen within
- * `sinceDays` of `now`.
+ * Critical changes over the given checks (any order), newest first. Only changes first seen within `sinceDays` of
+ * `now`. `hostname` is the domain's, for checks that did not record the origin they fetched.
  */
-export function siteChanges(snapshots: Dated[], now: Date, sinceDays = 30): SiteChange[] {
-  const out = new Map<string, SiteChange>();
-  for (let i = 0; i + 2 < snapshots.length; i++) {
-    const [c, b, a] = [snapshots[i]!, snapshots[i + 1]!, snapshots[i + 2]!];
-    for (const ch of [...robotsChanges(a, b, c), ...pageChanges(a, b, c)]) {
-      if (now.getTime() - ch.at.getTime() > sinceDays * 86_400_000) continue;
-      const seen = out.get(ch.key);
-      if (!seen || seen.at < ch.at) out.set(ch.key, ch);
+export function siteChanges(snapshots: Dated[], now: Date, hostname: string, sinceDays = 30): SiteChange[] {
+  if (snapshots.length < 2) return [];
+  const sorted = [...snapshots].sort((a, b) => a.checkedAt.getTime() - b.checkedAt.getTime());
+  const version = sorted.at(-1)!.checkVersion;
+  const series = sorted.filter((s) => s.checkVersion === version);
+  const out: SiteChange[] = [];
+  const recent = (at: Date) => now.getTime() - at.getTime() <= sinceDays * 86_400_000;
+
+  const paths = new Set(series.flatMap((s) => s.pages.map((p) => p.path)));
+  for (const path of paths) {
+    for (const rule of PAGE_RULES) {
+      const points = series.map((s) => {
+        const p = s.pages.find((x) => x.path === path);
+        return { at: s.checkedAt, state: p ? rule.state(p, s.robots.origin ?? `https://${hostname}`) : null };
+      });
+      // A page that failed from its first reading on is not a change, and nor is a missing structured-data block
+      // on a page that never had one: `change` needs the old state first.
+      const at = change(points);
+      if (at && recent(at)) {
+        const latest = series.at(-1)!.pages.find((x) => x.path === path);
+        out.push({ at, key: `${rule.key}:${path}`, text: rule.text(path, latest) });
+      }
     }
   }
-  return [...out.values()].sort((x, y) => y.at.getTime() - x.at.getTime());
+
+  // robots.txt: evaluated on the stored groups (no round trip through text), only checks that read it.
+  for (const agent of AI_AGENTS.filter((a) => SEARCH_AGENTS.includes(a.agent))) {
+    const points = series.map((s) => ({
+      at: s.checkedAt,
+      state: robotsReadable(s) ? s.robots.status === 200 && !isAllowed(rulesFor(s.robots.groups, agent.agent, agent.fallback), "/") : null,
+    }));
+    const at = change(points);
+    if (at && recent(at)) out.push({ at, key: `robots:${agent.agent}`, text: `robots.txt now blocks ${agent.agent} (${agent.governs})` });
+  }
+  return out.sort((a, b) => b.at.getTime() - a.at.getTime() || a.key.localeCompare(b.key));
 }

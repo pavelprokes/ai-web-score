@@ -245,6 +245,12 @@ export function siteFindings(latest: SiteSnapshotData, previous: SiteSnapshotDat
   return out;
 }
 
+/** Whether a page hits a rule (by key), for code that follows one rule over time (changes.ts). */
+export function pageHits(key: string, page: PageCheck, origin: string): boolean {
+  const rule = RULES.find((r) => r.key === key);
+  return !!rule && answered(page) && rule.test(page, origin) !== null;
+}
+
 /** Whether a check found a page it should look at again in 24 hours (a possible hit on any page). */
 export const needsRecheck = (findings: Finding[]) => findings.some((f) => ((f.evidence as { possiblePages?: string[] }).possiblePages?.length ?? 0) > 0);
 

@@ -749,7 +749,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const s = await import("@/db/schema");
     const { checkSite, latestSiteSnapshot } = await import("@/services/site-check");
     const { generateRecommendations, latestRecommendations, setRecommendationStatus } = await import("@/services/recommendations");
-    const { KEEP_SNAPSHOTS } = await import("@/core/site/check");
+    const { KEEP_DAYS, KEEP_SNAPSHOTS } = await import("@/core/site/check");
     const db = getDb();
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
     const home = `<!doctype html><html lang="cs"><head><title>Kódování pro děti</title>
@@ -837,10 +837,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(requests.map((r) => new URL(r.url).pathname).sort()).toEqual(["/", "/robots.txt"]);
       await db.update(s.domains).set({ siteCheckHomepageOnly: false }).where(eq(s.domains.id, demo!.id));
 
-      // Only the latest KEEP_SNAPSHOTS are kept.
+      // Kept: every check of the last KEEP_DAYS, and at least the latest KEEP_SNAPSHOTS of the older ones.
       for (let i = 0; i < KEEP_SNAPSHOTS + 1; i++) await checkSite(demo!.id, { thenRecommend: false });
-      const kept = await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
-      expect(kept).toHaveLength(KEEP_SNAPSHOTS);
+      const count = async () => (await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id))).length;
+      const recent = await count();
+      expect(recent).toBeGreaterThan(KEEP_SNAPSHOTS);
+      await db.execute(sql`update site_snapshots set created_at = created_at - make_interval(days => ${KEEP_DAYS + 1}) where domain_id = ${demo!.id}`);
+      await checkSite(demo!.id, { thenRecommend: false });
+      expect(await count()).toBe(KEEP_SNAPSHOTS);
     } finally {
       globalThis.fetch = realFetch;
       await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
