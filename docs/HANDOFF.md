@@ -94,7 +94,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 **2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74, phase A merged as #75)
 and the team meeting on phases B and C (`docs/meetings/2026-11-13-phases-b-c-team.md`, #76). C1 source types is in
 #77 (migration 0013 `host_types`; check on production: share of cited volume typed ≥ 90 % per domain, and seo-geo
-reviews 50 LLM-labelled hosts, ≤ 5 wrong). B1 `site.check` is in the PR after #77 (migration 0014 `site_snapshots`;
+reviews 50 LLM-labelled hosts, ≤ 5 wrong). B1 `site.check` is merged as #79 (migration 0014 `site_snapshots` and `domains.site_check_homepage_only`, set for the
+photos site;
 on production: one snapshot per ACTIVE domain within a day of the deploy, ≤ 20 kB each, `select domain_id,
 pg_column_size(pages) + pg_column_size(robots) from site_snapshots`). Next, in order: B2 eligibility findings
 (possible / confirmed, 24 h re-check) → "Fixed on the site" + B3 → B4 critical events after the Phase 1 markers. B5's metric, C2–C4 postponed or cut. Pavel confirmed *Search generative AI* =
