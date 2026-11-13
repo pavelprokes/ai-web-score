@@ -40,6 +40,13 @@ export const LLM_TASKS = {
     env: "RECOMMENDATIONS_LLM_MODEL",
     default: "claude-sonnet-5-5",
   },
+  sources: {
+    label: "Source types",
+    detail: "Labels cited sites the code does not know (directory, news, forum, reference) from the hostname alone. Once per new host.",
+    env: "SOURCES_LLM_MODEL",
+    // A hostname-only label; seed and rule labels carry the actions, an LLM label stays neutral.
+    default: "claude-haiku-5-5",
+  },
 } as const;
 export type LlmTask = keyof typeof LLM_TASKS;
 

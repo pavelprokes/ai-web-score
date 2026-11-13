@@ -22,6 +22,7 @@ import { type BriefExample, pickExamples, renderAgentBrief } from "@/core/recomm
 import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
+import { storedHostLabels } from "@/services/host-types";
 import { throwIfJobCancelled } from "@/jobs/queue";
 
 /**
@@ -60,6 +61,7 @@ async function collectFindings(domainId: string) {
   const profile = DomainProfile.parse(profileRow.profile);
 
   const [answers, clusters, site] = await Promise.all([loadAnswers(domainId), loadClusters(domainId), fetchSiteFiles(domain.hostname)]);
+  const hostLabels = await storedHostLabels(answers.flatMap((a) => a.signals.citedDomains));
   const findings = diagnose({
     hostname: domain.hostname,
     profile,
@@ -70,6 +72,7 @@ async function collectFindings(domainId: string) {
     clusters,
     providerLabels: providerLabels(),
     ignoredCompetitors: domain.ignoredCompetitors,
+    hostLabels,
   });
   return { domain, profile, answers, clusters, findings };
 }

@@ -174,6 +174,41 @@ describe("diagnose", () => {
     expect(sources({})).toHaveLength(3);
   });
 
+  it("counts only cited sites as third-party sources, skips reference sites and words the action by type", () => {
+    const answers = Array.from({ length: 6 }, () =>
+      answer({
+        competitorsMentioned: ["rival"],
+        citedDomains: ["firmy.cz", "idnes.cz", "cs.wikipedia.org", "svatebni-salon.cz"],
+        retrievedUrls: ["https://www.seen-not-cited.cz/x"],
+      }),
+    );
+    const llm = new Map([["svatebni-salon.cz", { type: "listing" as const, source: "llm" as const }]]);
+    const f = diagnose(input({ answers, hostLabels: llm })).find((x) => x.key === "authority:third-party-sources")!;
+    const hosts = (f.evidence.sources as Array<{ value: string; kind?: string }>).map((x) => x.value);
+    expect(hosts).not.toContain("seen-not-cited.cz");
+    expect(hosts).not.toContain("cs.wikipedia.org");
+    expect(f.action.steps[0]).toMatch(/profile on firmy\.cz .*reviews/);
+    expect(f.action.steps.join(" ")).toMatch(/story, data or a quote to idnes\.cz/);
+    // An LLM label is shown as evidence but gets the neutral step.
+    expect(f.action.steps.join(" ")).toMatch(/See what svatebni-salon\.cz publish/);
+    expect(f.action.steps.join(" ")).not.toMatch(/profile on [^.]*svatebni-salon/);
+  });
+
+  it("never hides a host on an LLM 'reference' guess, and keeps the step for the most cited host", () => {
+    const answers = Array.from({ length: 6 }, (_, i) =>
+      answer({
+        competitorsMentioned: ["rival"],
+        // svatebni-portal.cz is cited in every answer, the typed hosts in fewer.
+        citedDomains: ["svatebni-portal.cz", ...(i < 3 ? ["firmy.cz", "idnes.cz", "reddit.com"] : [])],
+      }),
+    );
+    const llm = new Map([["svatebni-portal.cz", { type: "reference" as const, source: "llm" as const }]]);
+    const f = diagnose(input({ answers, hostLabels: llm })).find((x) => x.key === "authority:third-party-sources")!;
+    expect((f.evidence.sources as Array<{ value: string }>)[0]!.value).toBe("svatebni-portal.cz");
+    expect(f.action.steps).toHaveLength(3);
+    expect(f.action.steps[0]).toMatch(/See what svatebni-portal\.cz publish/);
+  });
+
   it("flags a brand that is mentioned but never cited", () => {
     const answers = Array.from({ length: 5 }, () => answer({ brandMentioned: true, domainCited: false }));
     expect(diagnose(input({ answers })).map((f) => f.key)).toContain("citation:own-pages");

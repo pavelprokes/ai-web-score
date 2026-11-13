@@ -23,7 +23,8 @@ export type JobType =
   | "umami.send"
   | "optimizer.run"
   | "recommendations.generate"
-  | "signals.reextract";
+  | "signals.reextract"
+  | "sources.classify";
 
 export interface Job {
   id: string;

@@ -3,7 +3,10 @@ import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { domains, measurementSignals, measurements, prompts, promptVersions, providers, scoreSnapshots, topicClusters } from "@/db/schema";
 import { throwIfJobCancelled } from "@/jobs/queue";
-import { ownPages, topSources } from "@/core/scoring/sources";
+import { ownPages, sourceKindShares, topSources } from "@/core/scoring/sources";
+import { typeOfHost } from "@/core/sources/host-types";
+import { competitorHostTest } from "@/core/competitors";
+import { storedHostLabels } from "@/services/host-types";
 import { latestProfile } from "./discovery";
 import { computeMetrics, getScoringVersion, type ScoringObservation } from "@/core/scoring/scoring";
 import { cellWeights } from "@/core/scoring/weights";
@@ -217,11 +220,16 @@ export async function latestScores(domainId: string, scoringVersion: string) {
 /** Sites AI cites for the domain's unbranded questions over the scoring window, and its own cited pages (see `topSources`, `ownPages`). */
 export async function sourcesFor(domainId: string) {
   const [domain] = await getDb().select().from(domains).where(eq(domains.id, domainId));
-  if (!domain) return { sources: [], ownPages: [], ownPagesTotal: 0 };
+  if (!domain) return { sources: [], kindShares: [], ownPages: [], ownPagesTotal: 0 };
   const profile = await latestProfile(domainId);
   const end = new Date();
   const obs = await loadObservations(domainId, new Date(end.getTime() - DEFAULT_WINDOW_DAYS * 86_400_000), end, domain.scoringVersion);
   const own = [domain.hostname, ...(profile?.profile.ownedDomains ?? [])];
   const { pages, total } = ownPages(obs, own);
-  return { sources: topSources(obs, own), ownPages: pages, ownPagesTotal: total };
+  const p = profile?.profile;
+  // The same competitor rule as the recommendations (#46): a rival's domain, or a host spelling a rival's name.
+  const isCompetitor = competitorHostTest([...(p?.competitors ?? []), ...(p?.removedCompetitors ?? [])], domain.ignoredCompetitors);
+  const stored = await storedHostLabels(obs.flatMap((o) => o.signals.citedDomains));
+  const kindOf = (host: string) => typeOfHost(host, { ownDomains: own, isCompetitor: (h) => isCompetitor(h), stored }).kind;
+  return { sources: topSources(obs, own, 15, kindOf), kindShares: sourceKindShares(obs, kindOf), ownPages: pages, ownPagesTotal: total };
 }

@@ -1,8 +1,9 @@
 import type { CrawlDigest } from "../discovery/crawl";
 import type { DomainProfile } from "../domain-profile";
 import type { RawSignals } from "../signals/extract";
-import { nameKey, suggestCompetitors } from "../competitors";
+import { competitorHostTest, nameKey, suggestCompetitors } from "../competitors";
 import { AI_AGENTS, type AiAgent } from "./ai-agents";
+import { type HostLabel, KIND_LABEL, labelHost, trustedLabel } from "../sources/host-types";
 import { isAllowed, parseRobots, robotsPath, rulesFor } from "./robots";
 
 /**
@@ -74,6 +75,8 @@ export interface DiagnosticsInput {
   providerLabels?: Record<string, string>;
   /** Names the admin chose not to track. */
   ignoredCompetitors?: string[];
+  /** Stored source-type labels (LLM and manual), keyed by host; seed and rule labels come from code. */
+  hostLabels?: ReadonlyMap<string, HostLabel>;
 }
 
 // ─── robots.txt ──────────────────────────────────────────────────────────────
@@ -302,55 +305,67 @@ function topicGaps({ answers, clusters }: DiagnosticsInput): Finding[] {
   return out;
 }
 
-function citationSources({ answers, profile, hostname, ignoredCompetitors }: DiagnosticsInput): Finding[] {
+function citationSources({ answers, profile, hostname, ignoredCompetitors, hostLabels }: DiagnosticsInput): Finding[] {
   const missing = answers.filter((a) => !a.signals.brandMentioned && a.signals.competitorsMentioned.length > 0);
   if (missing.length < MIN_ANSWERS) return [];
   const own = new Set([hostname, ...profile.ownedDomains].map(hostOf));
   // A removed competitor is no longer ranked against, but it is still a rival.
   const rivals = [...profile.competitors, ...(profile.removedCompetitors ?? [])];
-  const competitorHosts = new Set(rivals.flatMap((c) => (c.domains ?? []).map(hostOf)));
   // A competitor's own site is not a place to get listed: a host spelling a tracked or suggested competitor
   // (bridgeacademy.cz for "Bridge Academy", also blog.bridgeacademy.cz), or a business the same answer recommends
   // (petr-dolezal.cz next to "Petr Doležal"; only analysed answers name those). Directories cited for others still
   // count, and an ignored name is never a competitor: ignoring "MyWed" keeps mywed.com as a source.
-  const ignored = new Set((ignoredCompetitors ?? []).map(nameKey));
   const suggested = suggestCompetitors(answers, profile, ignoredCompetitors ?? [], Infinity);
-  const competitorNames = new Set(
-    [...rivals, ...suggested].flatMap((c) => [c.name, ...c.aliases, ...(c.domains ?? [])]).map(nameKey),
-  );
+  const isCompetitor = competitorHostTest([...rivals, ...suggested], ignoredCompetitors ?? []);
   const domains = missing.flatMap((a) => {
     const named = new Set((a.signals.untrackedEntities ?? []).map(nameKey));
-    const isCompetitor = (k: string) => !ignored.has(k) && (competitorNames.has(k) || named.has(k));
-    return [...new Set([...a.signals.citedDomains, ...a.signals.retrievedUrls.map(hostOf)].map(hostOf))].filter((d) => {
-      const labels = d.split(".");
-      const keys = labels.slice(0, -1).map((_, i) => nameKey(labels.slice(i).join("."))); // the host and its parents
-      return d && !own.has(d) && !competitorHosts.has(d) && !keys.some(isCompetitor);
-    });
+    // Cited domains only: search results an assistant saw but did not cite are not where it found its answer.
+    return [...new Set(a.signals.citedDomains.map(hostOf))].filter((d) => d && !own.has(d) && !isCompetitor(d, named));
   });
-  const third = topCounts(domains, 8).filter((d) => d.count >= 2);
+  const labels = new Map<string, ReturnType<typeof labelHost>>();
+  const label = (d: string) => {
+    if (!labels.has(d)) labels.set(d, labelHost(d, hostLabels ?? new Map()));
+    return labels.get(d)!;
+  };
+  // Encyclopedias and public bodies are not places to get listed — only when the code or the admin says so: an LLM
+  // guess must not hide a host.
+  const third = topCounts(domains, 12)
+    .filter((d) => d.count >= 2 && !(label(d.value)?.type === "reference" && trustedLabel(label(d.value)!.source)))
+    .slice(0, 8)
+    .map((d) => {
+      const l = label(d.value);
+      // A type-specific step only for hosts labelled by the seed list, a rule or the admin (an LLM label may be wrong).
+      return { ...d, kind: l?.type ?? null, trusted: !!l && trustedLabel(l.source) };
+    });
   if (third.length === 0) return [];
   const share = third[0]!.count / missing.length;
+  const group = (kind: string | null) => third.filter((d) => (kind ? d.trusted && d.kind === kind : !(d.trusted && ["listing", "editorial", "ugc"].includes(d.kind ?? ""))));
+  const step = (hosts: typeof third, n: number, text: (list: string) => string) =>
+    hosts.length ? [{ top: hosts[0]!.count, text: text(hosts.slice(0, n).map((d) => d.value).join(", ")) }] : [];
+  // Ordered by the most cited host each step is about, so the step for the main source is never cut.
+  const steps = [
+    ...step(group("listing"), 4, (l) => `Create or complete your profile on ${l} and ask satisfied customers for reviews there.`),
+    ...step(group("editorial"), 3, (l) => `Offer a story, data or a quote to ${l}, which cover your topics.`),
+    ...step(group("ugc"), 3, (l) => `Answer the questions people ask on ${l} where it fits (lower priority).`),
+    ...step(group(null), 4, (l) => `See what ${l} publish about your topics and whether you can be featured.`),
+  ]
+    .sort((x, y) => y.top - x.top)
+    .map((x) => x.text);
   return [
     {
       key: "authority:third-party-sources",
       category: "AUTHORITY",
       severity: Math.min(0.9, 0.4 + share),
       title: "Assistants rely on third-party sites where you are not featured",
-      detail: `In ${missing.length} answers that recommend competitors but not you, assistants used sources such as ${third
+      detail: `In ${missing.length} answers that recommend competitors but not you, assistants cited ${third
         .slice(0, 4)
-        .map((d) => `${d.value} (${d.count}×)`)
+        .map((d) => `${d.value} (${d.count}×${d.kind && d.trusted ? `, ${KIND_LABEL[d.kind].toLowerCase()}` : ""})`)
         .join(", ")}.`,
-      evidence: { answersWithoutBrand: missing.length, sources: third },
+      evidence: { answersWithoutBrand: missing.length, sources: third.map(({ value, count, kind }) => ({ value, count, ...(kind ? { kind } : {}) })) },
       metric: "mention-rate",
       action: {
-        title: "Get listed and reviewed on the sources assistants cite",
-        steps: [
-          `Create or complete profiles on ${third
-            .slice(0, 4)
-            .map((d) => d.value)
-            .join(", ")} (directories, review and comparison sites).`,
-          "Ask satisfied customers for reviews there; offer data or a quote to the articles that list competitors.",
-        ],
+        title: "Get featured on the sites assistants cite",
+        steps: steps.slice(0, 3),
         effort: "MEDIUM",
       },
     },

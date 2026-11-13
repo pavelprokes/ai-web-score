@@ -13,6 +13,7 @@ import { sendMeasurementToUmami } from "@/services/umami";
 import { runOptimizer } from "@/services/optimizer";
 import { generateRecommendations } from "@/services/recommendations";
 import { reextractSignals } from "@/services/competitors";
+import { classifyCitedHosts } from "@/services/host-types";
 import { syncProviderRegistry } from "@/services/registry";
 import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
 
@@ -35,6 +36,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "optimizer.run": () => runOptimizer(),
   "recommendations.generate": (p) => generateRecommendations(s(p.domainId)),
   "signals.reextract": (p) => reextractSignals(s(p.domainId), p.after ? s(p.after) : null),
+  "sources.classify": () => classifyCitedHosts(),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
@@ -59,6 +61,7 @@ const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
   "analysis.collect": 120,
   "recommendations.generate": 120, // site files + one short LLM call
   "signals.reextract": 120, // 60 s of slices, then the score history rebuild
+  "sources.classify": 120, // up to three short hostname-only LLM calls
 };
 const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
 const DEFAULT_MAX_JOB_SECONDS = 60;
@@ -198,6 +201,8 @@ async function tick() {
   // Daily maintenance (dedupe key per day).
   const day = now.toISOString().slice(0, 10);
   await enqueue("optimizer.run", {}, { dedupeKey: `optimizer:${day}`, oncePerKey: true });
+  // Source types for "Where AI looks": only hosts nobody labelled yet, so most days this is a no-op.
+  await enqueue("sources.classify", {}, { dedupeKey: `sources-classify:${day}`, oncePerKey: true, maxAttempts: 2 });
   // Portfolio rotation (CORE kept, ROTATING slots turn over, new candidates come in) — proposals unless the domain
   // auto-approves. Without it the active set only changed when someone pressed "Optimise".
   const monitored = await db.select({ id: domains.id }).from(domains).where(eq(domains.status, "ACTIVE"));
