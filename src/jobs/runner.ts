@@ -224,10 +224,17 @@ async function tick() {
     .from(siteSnapshots)
     .where(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)));
   const siteFresh = new Set(checked.map((r) => r.domainId));
+  // A check that keeps failing must not hold the recommendations back for good: past twice the interval they are
+  // written from the last snapshot (or the discovery crawl) anyway.
+  const recent = await db
+    .selectDistinct({ domainId: recommendationSets.domainId })
+    .from(recommendationSets)
+    .where(gte(recommendationSets.createdAt, new Date(now.getTime() - 2 * RECOMMENDATIONS_EVERY_DAYS * 86_400_000)));
+  const notOverdue = new Set(recent.map((r) => r.domainId));
   for (const d of monitored) {
     if (!siteFresh.has(d.id)) {
       await enqueue("site.check", { domainId: d.id }, { dedupeKey: `site-check:${d.id}:${day}`, oncePerKey: true, maxAttempts: 2 });
-      continue;
+      if (notOverdue.has(d.id)) continue;
     }
     if (upToDate.has(d.id)) continue;
     await enqueue("recommendations.generate", { domainId: d.id }, { dedupeKey: `recommendations:${d.id}:${day}`, oncePerKey: true, maxAttempts: 2 });

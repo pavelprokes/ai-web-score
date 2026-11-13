@@ -719,6 +719,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       const robots = (set.diagnostics as Array<{ key: string; evidence: { blockedPaths?: string[] } }>).find((f) => f.key === "robots:OAI-SearchBot");
       expect(robots?.evidence.blockedPaths).toEqual(["/kurzy"]);
 
+      // A gallery site is checked on its homepage only.
+      await db.update(s.domains).set({ siteCheckHomepageOnly: true }).where(eq(s.domains.id, demo!.id));
+      requests.length = 0;
+      expect((await checkSite(demo!.id, { thenRecommend: false })).pages).toBe(1);
+      expect(requests.map((r) => new URL(r.url).pathname).sort()).toEqual(["/", "/robots.txt"]);
+      await db.update(s.domains).set({ siteCheckHomepageOnly: false }).where(eq(s.domains.id, demo!.id));
+
       // Only the latest KEEP_SNAPSHOTS are kept.
       for (let i = 0; i < KEEP_SNAPSHOTS + 1; i++) await checkSite(demo!.id, { thenRecommend: false });
       const kept = await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));

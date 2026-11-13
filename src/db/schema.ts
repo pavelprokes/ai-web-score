@@ -46,6 +46,8 @@ export const domains = pgTable("domains", {
   providerReach: jsonb("provider_reach"),
   /** Names the admin chose not to track as competitors (hidden from the suggestions from answers). */
   ignoredCompetitors: jsonb("ignored_competitors").$type<string[]>().notNull().default([]),
+  /** The weekly site check reads the homepage and robots.txt only (client galleries: no names stored). */
+  siteCheckHomepageOnly: boolean("site_check_homepage_only").notNull().default(false),
   cyclesPerDay: integer("cycles_per_day").notNull().default(1),
   nextPlanAt: ts("next_plan_at"),
   lastDiscoveryAt: ts("last_discovery_at"),

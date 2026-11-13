@@ -83,7 +83,7 @@ async function collectFindings(domainId: string) {
     ignoredCompetitors: domain.ignoredCompetitors,
     hostLabels,
   });
-  return { domain, profile, answers, clusters, findings, siteCheckedAt: snapshot?.checkedAt ?? null };
+  return { domain, profile, answers, clusters, findings };
 }
 
 const providerLabels = () => Object.fromEntries(listProviders().map((p) => [p.id, p.label]));

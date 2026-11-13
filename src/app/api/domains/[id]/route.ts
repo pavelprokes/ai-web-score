@@ -20,6 +20,7 @@ const UpdateDomain = z.object({
   umamiWebsiteId: z.string().nullable().optional(),
   umamiTrafficWebsiteId: z.string().nullable().optional(),
   autoApprovePortfolioChanges: z.boolean().optional(),
+  siteCheckHomepageOnly: z.boolean().optional(),
   cyclesPerDay: z.number().int().min(1).max(24).optional(),
   scoringVersion: z.string().refine((v) => v in SCORING_VERSIONS, "Unknown scoring version").optional(),
 });

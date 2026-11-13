@@ -84,14 +84,17 @@ describe("robots.txt in a snapshot", () => {
 describe("selectPages", () => {
   const nav = ["https://kpd.example/blog", "https://www.kpd.example/kurzy/", "https://kpd.example/kontakt#mapa", "https://other.example/x", "https://kpd.example/blog"];
 
-  it("takes the homepage, priority navigation, the rest of the navigation, then cited pages without query strings", () => {
-    const cited = ["https://kpd.example/kurzy/python?utm_source=chatgpt.com", "https://kpd.example/"];
+  it("takes the homepage, priority navigation, the rest of the navigation, then cited pages; www and bare host are one page", () => {
+    const cited = ["https://kpd.example/kurz?id=12", "https://kpd.example/kurz?id=14", "https://kpd.example/", "https://kpd.example/kurzy"];
     expect(selectPages("https://kpd.example", nav, cited, { priority: PRIORITY_PATH })).toEqual([
+      // "blog" is a priority path too (crawl.ts PRIORITY_PATH).
       "https://kpd.example/",
       "https://kpd.example/blog",
       "https://www.kpd.example/kurzy",
       "https://kpd.example/kontakt",
-      "https://kpd.example/kurzy/python",
+      // Pages addressed by their query string stay apart.
+      "https://kpd.example/kurz?id=12",
+      "https://kpd.example/kurz?id=14",
     ]);
   });
 
@@ -121,5 +124,36 @@ describe("digestFromSnapshot", () => {
 
   it("falls back to the discovery crawl when no page answered (a site that was down is not a site without markup)", () => {
     expect(digestFromSnapshot({ robots: { status: null, groups: [] }, pages: [{ path: "/", status: null }] }, "https://kpd.example", base)).toBe(base);
+  });
+
+  it("keeps the crawl's organization, hreflang and the structured data of pages the check could not read", () => {
+    const crawl = {
+      domain: "kpd.example",
+      homepageLang: "cs",
+      hreflang: [{ lang: "en", href: "https://kpd.example/en" }],
+      organization: { "@type": "EducationalOrganization" },
+      pages: [
+        { url: "https://kpd.example/", jsonLdTypes: ["EducationalOrganization"] },
+        { url: "https://kpd.example/kurzy", jsonLdTypes: ["Course"] },
+      ],
+    } as never;
+    // The homepage timed out, /kontakt answered, /kurzy was over the time limit.
+    const pages: PageCheck[] = [
+      { path: "/", status: null, error: "no answer" },
+      { path: "/kontakt", status: 200 },
+      { path: "/kurzy", status: null, error: "not checked (time limit)" },
+    ];
+    const d = digestFromSnapshot({ robots: { status: 200, groups: [] }, pages }, "https://kpd.example", crawl)!;
+    expect(d.organization).toEqual({ "@type": "EducationalOrganization" });
+    expect(d.hreflang.map((h) => h.lang)).toEqual(["en"]);
+    expect(d.homepageLang).toBe("cs");
+    expect(d.pages.map((p) => [p.url, p.jsonLdTypes])).toEqual([
+      ["https://kpd.example/kontakt", []],
+      ["https://kpd.example/", ["EducationalOrganization"]],
+      ["https://kpd.example/kurzy", ["Course"]],
+    ]);
+    // A complete check that finds no organization says so.
+    const full = digestFromSnapshot({ robots: { status: 200, groups: [] }, pages: [{ path: "/", status: 200 }] }, "https://kpd.example", crawl)!;
+    expect(full.organization).toBeNull();
   });
 });

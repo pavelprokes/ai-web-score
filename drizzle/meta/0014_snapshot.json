@@ -1,5 +1,5 @@
 {
-  "id": "ec46e169-b3e9-4e97-8055-24450e564e0d",
+  "id": "7557aee7-5a67-4455-8a30-7c8b455f25b2",
   "prevId": "8520cef5-56d3-480d-a62f-1cfda54c7747",
   "version": "7",
   "dialect": "postgresql",
@@ -437,6 +437,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'[]'::jsonb"
+        },
+        "site_check_homepage_only": {
+          "name": "site_check_homepage_only",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "cycles_per_day": {
           "name": "cycles_per_day",

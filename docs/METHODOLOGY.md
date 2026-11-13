@@ -225,8 +225,11 @@ On demand per domain (domain page → Recommendations, or `POST /api/domains/{id
    first status, redirect target, `X-Robots-Tag`, robots / googlebot meta, canonical, `data-nosnippet` elements,
    JSON-LD types and a hash, title, H1, words in the HTML as served (before JavaScript) and signs of a client-only
    shell. No page bodies and only the robots.txt groups of AI agents and `*` are stored (≤ 20 kB, the latest 12 per
-   domain). Gallery sites are checked on the homepage only (no client names stored). The check runs before the
-   weekly recommendations and before every manual Refresh, and queues them.
+   domain). A domain with `siteCheckHomepageOnly` (client galleries; set by migration 0014 for the photos site,
+   `PATCH /api/domains/{id}`) is checked on its homepage only, so no client names are stored. Pages the check could
+   not read keep the discovery crawl's facts (no finding from a page that did not answer). The check runs before the
+   weekly recommendations and before every manual Refresh, and queues them; recommendations older than 14 days are
+   written without a new check if checks keep failing.
 1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
    digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per

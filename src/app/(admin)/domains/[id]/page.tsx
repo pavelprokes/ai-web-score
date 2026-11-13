@@ -5,7 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { domainDetail, listPrompts, scoreHistory, searchQueriesFor } from "@/services/overview";
 import { sourcesFor } from "@/services/scores";
-import { latestSiteSnapshot } from "@/services/site-check";
+import { lastSiteCheckAt } from "@/services/site-check";
 import { competitorStandings, type KindShareRow, standingsSummary, type PageRow, type SearchQueryTopic, type SourceRow } from "@/core/scoring/sources";
 import { KIND_LABEL, type SourceKind } from "@/core/sources/host-types";
 import { busyKindsByDomain, busyReason } from "@/services/action-guards";
@@ -67,7 +67,7 @@ export default async function DomainPage({
     competitorSuggestions(id),
     competitorMatchCounts(id),
     searchQueriesFor(id),
-    latestSiteSnapshot(id),
+    lastSiteCheckAt(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -139,7 +139,7 @@ export default async function DomainPage({
         </Section>
       )}
 
-      <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck?.checkedAt ?? null} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
+      <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 
       {/* From here on: reference. Collapsed unless something to fix or a change points into the section. */}
       <div className="grid-2">

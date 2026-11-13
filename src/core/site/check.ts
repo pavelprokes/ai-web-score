@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { CrawlDigest } from "../discovery/crawl";
 import { AI_AGENTS } from "../recommendations/ai-agents";
-import { parseRobots, productToken, type RobotsGroup } from "../recommendations/robots";
+import { parseRobots, productToken, type RobotsGroup, robotsPath } from "../recommendations/robots";
 
 /** Bump when a field changes meaning, so a reader can tell old snapshots apart. */
 export const SITE_CHECK_VERSION = 1;
@@ -137,7 +137,8 @@ export function relevantRobotsGroups(robotsTxt: string): RobotsGroup[] {
   const tokens = new Set(["*", ...AI_AGENTS.flatMap((a) => [a.agent, a.fallback ?? ""]).filter(Boolean).map(productToken)]);
   return parseRobots(robotsTxt)
     .filter((g) => g.agents.some((a) => tokens.has(a)))
-    .map((g) => ({ agents: g.agents.filter((a) => tokens.has(a)), rules: g.rules.slice(0, 200) }));
+    // Every rule of a kept group: under longest-match precedence a dropped rule can flip the outcome.
+    .map((g) => ({ agents: g.agents.filter((a) => tokens.has(a)), rules: g.rules }));
 }
 
 /** robots.txt text equivalent to the kept groups (for the diagnostics, which parse text). */
@@ -147,72 +148,90 @@ export function robotsText(groups: RobotsGroup[]): string {
     .join("\n\n");
 }
 
-const pathOf = (url: string) => {
-  const u = new URL(url);
-  return (u.pathname || "/") + u.search;
-};
-
 /**
  * Pages to check, in order, at most MAX_CHECK_PAGES: the homepage, navigation links on the site with a priority path
- * (services, prices, contact …), then the rest of the navigation, then the own pages assistants cite (without query
- * strings). `homepageOnly` keeps just the homepage (sites with client galleries: no names in snapshots).
+ * (services, prices, contact …), then the rest of the navigation, then the own pages assistants cite. The query string
+ * stays (many sites address pages by it; cited URLs come without tracking parameters), the fragment and a trailing
+ * slash go, and www. and the bare host are one page. `homepageOnly` keeps just the homepage.
  */
 export function selectPages(origin: string, navigation: string[], citedPages: string[], opts: { homepageOnly?: boolean; priority: RegExp }): string[] {
-  const host = new URL(origin).hostname.replace(/^www\./, "");
-  const same = (u: string) => {
+  const bare = (h: string) => h.toLowerCase().replace(/^www\./, "");
+  const host = bare(new URL(origin).hostname);
+  const parse = (u: string) => {
     try {
-      const h = new URL(u).hostname.replace(/^www\./, "");
-      return h === host;
+      const x = new URL(u);
+      if (bare(x.hostname) !== host || (x.protocol !== "https:" && x.protocol !== "http:")) return null;
+      x.hash = "";
+      return { url: x.origin + (x.pathname.replace(/\/+$/, "") || "/") + x.search, key: (x.pathname.replace(/\/+$/, "") || "/") + x.search };
     } catch {
-      return false;
+      return null;
     }
   };
-  const norm = (u: string) => {
-    const x = new URL(u);
-    x.hash = "";
-    return x.origin + (x.pathname.replace(/\/+$/, "") || "/");
-  };
-  const home = norm(origin);
-  if (opts.homepageOnly) return [home];
-  const nav = navigation.filter(same).map(norm);
-  const ordered = [home, ...nav.filter((u) => opts.priority.test(u)), ...nav, ...citedPages.filter(same).map(norm).slice(0, CITED_PAGES)];
-  return [...new Set(ordered)].slice(0, MAX_CHECK_PAGES);
+  const homePage = new URL(origin).origin + "/";
+  if (opts.homepageOnly) return [homePage];
+  const nav = navigation.map(parse).filter((x): x is NonNullable<typeof x> => !!x);
+  const cited = citedPages.map(parse).filter((x): x is NonNullable<typeof x> => !!x);
+  const out = new Map<string, string>([["/", homePage]]);
+  let citedAdded = 0;
+  for (const p of [...nav.filter((x) => opts.priority.test(x.url)), ...nav]) if (!out.has(p.key)) out.set(p.key, p.url);
+  for (const p of cited) {
+    if (citedAdded >= CITED_PAGES) break;
+    if (!out.has(p.key)) {
+      out.set(p.key, p.url);
+      citedAdded++;
+    }
+  }
+  return [...out.values()].slice(0, MAX_CHECK_PAGES);
 }
 
 /**
  * The profile's crawl digest with the snapshot's fresher facts laid over it, for the diagnostics: pages and their
- * structured data, the organization block, hreflang. Pages that did not answer 2xx are left out.
+ * structured data, the organization block, hreflang. A check that did not read everything never reads as missing
+ * markup: when the homepage did not answer, the organization, language and hreflang stay the crawl's; pages the check
+ * could not read keep the crawl's structured data; and a snapshot where nothing answered changes nothing.
  */
 export function digestFromSnapshot(snapshot: SiteSnapshotData, origin: string, base: CrawlDigest | null): CrawlDigest | null {
-  const ok = snapshot.pages.filter((p) => p.status !== null && p.status < 300);
-  // Nothing answered (site down, blocked): no fresher facts — a missing page must not read as missing markup.
+  const answered = (p: PageCheck) => p.status !== null && p.status < 300;
+  const ok = snapshot.pages.filter(answered);
   if (ok.length === 0) return base;
+  const home = snapshot.pages[0];
+  const homeOk = !!home && answered(home);
+  const checkedPaths = new Set(ok.map((p) => p.path));
+  const unread = snapshot.pages.filter((p) => !answered(p)).map((p) => p.path);
+  // Crawl pages the check did not read this time (not answered, over the time limit, or not selected).
+  const carried = (base?.pages ?? []).filter((p) => {
+    const path = robotsPath(p.url);
+    return !checkedPaths.has(path) && (unread.includes(path) || !snapshot.pages.some((s) => s.path === path));
+  });
   const types = ok.flatMap((p) => p.jsonLdTypes ?? []);
   const orgType = types.find((t) => /Organization|LocalBusiness|Corporation|Store|School|EducationalOrganization/.test(t));
-  const home = snapshot.pages[0];
   return {
     domain: base?.domain ?? new URL(origin).hostname,
     fetchedAt: base?.fetchedAt ?? new Date().toISOString(),
-    homepageLang: home?.lang ?? base?.homepageLang ?? null,
-    hreflang: (home?.hreflang ?? []).map((lang) => ({ lang, href: "" })),
+    homepageLang: homeOk ? (home!.lang ?? null) : (base?.homepageLang ?? null),
+    hreflang: homeOk ? (home!.hreflang ?? []).map((lang) => ({ lang, href: "" })) : (base?.hreflang ?? []),
     sitemapUrlCount: base?.sitemapUrlCount ?? 0,
     sitemapSections: base?.sitemapSections ?? {},
     navigation: base?.navigation ?? [],
-    organization: orgType ? { "@type": orgType } : null,
+    organization: orgType ? { "@type": orgType } : homeOk && unread.length === 0 ? null : (base?.organization ?? null),
     products: base?.products ?? [],
     addresses: base?.addresses ?? [],
-    pages: ok.map((p) => ({
-      url: new URL(p.path, origin).toString(),
-      title: p.title ?? "",
-      description: "",
-      lang: p.lang ?? null,
-      h1: p.h1 ? [p.h1] : [],
-      h2: [],
-      jsonLdTypes: p.jsonLdTypes ?? [],
-      text: "",
-    })),
+    pages: [
+      ...ok.map((p) => ({
+        url: new URL(p.path, origin).toString(),
+        title: p.title ?? "",
+        description: "",
+        lang: p.lang ?? null,
+        h1: p.h1 ? [p.h1] : [],
+        h2: [],
+        jsonLdTypes: p.jsonLdTypes ?? [],
+        text: "",
+      })),
+      ...carried,
+    ],
     errors: [],
   };
 }
 
-export { pathOf };
+/** Path plus query of a checked URL, as stored and as robots.txt rules see it. */
+export const pathOf = robotsPath;

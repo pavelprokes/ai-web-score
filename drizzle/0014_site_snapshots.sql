@@ -8,5 +8,8 @@ CREATE TABLE "site_snapshots" (
 );
 --> statement-breakpoint
 ALTER TABLE "site_snapshots" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "domains" ADD COLUMN "site_check_homepage_only" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "site_snapshots" ADD CONSTRAINT "site_snapshots_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "site_snapshots_domain" ON "site_snapshots" USING btree ("domain_id","created_at");
+CREATE INDEX "site_snapshots_domain" ON "site_snapshots" USING btree ("domain_id","created_at");--> statement-breakpoint
+-- Client galleries carry couples' names in titles and headings: their site check reads the homepage only.
+UPDATE "domains" SET "site_check_homepage_only" = true WHERE "hostname" IN ('photos.svatebni-fotograf-cechy.cz', 'www.photos.svatebni-fotograf-cechy.cz');
