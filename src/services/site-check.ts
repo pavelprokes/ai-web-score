@@ -1,7 +1,8 @@
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, gte, lt, notInArray } from "drizzle-orm";
 import { openSite, parsePage, PRIORITY_PATH, type Fetched } from "@/core/discovery/crawl";
 import {
   checkPage,
+  KEEP_DAYS,
   KEEP_SNAPSHOTS,
   pathOf,
   type PageCheck,
@@ -11,6 +12,7 @@ import {
   type SiteSnapshotData,
 } from "@/core/site/check";
 import { confirmingSnapshot, needsRecheck, siteFindings } from "@/core/site/findings";
+import { siteChanges } from "@/core/site/changes";
 import { getDb } from "@/db";
 import { domains, siteSnapshots } from "@/db/schema";
 import { enqueue, PermanentJobError } from "@/jobs/queue";
@@ -40,9 +42,27 @@ export async function recentSiteSnapshots(domainId: string, n = 2): Promise<Site
   return rows.map(toSnapshot);
 }
 
+/** The site check taken at `at` (the one a recommendation set was built from), or null when it is no longer kept. */
+export async function siteSnapshotAt(domainId: string, at: Date): Promise<SiteSnapshot | null> {
+  const [row] = await getDb().select().from(siteSnapshots).where(and(eq(siteSnapshots.domainId, domainId), eq(siteSnapshots.createdAt, at))).limit(1);
+  return row ? toSnapshot(row) : null;
+}
+
 /** The latest site check of a domain, or null before the first one. */
 export async function latestSiteSnapshot(domainId: string): Promise<SiteSnapshot | null> {
   return (await recentSiteSnapshots(domainId, 1))[0] ?? null;
+}
+
+/** Critical website changes of the last 30 days (B4), from the kept snapshots; computed when read. */
+export async function recentSiteChanges(domainId: string, now = new Date()) {
+  const [domain] = await getDb().select({ hostname: domains.hostname }).from(domains).where(eq(domains.id, domainId));
+  if (!domain) return [];
+  const rows = await getDb()
+    .select()
+    .from(siteSnapshots)
+    .where(and(eq(siteSnapshots.domainId, domainId), gte(siteSnapshots.createdAt, new Date(now.getTime() - KEEP_DAYS * 86_400_000))))
+    .orderBy(desc(siteSnapshots.createdAt));
+  return siteChanges(rows.map(toSnapshot), now, domain.hostname);
 }
 
 /** When the domain's website was last checked (the page shows it; no need to read the snapshot). */
@@ -126,13 +146,22 @@ export async function checkSite(domainId: string, opts: { thenRecommend?: boolea
       { dedupeKey: `site-recheck:${domainId}`, runAt: new Date(Date.now() + RECHECK_AFTER_MS), maxAttempts: 2 },
     );
   }
+  // Keep the latest KEEP_SNAPSHOTS and everything of the last KEEP_DAYS (changes need the check from before them).
   const keep = await db
     .select({ id: siteSnapshots.id })
     .from(siteSnapshots)
     .where(eq(siteSnapshots.domainId, domainId))
     .orderBy(desc(siteSnapshots.createdAt))
     .limit(KEEP_SNAPSHOTS);
-  await db.delete(siteSnapshots).where(and(eq(siteSnapshots.domainId, domainId), notInArray(siteSnapshots.id, keep.map((k) => k.id))));
+  await db
+    .delete(siteSnapshots)
+    .where(
+      and(
+        eq(siteSnapshots.domainId, domainId),
+        notInArray(siteSnapshots.id, keep.map((k) => k.id)),
+        lt(siteSnapshots.createdAt, new Date(Date.now() - KEEP_DAYS * 86_400_000)),
+      ),
+    );
   if (opts.thenRecommend !== false) await enqueue("recommendations.generate", { domainId }, { dedupeKey: `recommendations:${domainId}`, maxAttempts: 2 });
   return { pages: pages.length, answered: pages.filter((p) => p.status !== null).length, robotsStatus: data.robots.status, recheckQueued: possible && !opts.recheck };
 }

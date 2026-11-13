@@ -17,8 +17,10 @@ export const SITE_CHECK_VERSION = 1;
 export const MAX_CHECK_PAGES = 20;
 /** Own pages assistants cite, checked besides the homepage and the navigation. */
 export const CITED_PAGES = 5;
-/** Snapshots kept per domain (about three months at one a week). */
+/** Snapshots kept per domain: at least the latest KEEP_SNAPSHOTS, and every one of the last KEEP_DAYS (so manual
+ * Refreshes and 24 h re-checks never push out the check from before a change; ≤ 20 kB each). */
 export const KEEP_SNAPSHOTS = 12;
+export const KEEP_DAYS = 45;
 
 export interface PageCheck {
   /** Path plus query of the requested URL (the host is the domain's). */
@@ -152,8 +154,10 @@ export function relevantRobotsGroups(robotsTxt: string): RobotsGroup[] {
 
 /** robots.txt text equivalent to the kept groups (for the diagnostics, which parse text). */
 export function robotsText(groups: RobotsGroup[]): string {
+  // A group without rules (an empty "Disallow:" allows everything) still gets one line: without it the next group's
+  // user-agent lines would join this group.
   return groups
-    .map((g) => [...g.agents.map((a) => `User-agent: ${a}`), ...g.rules.map((r) => `${r.allow ? "Allow" : "Disallow"}: ${r.path}`)].join("\n"))
+    .map((g) => [...g.agents.map((a) => `User-agent: ${a}`), ...(g.rules.length ? g.rules.map((r) => `${r.allow ? "Allow" : "Disallow"}: ${r.path}`) : ["Disallow:"])].join("\n"))
     .join("\n\n");
 }
 

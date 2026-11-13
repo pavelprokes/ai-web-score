@@ -23,7 +23,7 @@ import type { VisibilityMetrics } from "@/core/scoring/scoring";
 import { DEFAULT_WINDOW_DAYS, latestScores, sourcesFor } from "@/services/scores";
 import { generateStructured, llmAvailable, llmModel } from "@/lib/llm";
 import { storedHostLabels } from "@/services/host-types";
-import { RECENT_FOR_CONFIRMATION, recentSiteSnapshots } from "@/services/site-check";
+import { RECENT_FOR_CONFIRMATION, recentSiteSnapshots, siteSnapshotAt } from "@/services/site-check";
 import { KEEP_SNAPSHOTS } from "@/core/site/check";
 import { couldSee, findingPages, freshSighting } from "@/core/site/evidence";
 import { confirmingSnapshot, findingStates } from "@/core/site/findings";
@@ -351,7 +351,7 @@ export async function websiteFixStatus(domainId: string): Promise<{
   const [latest] = await db.select().from(recommendationSets).where(eq(recommendationSets.domainId, domainId)).orderBy(desc(recommendationSets.createdAt)).limit(1);
   if (!latest?.siteCheckedAt) return { checkedAt: null, stillFound: [], fixed: [] };
   const checkedAt = latest.siteCheckedAt;
-  const snapshot = (await recentSiteSnapshots(domainId, KEEP_SNAPSHOTS)).find((x) => x.checkedAt.getTime() === checkedAt.getTime()) ?? null;
+  const snapshot = await siteSnapshotAt(domainId, checkedAt);
   const latestFindings = (latest.diagnostics as Array<{ key: string; evidence?: unknown }>) ?? [];
   const present = new Set(latestFindings.map((f) => f.key));
   const decisions = await db

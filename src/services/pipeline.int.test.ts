@@ -658,6 +658,28 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
+  it("reports critical website changes from the kept snapshots, newest first", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { recentSiteChanges } = await import("@/services/site-check");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const at = (d: number) => new Date(Date.now() - d * 86_400_000);
+    const page = (robots?: string) => [{ path: "/cenik", status: 200, ...(robots ? { metaRobots: robots } : {}) }];
+    try {
+      await db.insert(s.siteSnapshots).values([
+        { domainId: demo!.id, checkVersion: 1, robots: { status: 404, groups: [] }, pages: page(), createdAt: at(15) },
+        { domainId: demo!.id, checkVersion: 1, robots: { status: 404, groups: [] }, pages: page("noindex"), createdAt: at(8) },
+        { domainId: demo!.id, checkVersion: 1, robots: { status: 404, groups: [] }, pages: page("noindex"), createdAt: at(1) },
+      ]);
+      const changes = await recentSiteChanges(demo!.id);
+      expect(changes.map((c) => c.text)).toEqual(["/cenik now has noindex (hidden from Google and its AI answers)"]);
+      expect(Math.round((Date.now() - changes[0]!.at.getTime()) / 86_400_000)).toBe(8);
+    } finally {
+      await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+    }
+  });
+
   it("schedules a recommendations refresh for ACTIVE domains whose latest set is a week old, once a day", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
@@ -727,7 +749,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const s = await import("@/db/schema");
     const { checkSite, latestSiteSnapshot } = await import("@/services/site-check");
     const { generateRecommendations, latestRecommendations, setRecommendationStatus } = await import("@/services/recommendations");
-    const { KEEP_SNAPSHOTS } = await import("@/core/site/check");
+    const { KEEP_DAYS, KEEP_SNAPSHOTS } = await import("@/core/site/check");
     const db = getDb();
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
     const home = `<!doctype html><html lang="cs"><head><title>Kódování pro děti</title>
@@ -815,10 +837,14 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(requests.map((r) => new URL(r.url).pathname).sort()).toEqual(["/", "/robots.txt"]);
       await db.update(s.domains).set({ siteCheckHomepageOnly: false }).where(eq(s.domains.id, demo!.id));
 
-      // Only the latest KEEP_SNAPSHOTS are kept.
+      // Kept: every check of the last KEEP_DAYS, and at least the latest KEEP_SNAPSHOTS of the older ones.
       for (let i = 0; i < KEEP_SNAPSHOTS + 1; i++) await checkSite(demo!.id, { thenRecommend: false });
-      const kept = await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
-      expect(kept).toHaveLength(KEEP_SNAPSHOTS);
+      const count = async () => (await db.select({ id: s.siteSnapshots.id }).from(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id))).length;
+      const recent = await count();
+      expect(recent).toBeGreaterThan(KEEP_SNAPSHOTS);
+      await db.execute(sql`update site_snapshots set created_at = created_at - make_interval(days => ${KEEP_DAYS + 1}) where domain_id = ${demo!.id}`);
+      await checkSite(demo!.id, { thenRecommend: false });
+      expect(await count()).toBe(KEEP_SNAPSHOTS);
     } finally {
       globalThis.fetch = realFetch;
       await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
