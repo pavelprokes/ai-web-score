@@ -234,10 +234,13 @@ On demand per domain (domain page → Recommendations, or `POST /api/domains/{id
    `none`) for Googlebot, nosnippet / max-snippet:0, max-snippet under 160, text only after JavaScript (< 50 words
    **and** an app-shell marker), a canonical pointing elsewhere, a bot challenge (information only: a firewall may still
    let verified crawlers through). Directives come from meta robots, meta googlebot and `X-Robots-Tag` (parts scoped
-   to another bot are skipped). Seen in one check a finding is *possible* (noindex / nosnippet 0.5, JavaScript-only
-   0.5) and the site is checked again in 24 hours; seen on the same page in two consecutive checks it is *confirmed*
-   (0.8, 0.7). A re-check does not schedule another. Schema findings stay ≤ 0.3 (Google: structured data is not
-   needed for its AI features).
+   to another bot are skipped; the most restrictive max-snippet counts). A bot challenge's own page is never read as
+   the site's, even with status 200. A page hitting a rule in one check is *possible* (noindex / nosnippet 0.5,
+   JavaScript-only 0.5) and the site is checked again in 24 hours; hitting it in two checks at least 20 hours apart it
+   is *confirmed* (0.8, 0.7) — a double Refresh is one look. A page the latest check could not read keeps what the
+   previous check saw (as possible). A re-check does not schedule another, does not count as the weekly check, and is
+   skipped for a domain paused meanwhile. A Done / Dismissed taken on a possible finding no longer holds once it is
+   confirmed. Schema findings stay ≤ 0.3 (Google: structured data is not needed for its AI features).
 1. **Diagnostics (deterministic, free).** Inputs: the latest site check (before the first one: the discovery crawl
    digest and a live `robots.txt`), and
    the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per

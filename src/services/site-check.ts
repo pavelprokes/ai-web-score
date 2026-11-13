@@ -10,7 +10,7 @@ import {
   SITE_CHECK_VERSION,
   type SiteSnapshotData,
 } from "@/core/site/check";
-import { needsRecheck, siteFindings } from "@/core/site/findings";
+import { confirmingSnapshot, needsRecheck, siteFindings } from "@/core/site/findings";
 import { getDb } from "@/db";
 import { domains, siteSnapshots } from "@/db/schema";
 import { enqueue, PermanentJobError } from "@/jobs/queue";
@@ -62,13 +62,17 @@ export async function lastSiteCheckAt(domainId: string): Promise<Date | null> {
  * KEEP_SNAPSHOTS, and queues the recommendations so they read it. Pages that do not answer in time are recorded as
  * not checked, so a slow site gives a partial snapshot instead of a failed job.
  */
-/** A possible finding is looked at again after this long (B2: confirmed when two consecutive checks agree). */
+/** A possible finding is looked at again after this long (B2: confirmed when two checks a day apart agree). */
 export const RECHECK_AFTER_MS = 24 * 3600_000;
+/** Snapshots read to find the check that confirms the latest one (manual Refreshes can sit in between). */
+export const RECENT_FOR_CONFIRMATION = 6;
 
 export async function checkSite(domainId: string, opts: { thenRecommend?: boolean; recheck?: boolean } = {}) {
   const db = getDb();
   const [domain] = await db.select().from(domains).where(eq(domains.id, domainId));
   if (!domain) throw new PermanentJobError(`Domain ${domainId} not found`);
+  // A 24 h re-check of a domain paused meanwhile is not wanted (no recommendations are refreshed for it either).
+  if (opts.recheck && domain.status !== "ACTIVE") return { skipped: `domain is ${domain.status}` };
   const started = Date.now();
   const origin = `https://${domain.hostname}`;
   const { home, get } = await openSite(origin, { browserRetry: false, timeoutMs: FETCH_TIMEOUT_MS });
@@ -102,10 +106,15 @@ export async function checkSite(domainId: string, opts: { thenRecommend?: boolea
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
   const data: SiteSnapshotData = {
-    robots: { status: robots?.status ?? null, groups: robots?.status === 200 ? relevantRobotsGroups(robots.text) : [] },
+    robots: {
+      status: robots?.status ?? null,
+      groups: robots?.status === 200 ? relevantRobotsGroups(robots.text) : [],
+      origin: base,
+      ...(opts.recheck ? { recheck: true } : {}),
+    },
     pages,
   };
-  const previous = await latestSiteSnapshot(domainId);
+  const previous = confirmingSnapshot([{ ...data, checkedAt: new Date() }, ...(await recentSiteSnapshots(domainId, RECENT_FOR_CONFIRMATION))]);
   await db.insert(siteSnapshots).values({ domainId, checkVersion: SITE_CHECK_VERSION, robots: data.robots, pages: data.pages });
   // Something seen for the first time is looked at again in 24 hours, so it is confirmed (or cleared) within a day
   // instead of a week. A re-check does not schedule another: flapping pages stay "possible" until the weekly check.

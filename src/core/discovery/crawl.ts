@@ -70,7 +70,7 @@ for (const [net, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10]
 for (const [net, prefix] of [["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) NON_PUBLIC.addSubnet(net, prefix, "ipv6");
 
 /** The host as the crawler compares it: `www.` is the same site. */
-const siteHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, "");
+export const siteHost = (hostname: string) => hostname.toLowerCase().replace(/^www\./, "");
 
 const isNonPublic = (address: string) => NON_PUBLIC.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
 

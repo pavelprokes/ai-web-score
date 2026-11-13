@@ -222,7 +222,8 @@ async function tick() {
   const checked = await db
     .selectDistinct({ domainId: siteSnapshots.domainId })
     .from(siteSnapshots)
-    .where(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)));
+    // A 24 h re-check is not the weekly check: counting it would push the week forward by a day each time.
+    .where(and(gte(siteSnapshots.createdAt, new Date(now.getTime() - SITE_CHECK_EVERY_DAYS * 86_400_000)), sql`coalesce((${siteSnapshots.robots}->>'recheck')::boolean, false) = false`));
   const siteFresh = new Set(checked.map((r) => r.domainId));
   // A check that keeps failing must not hold the recommendations back for good: past twice the interval they are
   // written from the last snapshot (or the discovery crawl) anyway.
