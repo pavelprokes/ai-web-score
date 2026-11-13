@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 
 /**
  * End-to-end pipeline test against a real Postgres with the offline mock provider.
@@ -638,9 +638,15 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       await check(blocked, 2);
       expect((await item())!.status).toBe("OPEN");
 
-      // Done again, then the check no longer finds it: fixed on the site.
+      // Done again; a check that could not read robots.txt says nothing: not fixed, and no sighting.
       await setRecommendationStatus((await item())!.id, "DONE");
-      await db.update(s.recommendations).set({ statusChangedAt: new Date(Date.now() - 1.5 * 86_400_000) }).where(eq(s.recommendations.status, "DONE"));
+      await db
+        .update(s.recommendations)
+        .set({ statusChangedAt: new Date(Date.now() - 1.5 * 86_400_000) })
+        .where(and(eq(s.recommendations.domainId, demo!.id), eq(s.recommendations.status, "DONE")));
+      await check({ status: null, groups: [], origin: "https://kodovani-pro-deti.example" }, 1.2);
+      expect((await websiteFixStatus(demo!.id)).fixed.map((f) => f.title)).not.toContain("Allow OAI-SearchBot in robots.txt");
+      // Then a check reads it and the block is gone: fixed on the site.
       await check(open, 1);
       expect(await item()).toBeUndefined();
       const status = await websiteFixStatus(demo!.id);
@@ -648,6 +654,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(status.stillFound).toEqual([]);
     } finally {
       await db.delete(s.siteSnapshots).where(eq(s.siteSnapshots.domainId, demo!.id));
+      await db.delete(s.recommendationSets).where(and(eq(s.recommendationSets.domainId, demo!.id), isNotNull(s.recommendationSets.siteCheckedAt)));
     }
   });
 

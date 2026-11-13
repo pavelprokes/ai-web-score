@@ -5,6 +5,8 @@
  * cites the affected pages anyway. Never "the reason": the measurements show a correlation in one domain, not a cause.
  */
 import { AI_AGENTS } from "./ai-agents";
+import { TRACKING_PARAM } from "../scoring/sources";
+import { hostOf } from "../signals/matcher";
 import type { AnswerObservation, Finding } from "./diagnostics";
 
 /** Searched, unbranded answers an assistant needs before its silence says anything (team: ≥ 20 in 28 days). */
@@ -14,9 +16,15 @@ export const CONTRADICTED_SEVERITY = 0.2;
 /** Floor of a finding that is the likely reason (robots findings and confirmed site findings only). */
 export const LIKELY_SEVERITY = 0.9;
 
-/** Which assistants (provider ids) a website finding concerns. */
+/**
+ * Which assistants (provider ids) a website finding concerns. Robots findings only for agents that fetch for search
+ * or grounding: a user-triggered fetcher (ChatGPT-User, Claude-User) does not explain why a site is never cited.
+ */
 export function providersOf(key: string): string[] {
-  if (key.startsWith("robots:")) return AI_AGENTS.find((a) => `robots:${a.agent}` === key)?.providers ?? [];
+  if (key.startsWith("robots:")) {
+    const a = AI_AGENTS.find((x) => `robots:${x.agent}` === key);
+    return a && (a.role === "search" || a.role === "grounding-opt-out") ? a.providers : [];
+  }
   if (key.startsWith("eligibility:")) return ["google-ai-mode", "gemini-ui"];
   if (key === "content:js-only") return ["chatgpt-ui", "claude-api", "perplexity-api"];
   return [];
@@ -29,9 +37,6 @@ function pagesOf(f: Finding): string[] {
   if (Array.isArray(e.pages)) return e.pages;
   return e.pages ? Object.keys(e.pages) : [];
 }
-
-/** Query parameters that say who sent the visitor, not which page it is (as in scoring/sources.ts). */
-const TRACKING_PARAM = /^(utm_|srsltid$|fbclid$|gclid$)/;
 
 /** A page as both sides can compare it: path without a trailing slash, query without tracking parameters. */
 export function pageKey(urlOrPath: string): string {
@@ -52,23 +57,20 @@ interface ProviderReading {
   paths: Set<string>;
 }
 
-function readings(answers: AnswerObservation[], ownHosts: string[]): Map<string, ProviderReading> {
-  const own = (url: string) => {
-    try {
-      const h = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-      return ownHosts.some((o) => h === o || h.endsWith(`.${o}`));
-    } catch {
-      return false;
-    }
-  };
+/**
+ * Per assistant: searched, unbranded answers, and its citations of the monitored host itself — not of other owned
+ * domains or subdomains, because robots.txt and the checked pages belong to that one host.
+ */
+function readings(answers: AnswerObservation[], hostname: string): Map<string, ProviderReading> {
+  const host = hostname.toLowerCase().replace(/^www\./, "");
   const out = new Map<string, ProviderReading>();
   for (const a of answers) {
     if (a.branded) continue;
     if (!(a.signals.searchWasUsed || a.signals.citedUrls.length > 0)) continue;
     const r = out.get(a.providerId) ?? { answers: 0, citing: 0, paths: new Set<string>() };
     r.answers++;
-    const cited = a.signals.citedUrls.filter(own);
-    if (cited.length || a.signals.domainCited) r.citing++;
+    const cited = a.signals.citedUrls.filter((u) => hostOf(u) === host);
+    if (cited.length) r.citing++;
     for (const u of cited) r.paths.add(pageKey(u));
     out.set(a.providerId, r);
   }
@@ -84,9 +86,9 @@ function readings(answers: AnswerObservation[], ownHosts: string[]): Map<string,
 export function joinWithAnswers(
   findings: Finding[],
   answers: AnswerObservation[],
-  ctx: { ownHosts: string[]; providerLabels?: Record<string, string> },
+  ctx: { hostname: string; providerLabels?: Record<string, string> },
 ): Finding[] {
-  const byProvider = readings(answers, ctx.ownHosts.map((h) => h.toLowerCase().replace(/^www\./, "")));
+  const byProvider = readings(answers, ctx.hostname);
   const label = (id: string) => ctx.providerLabels?.[id] ?? id;
   return findings.map((f) => {
     const concerned = providersOf(f.key)
@@ -99,7 +101,9 @@ export function joinWithAnswers(
     const silent = concerned.filter((x) => x.r.citing === 0);
     const contradicting = concerned.filter((x) => citesAffected(x.r));
     const state = (f.evidence as { state?: string }).state;
-    const canRaise = f.key.startsWith("robots:") || state === "confirmed";
+    // Raised only when the finding can explain silence about the whole site: a whole-site block, or a confirmed site
+    // finding. A block of a few pages, or a first sighting, only gets the sentence.
+    const canRaise = (f.key.startsWith("robots:") && wholeSite) || state === "confirmed";
     const causal = concerned.map((x) => ({ provider: x.id, answers: x.r.answers, citing: x.r.citing, citesAffectedPages: citesAffected(x.r) }));
     if (contradicting.length === concerned.length) {
       return {

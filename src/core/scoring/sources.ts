@@ -30,7 +30,7 @@ export interface SourceRow {
 const SOURCE_PAGES = 3;
 const OWN_PAGES = 15;
 /** Query parameters that say who sent the visitor, not which page it is. */
-const TRACKING_PARAM = /^(utm_|srsltid$|fbclid$|gclid$)/;
+export const TRACKING_PARAM = /^(utm_|srsltid$|fbclid$|gclid$)/;
 
 /** Answers the visibility metrics read: unbranded questions that got an answer. */
 const unbranded = <T extends Observation>(obs: T[]) => obs.filter((o) => !o.branded && !o.signals.noAnswer);

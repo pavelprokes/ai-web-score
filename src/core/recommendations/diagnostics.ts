@@ -149,10 +149,7 @@ export function diagnose(input: DiagnosticsInput): Finding[] {
     ...markets(input),
   ];
   // B3: a website finding next to what its assistants do (likely reason, or contradicted by their citations).
-  const joined = joinWithAnswers(findings, unbranded.answers, {
-    ownHosts: [input.hostname, ...input.profile.ownedDomains],
-    providerLabels: input.providerLabels,
-  });
+  const joined = joinWithAnswers(findings, unbranded.answers, { hostname: input.hostname, providerLabels: input.providerLabels });
   return joined.sort((a, b) => b.severity - a.severity || a.key.localeCompare(b.key));
 }
 

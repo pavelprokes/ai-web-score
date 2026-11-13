@@ -24,7 +24,7 @@ const finding = (key: string, evidence: Record<string, unknown>, severity = 0.5)
   metric: "citation-rate",
   action: { title: "a", steps: ["s"], effort: "LOW" },
 });
-const ctx = { ownHosts: ["kpd.example"], providerLabels: { "chatgpt-ui": "ChatGPT", "google-ai-mode": "Google AI Mode" } };
+const ctx = { hostname: "kpd.example", providerLabels: { "chatgpt-ui": "ChatGPT", "google-ai-mode": "Google AI Mode" } };
 
 describe("providersOf", () => {
   it("maps each website finding to the assistants it concerns", () => {
@@ -33,6 +33,10 @@ describe("providersOf", () => {
     expect(providersOf("eligibility:noindex")).toEqual(["google-ai-mode", "gemini-ui"]);
     expect(providersOf("content:js-only")).toEqual(["chatgpt-ui", "claude-api", "perplexity-api"]);
     expect(providersOf("schema:organization")).toEqual([]);
+    // User-triggered fetchers and training crawlers do not explain why a site is never cited.
+    expect(providersOf("robots:ChatGPT-User")).toEqual([]);
+    expect(providersOf("robots:Claude-User")).toEqual([]);
+    expect(providersOf("robots:GPTBot")).toEqual([]);
   });
 });
 
@@ -68,6 +72,20 @@ describe("joinWithAnswers", () => {
     const p = joinWithAnswers([possible], silent, ctx)[0]!;
     expect(p.severity).toBe(0.5);
     expect(p.detail).toMatch(/Likely reason/);
+  });
+
+  it("only explains a block of a few pages, without raising it", () => {
+    const partial = finding("robots:OAI-SearchBot", { blockedPaths: ["/kurzy"] }, 0.6);
+    const [f] = joinWithAnswers([partial], many(25, () => answer("chatgpt-ui")), ctx);
+    expect(f!.severity).toBe(0.6);
+    expect(f!.detail).toMatch(/Likely reason/);
+  });
+
+  it("does not let citations of another owned host or a subdomain contradict a block of the monitored host", () => {
+    const answers = many(25, () => answer("chatgpt-ui", ["https://photos.kpd.example/gallery", "https://kpd-shop.example/x"]));
+    const [f] = joinWithAnswers([robots], answers, ctx);
+    expect(f!.severity).toBe(LIKELY_SEVERITY);
+    expect(f!.detail).toMatch(/Likely reason/);
   });
 
   it("leaves a finding alone when its assistant cites the site but not the affected pages", () => {
