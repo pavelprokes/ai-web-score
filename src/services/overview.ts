@@ -277,7 +277,6 @@ export interface TrendPoint {
   providers?: string[];
 }
 
-/** Daily score history (rolling-window snapshots) for the domain and each provider. */
 /** Hostnames of monitored domains by the scoring version they use. */
 export async function scoringVersionUsage(): Promise<Record<string, string[]>> {
   const rows = await getDb().select({ hostname: domains.hostname, version: domains.scoringVersion }).from(domains).orderBy(domains.hostname);
@@ -286,6 +285,7 @@ export async function scoringVersionUsage(): Promise<Record<string, string[]>> {
   return out;
 }
 
+/** Daily score history (rolling-window snapshots) for the domain and each provider. */
 export async function scoreHistory(domainId: string, days = 180) {
   const db = getDb();
   const [d] = await db.select({ scoringVersion: domains.scoringVersion }).from(domains).where(eq(domains.id, domainId));
