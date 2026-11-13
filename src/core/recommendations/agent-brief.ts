@@ -2,6 +2,7 @@ import type { DomainProfile } from "../domain-profile";
 import type { RateWithCi, VisibilityMetrics } from "../scoring/scoring";
 import type { SourceRow } from "../scoring/sources";
 import type { RawSignals } from "../signals/extract";
+import { SEARCH_AGENTS } from "./ai-agents";
 import type { Finding } from "./diagnostics";
 
 /**
@@ -251,8 +252,8 @@ export function renderAgentBrief(i: AgentBriefInput): string {
   push(
     "## Work plan",
     "",
-    "1. Explore the repository: framework, where pages, content, metadata, structured data, sitemap, robots.txt and",
-    "   llms.txt come from, and how the site is built and deployed.",
+    "1. Explore the repository: framework, where pages, content, metadata, structured data, sitemap and robots.txt",
+    "   come from, and how the site is built and deployed.",
     "2. Map each finding to the files it touches. Skip findings that need facts you do not have (note them for the owner).",
     "3. Implement in the order above, one finding per commit, with the key in the commit message.",
     "",
@@ -264,8 +265,9 @@ export function renderAgentBrief(i: AgentBriefInput): string {
     "- Rendered HTML (not only client-side JS) of every changed page contains the new content, title, meta description and",
     "  canonical URL.",
     "- JSON-LD is valid (schema.org types, no errors in a structured-data validator) and matches the visible content.",
-    "- robots.txt still allows the AI search agents (OAI-SearchBot, ChatGPT-User, PerplexityBot, Googlebot) and lists the",
-    "  sitemap; the sitemap includes new pages; /llms.txt, if added, is served as text/plain.",
+    `- robots.txt still allows the search agents (${SEARCH_AGENTS.join(", ")}) on every changed page and lists the`,
+    "  sitemap; the sitemap includes new pages; no changed page carries noindex, nosnippet or a restrictive max-snippet.",
+    "- JSON-LD holds no placeholder text ([Business Name], TODO(owner), example values): leave a property out instead.",
     "- No broken internal links, no new accessibility or Core Web Vitals regressions on changed pages.",
     "- Every factual claim added is in the facts above or the existing site; anything else is a `TODO(owner)`.",
     "",

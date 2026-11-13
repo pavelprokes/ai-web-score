@@ -120,6 +120,14 @@ the FLOW prompt library, English-only content heuristics (`content_quality.py`, 
 Markdown negotiation / ai-catalog / A2A / Content-Signal / RSL checks (no confirmed consumer), spoofing bot user
 agents, self-serving AggregateRating, competitor comparison pages, backlink and Common Crawl tooling.
 
+## Implementation notes (phase A)
+
+- The llms.txt finding was removed instead of reworded: its only honest action was "not needed", which is noise for
+  the plan-writing step. The diagnostics no longer fetch `/llms.txt`.
+- Opt-out tokens (Google-Extended, Applebot-Extended) count only when robots.txt names them; agents that ignore
+  robots.txt (Perplexity-User) raise no finding. A search agent blocked from some key pages only gets a scaled severity.
+- Pavel confirmed *Search generative AI* = Include on 2026-11-13, and that phases B and C go to `/team` after phase A.
+
 ## Decisions for Pavel
 
 1. Phase A now as one PR (recommended; it fixes wrong advice and needs no production access).

@@ -91,9 +91,11 @@ Keep this file current: update it at the end of each piece of work (state, merge
 
 ## Next task
 
-**2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`): facts checked at vendor
-pages, seven defects in the recommendation diagnostics, phases A–D. Phase A (one PR, no production access) waits
-for Pavel's go; owner action: confirm Search Console → Settings → *Search generative AI* = Include on each domain.
+**2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74): facts checked at vendor
+pages, phases A–D. Phase A is implemented (agent table from vendor docs, RFC 9309 robots.txt on key pages, 5xx
+robots.txt, no FAQPage / llms.txt advice, sourced provider hints, plan-writing guardrails, RESEARCH §8). Pavel
+confirmed *Search generative AI* = Include in Search Console. Next from this review: phases B (site check) and C
+(source types) through `/team`; phase D probes (≈ $0.25) still need his go.
 
 **Current plan: `docs/meetings/2026-11-12-project-review-phased-plan.md`** — a whole-project review by the team
 (UX, scoring, logic, providers, what is new in the field) with phases and the owner's decisions of 2026-11-12 (raw kept

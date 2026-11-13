@@ -219,9 +219,11 @@ timestamp.
 On demand per domain (domain page → Recommendations, or `POST /api/domains/{id}/actions` with
 `generate-recommendations`; read back via `GET /api/domains/{id}/recommendations`).
 
-1. **Diagnostics (deterministic, free).** Inputs: the crawl digest, live `robots.txt` and `/llms.txt`, and
-   the last 30 days of STANDARD answers with their raw signals. Checks: AI crawlers blocked in robots.txt
-   (search agents weigh far more than training agents), missing Organization / Product JSON-LD, topic
+1. **Diagnostics (deterministic, free).** Inputs: the crawl digest, live `robots.txt`, and
+   the last 30 days of STANDARD answers with their raw signals. Checks: AI agents blocked in robots.txt, matched per
+   RFC 9309 on the homepage and every crawled page, with roles from the vendors' documentation (search agents and
+   Google-Extended, which also controls Gemini grounding, weigh far more than user fetchers and training crawlers;
+   `src/core/recommendations/ai-agents.ts`, RESEARCH §8), a robots.txt answering 5xx, missing Organization / Product JSON-LD, topic
    clusters where competitors appear but the brand does not, third-party sites assistants cite instead,
    mentioned-but-not-cited, weak list position, low accuracy, negative sentiment, a provider far below the
    best one, untracked competitors, missing hreflang. Each finding has evidence, the metric it moves and a

@@ -65,7 +65,7 @@ async function collectFindings(domainId: string) {
     profile,
     digest: (profileRow.digest as CrawlDigest | null) ?? null,
     robotsTxt: site.robotsTxt,
-    llmsTxt: site.llmsTxt,
+    robotsStatus: site.robotsStatus,
     answers,
     clusters,
     providerLabels: providerLabels(),
@@ -266,14 +266,14 @@ async function loadClusters(domainId: string) {
   return rows.map((r) => ({ key: r.key, name: r.name, weight: Number(r.weight) }));
 }
 
-/** robots.txt and /llms.txt, fetched live (the crawl digest does not keep them). Failures count as unknown. */
-async function fetchSiteFiles(hostname: string): Promise<{ robotsTxt: string | null; llmsTxt: boolean | null }> {
+/** robots.txt, fetched live (the crawl digest does not keep it). No response counts as unknown. */
+async function fetchSiteFiles(hostname: string): Promise<{ robotsTxt: string | null; robotsStatus: number | null }> {
   const origin = `https://${hostname}`;
   const { get } = await openSite(origin);
-  const [robots, llms] = await Promise.all([get(`${origin}/robots.txt`), get(`${origin}/llms.txt`)]);
+  const robots = await get(`${origin}/robots.txt`);
   return {
     robotsTxt: robots && robots.status === 200 ? robots.text.slice(0, 200_000) : null,
-    llmsTxt: llms ? llms.status === 200 : null,
+    robotsStatus: robots?.status ?? null,
   };
 }
 

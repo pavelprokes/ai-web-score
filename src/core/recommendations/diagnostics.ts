@@ -2,6 +2,8 @@ import type { CrawlDigest } from "../discovery/crawl";
 import type { DomainProfile } from "../domain-profile";
 import type { RawSignals } from "../signals/extract";
 import { nameKey, suggestCompetitors } from "../competitors";
+import { AI_AGENTS, type AiAgent } from "./ai-agents";
+import { isAllowed, parseRobots, robotsPath, rulesFor } from "./robots";
 
 /**
  * RECOMMENDATIONS — step 1: deterministic diagnostics. Pure functions over what we already know about a
@@ -65,8 +67,8 @@ export interface DiagnosticsInput {
   digest: CrawlDigest | null;
   /** robots.txt body, null when missing or unreachable. */
   robotsTxt: string | null;
-  /** Whether /llms.txt exists (null = unknown). */
-  llmsTxt: boolean | null;
+  /** HTTP status of /robots.txt (null = no response). A 5xx makes crawlers stop (RFC 9309 §2.3.1.4). */
+  robotsStatus?: number | null;
   answers: AnswerObservation[];
   clusters: ClusterInfo[];
   providerLabels?: Record<string, string>;
@@ -76,53 +78,21 @@ export interface DiagnosticsInput {
 
 // ─── robots.txt ──────────────────────────────────────────────────────────────
 
-/**
- * AI user agents. Search/answer agents fetch pages to answer a question right now — blocking them
- * removes the site from those answers. Training agents only feed model training.
- */
-export const AI_AGENTS: Array<{ agent: string; vendor: string; purpose: "search" | "training" }> = [
-  { agent: "OAI-SearchBot", vendor: "ChatGPT search", purpose: "search" },
-  { agent: "ChatGPT-User", vendor: "ChatGPT (browsing on request)", purpose: "search" },
-  { agent: "PerplexityBot", vendor: "Perplexity", purpose: "search" },
-  { agent: "Claude-SearchBot", vendor: "Claude search", purpose: "search" },
-  { agent: "Googlebot", vendor: "Google Search, AI Overviews and AI Mode", purpose: "search" },
-  { agent: "Bingbot", vendor: "Bing (used by Copilot and ChatGPT search)", purpose: "search" },
-  { agent: "GPTBot", vendor: "OpenAI model training", purpose: "training" },
-  { agent: "ClaudeBot", vendor: "Anthropic model training", purpose: "training" },
-  { agent: "Google-Extended", vendor: "Gemini model training", purpose: "training" },
-];
+export { AI_AGENTS };
 
-/** Whether robots.txt disallows the whole site (`Disallow: /`) for this agent (its own group, else `*`). */
+/** Whether robots.txt disallows the homepage (and so the site) for this agent — RFC 9309 matching, see robots.ts. */
 export function robotsBlocksSite(robotsTxt: string, agent: string): boolean {
-  const groups: Array<{ agents: string[]; rules: Array<{ allow: boolean; path: string }> }> = [];
-  let current: (typeof groups)[number] | null = null;
-  let lastWasAgent = false;
-  for (const raw of robotsTxt.split(/\r?\n/)) {
-    const line = raw.replace(/#.*/, "").trim();
-    const m = /^([a-z-]+)\s*:\s*(.*)$/i.exec(line);
-    if (!m) continue;
-    const field = m[1]!.toLowerCase();
-    const value = m[2]!.trim();
-    if (field === "user-agent") {
-      if (!current || !lastWasAgent) {
-        current = { agents: [], rules: [] };
-        groups.push(current);
-      }
-      current.agents.push(value.toLowerCase());
-      lastWasAgent = true;
-    } else if (field === "allow" || field === "disallow") {
-      lastWasAgent = false;
-      if (current) current.rules.push({ allow: field === "allow", path: value });
-    } else {
-      lastWasAgent = false;
-    }
-  }
-  const a = agent.toLowerCase();
-  const group = groups.find((g) => g.agents.includes(a)) ?? groups.find((g) => g.agents.includes("*"));
-  if (!group) return false;
-  const rootDisallowed = group.rules.some((r) => !r.allow && r.path === "/");
-  const rootAllowed = group.rules.some((r) => r.allow && (r.path === "/" || r.path === "/$"));
-  return rootDisallowed && !rootAllowed;
+  const fallback = AI_AGENTS.find((a) => a.agent === agent)?.fallback;
+  return !isAllowed(rulesFor(parseRobots(robotsTxt), agent, fallback), "/");
+}
+
+/** Base severity of a fully blocked agent, by what blocking it costs in live answers. */
+function agentSeverity(a: AiAgent): number {
+  if (a.role === "search") return a.agent === "Googlebot" || a.agent === "Bingbot" ? 1 : 0.9;
+  if (a.role === "grounding-opt-out") return 0.7;
+  if (a.role === "user-fetch") return a.honoursRobots === "yes" ? 0.3 : 0.15;
+  if (a.role === "training") return 0.15;
+  return 0.1;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -172,47 +142,68 @@ export function diagnose(input: DiagnosticsInput): Finding[] {
   return findings.sort((a, b) => b.severity - a.severity || a.key.localeCompare(b.key));
 }
 
-function crawlerAccess({ robotsTxt, llmsTxt, hostname }: DiagnosticsInput): Finding[] {
+function crawlerAccess({ robotsTxt, robotsStatus, hostname, digest }: DiagnosticsInput): Finding[] {
   const out: Finding[] = [];
+  if (robotsStatus != null && robotsStatus >= 500) {
+    out.push({
+      key: "robots:unavailable",
+      category: "TECHNICAL",
+      severity: 0.9,
+      title: `robots.txt fails with HTTP ${robotsStatus}`,
+      detail: `https://${hostname}/robots.txt answers ${robotsStatus}. Crawlers then stop: Google pauses crawling for 12 hours and uses its last good copy for up to 30 days; RFC 9309 tells crawlers to treat the whole site as disallowed.`,
+      evidence: { status: robotsStatus, sources: ["https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec", "https://www.rfc-editor.org/rfc/rfc9309"] },
+      metric: "citation-rate",
+      action: {
+        title: "Make /robots.txt answer 200 (or 404)",
+        steps: ["Serve /robots.txt as a static text file with status 200; a missing file should answer 404, never 5xx.", `Check https://${hostname}/robots.txt afterwards.`],
+        effort: "LOW",
+      },
+    });
+  }
   if (robotsTxt) {
-    for (const { agent, vendor, purpose } of AI_AGENTS) {
-      if (!robotsBlocksSite(robotsTxt, agent)) continue;
-      const search = purpose === "search";
+    const groups = parseRobots(robotsTxt);
+    // The homepage plus every crawled page: a site that blocks only /sluzby/ is not "allowed".
+    const paths = [...new Set(["/", ...(digest?.pages ?? []).map((p) => robotsPath(p.url))])];
+    for (const a of AI_AGENTS) {
+      if (a.honoursRobots === "no") continue; // blocking it changes nothing
+      const own = groups.some((g) => g.agents.includes(a.agent.toLowerCase()));
+      // Opt-out tokens never crawl: only a group naming them is a decision about them.
+      if ((a.role === "grounding-opt-out" || a.role === "training-opt-out") && !own) continue;
+      const rules = rulesFor(groups, a.agent, a.fallback);
+      const blocked = paths.filter((p) => !isAllowed(rules, p));
+      if (blocked.length === 0) continue;
+      const whole = blocked.includes("/");
+      const live = a.role !== "training" && a.role !== "training-opt-out";
+      const where = whole ? hostname : `${blocked.length} of the ${paths.length} key pages of ${hostname} (${blocked.slice(0, 5).join(", ")})`;
       out.push({
-        key: `robots:${agent}`,
+        key: `robots:${a.agent}`,
         category: "TECHNICAL",
-        severity: search ? (agent === "Googlebot" || agent === "Bingbot" ? 1 : 0.9) : 0.15,
-        title: `robots.txt blocks ${agent}`,
-        detail: search
-          ? `${vendor} cannot read ${hostname}, so it cannot cite or describe it from its own pages.`
-          : `${vendor} is blocked. This only affects model training, not live AI answers.`,
-        evidence: { agent, vendor, purpose },
-        metric: search ? "citation-rate" : "mention-rate",
+        severity: Math.round(agentSeverity(a) * (whole ? 1 : 0.5 + (0.5 * blocked.length) / paths.length) * 100) / 100,
+        title: whole ? `robots.txt blocks ${a.agent}` : `robots.txt blocks ${a.agent} from key pages`,
+        detail:
+          a.role === "search"
+            ? `${a.agent} (${a.governs}) cannot read ${where}, so those pages cannot be cited from there.`
+            : a.role === "grounding-opt-out"
+              ? `${a.agent} is disallowed for ${where}: Google may not use these pages for ${a.governs}.`
+              : a.role === "user-fetch"
+                ? `${a.agent} is disallowed for ${where}; it fetches ${a.governs}.`
+                : `${a.agent} is disallowed for ${where}. It only governs ${a.governs}, not live answers.`,
+        evidence: { agent: a.agent, vendor: a.vendor, role: a.role, blockedPaths: blocked.slice(0, 20), source: a.source },
+        metric: live ? "citation-rate" : "mention-rate",
         action: {
-          title: search ? `Allow ${agent} in robots.txt` : `Decide whether to allow ${agent} (training only)`,
-          steps: search
-            ? [`Remove the "Disallow: /" rule that applies to ${agent} (or add "User-agent: ${agent}" with "Allow: /").`, "Check https://" + hostname + "/robots.txt afterwards."]
-            : [`Blocking ${agent} keeps content out of future model training but does not affect search answers; keep it only if that is intended.`],
+          title: live ? `Allow ${a.agent} in robots.txt` : `Decide whether to allow ${a.agent} (training only)`,
+          steps: live
+            ? [
+                whole
+                  ? `Remove the Disallow rule that applies to ${a.agent} (its own group, or "User-agent: *" when it has none).`
+                  : `Remove the Disallow rules that cover ${blocked.slice(0, 3).join(", ")} for ${a.agent}.`,
+                `Check https://${hostname}/robots.txt afterwards.`,
+              ]
+            : [`Blocking ${a.agent} keeps content out of ${a.governs} but does not affect live answers; keep it only if that is intended.`],
           effort: "LOW",
         },
       });
     }
-  }
-  if (llmsTxt === false) {
-    out.push({
-      key: "llms-txt",
-      category: "TECHNICAL",
-      severity: 0.05,
-      title: "No /llms.txt",
-      detail: "llms.txt is an emerging, optional summary file for AI agents; no major assistant documents relying on it yet.",
-      evidence: {},
-      metric: "accuracy",
-      action: {
-        title: "Optionally publish /llms.txt",
-        steps: ["Publish a short Markdown summary of who you are, what you offer, prices and key pages at /llms.txt. Low priority."],
-        effort: "LOW",
-      },
-    });
   }
   return out;
 }
@@ -256,7 +247,10 @@ function structuredData({ digest, profile }: DiagnosticsInput): Finding[] {
       metric: "accuracy",
       action: {
         title: "Mark up offerings with Product / Service JSON-LD",
-        steps: ["Add Product or Service JSON-LD (name, description, offers.price, priceCurrency) on each offering page.", "Add FAQPage markup to pages that answer common questions."],
+        steps: [
+          "Add Product, Service or Course JSON-LD (name, description, offers.price, priceCurrency) on each offering page.",
+          "Keep every value identical to the visible text of the page.",
+        ],
         effort: "MEDIUM",
       },
     });
@@ -479,18 +473,39 @@ function sentiment({ answers }: DiagnosticsInput): Finding[] {
   ];
 }
 
-const PROVIDER_HINTS: Record<string, string[]> = {
+/**
+ * What each assistant needs from a site, only where the vendor documents it (source per hint). Unsourced folklore
+ * ("fresh pages", Core Web Vitals, which index ChatGPT uses) stays out.
+ */
+export const PROVIDER_HINTS: Record<string, Array<{ step: string; source: string }>> = {
   "chatgpt-ui": [
-    "ChatGPT search relies heavily on Bing's index: verify the site in Bing Webmaster Tools and submit the sitemap.",
-    "Make sure OAI-SearchBot is allowed in robots.txt.",
+    {
+      step: "Allow OAI-SearchBot in robots.txt: it decides whether pages can appear in ChatGPT search (GPTBot is training only and does not matter here).",
+      source: "https://developers.openai.com/api/docs/bots",
+    },
   ],
   "google-ai-mode": [
-    "AI Mode draws on Google's index: check indexing and Core Web Vitals in Search Console.",
-    "Complete and keep the Google Business Profile up to date (category, services, reviews).",
+    {
+      step: "Key pages must be indexed and allowed a snippet: no noindex, nosnippet or restrictive max-snippet, and Googlebot allowed.",
+      source: "https://developers.google.com/search/docs/appearance/ai-features",
+    },
+    {
+      step: "In Search Console → Settings, keep \"Search generative AI\" on Include (required for AI Overviews and AI Mode since 2026-08-31; ai-web-score cannot read it).",
+      source: "https://support.google.com/webmasters/answer/16908024",
+    },
+    { step: "Keep the Google Business Profile complete and consistent with the website.", source: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide" },
   ],
-  "gemini-ui": ["Gemini uses Google Search: check indexing in Search Console and the Google Business Profile."],
-  "perplexity-api": ["Perplexity favours fresh, well-structured pages: keep dates visible and update key pages.", "Make sure PerplexityBot is allowed in robots.txt."],
-  "claude-api": ["Make sure Claude-SearchBot is allowed in robots.txt."],
+  "gemini-ui": [
+    {
+      step: "Do not disallow Google-Extended in robots.txt: besides training it controls grounding of Gemini Apps answers in Google Search content.",
+      source: "https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers",
+    },
+    { step: "Key pages must be indexed and allowed a snippet (no noindex or nosnippet).", source: "https://developers.google.com/search/docs/appearance/ai-features" },
+  ],
+  "perplexity-api": [{ step: "Allow PerplexityBot in robots.txt: it surfaces and links sites in Perplexity search.", source: "https://docs.perplexity.ai/guides/bots" }],
+  "claude-api": [
+    { step: "Allow Claude-SearchBot (search results) and Claude-User (pages fetched for a user) in robots.txt.", source: "https://support.claude.com/en/articles/8896518" },
+  ],
 };
 
 function providerGaps({ answers, providerLabels }: DiagnosticsInput): Finding[] {
@@ -509,11 +524,11 @@ function providerGaps({ answers, providerLabels }: DiagnosticsInput): Finding[] 
         severity: Math.min(0.8, 0.3 + (best.rate - r.rate)),
         title: `Much weaker in ${label}`,
         detail: `Mentioned in ${pct(r.rate)} of ${r.n} ${label} answers versus ${pct(best.rate)} in ${providerLabels?.[best.id] ?? best.id}.`,
-        evidence: { provider: r.id, mentionRate: r.rate, answers: r.n, bestProvider: best.id, bestRate: best.rate },
+        evidence: { provider: r.id, mentionRate: r.rate, answers: r.n, bestProvider: best.id, bestRate: best.rate, sources: (PROVIDER_HINTS[r.id] ?? []).map((h) => h.source) },
         metric: "mention-rate" as const,
         action: {
           title: `Improve visibility in ${label}`,
-          steps: PROVIDER_HINTS[r.id] ?? ["Check that this assistant's crawler can reach the site and that the key pages are indexed."],
+          steps: PROVIDER_HINTS[r.id]?.map((h) => h.step) ?? ["Check that this assistant's crawler can reach the site and that the key pages are indexed."],
           effort: "MEDIUM" as const,
         },
       };
