@@ -1,7 +1,8 @@
-import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getDb, runInJobScope } from "@/db";
-import { domains, measurementSignals, measurements, recommendationSets, siteSnapshots } from "@/db/schema";
+import { appSettings, domains, measurementSignals, measurements, recommendationSets, siteSnapshots } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
+import { MATCHER_REVISION } from "@/core/signals/matcher";
 import { runDiscovery } from "@/services/discovery";
 import { type GenerationMode, generatePortfolio, optimizePortfolio } from "@/services/portfolio";
 import { planMeasurements } from "@/services/planning";
@@ -204,6 +205,20 @@ async function tick() {
   // Daily maintenance (dedupe key per day).
   const day = now.toISOString().slice(0, 10);
   await enqueue("optimizer.run", {}, { dedupeKey: `optimizer:${day}`, oncePerKey: true });
+  // A matching change (MATCHER_REVISION) re-reads the stored answers of every domain that has any, once, so history
+  // and new answers count mentions the same way. The applied revision is a setting, not a job row: finished jobs are
+  // purged after 14 days, and a domain added later is extracted with the new matcher from its first answer.
+  const [applied] = await db.select({ value: appSettings.value }).from(appSettings).where(eq(appSettings.key, MATCHER_SETTING));
+  if (Number(applied?.value ?? 1) < MATCHER_REVISION) {
+    const withAnswers = await db.select({ id: domains.id }).from(domains).where(ne(domains.status, "NEW"));
+    for (const d of withAnswers) {
+      await enqueue("signals.reextract", { domainId: d.id }, { dedupeKey: `reextract:${d.id}:matcher-${MATCHER_REVISION}`, maxAttempts: 3 });
+    }
+    await db
+      .insert(appSettings)
+      .values({ key: MATCHER_SETTING, value: MATCHER_REVISION, updatedBy: "scheduler" })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value: MATCHER_REVISION, updatedBy: "scheduler", updatedAt: new Date() } });
+  }
   // Source types for "Where AI looks": only hosts nobody labelled yet, so most days this is a no-op.
   await enqueue("sources.classify", {}, { dedupeKey: `sources-classify:${day}`, oncePerKey: true, maxAttempts: 2 });
   // Portfolio rotation (CORE kept, ROTATING slots turn over, new candidates come in) — proposals unless the domain
@@ -259,6 +274,8 @@ async function tick() {
 }
 
 const RECOMMENDATIONS_EVERY_DAYS = 7;
+/** app_settings key holding the matcher revision whose re-read has been queued. */
+const MATCHER_SETTING = "signals.matcherRevision";
 const SITE_CHECK_EVERY_DAYS = 7;
 
 function sleep(ms: number) {

@@ -66,12 +66,13 @@ export function buildPerplexityBody(req: MeasurementRequest, config: ProviderCon
   const p = config.params as PerplexityParams;
   const tier = opts.serviceTier !== false && p.serviceTier;
   // "provider/model" ids select a model directly (one search step, explicit citation instructions);
-  // anything else is a preset name.
+  // anything else is an effort level ("fast"; the API renamed `preset` to `effort` in 2026-10 and keeps `preset` as a
+  // deprecated alias — docs.perplexity.ai/changelog).
   const direct = config.model.includes("/");
   // Only ISO 639-1 is accepted ("en-AU" → HTTP 400); without a code the answer follows the prompt.
   const language = isoLanguage(req.language);
   return {
-    ...(direct ? { model: config.model, max_steps: 1, max_output_tokens: 4096, instructions: CITATION_INSTRUCTIONS } : { preset: config.model }),
+    ...(direct ? { model: config.model, max_steps: 1, max_output_tokens: 4096, instructions: CITATION_INSTRUCTIONS } : { effort: config.model }),
     input: req.promptText,
     tools: [
       {
@@ -181,7 +182,7 @@ export const perplexityApi: ProviderAdapter = {
     measurementQuality: 0.6,
     estimatedCostPerMeasurement: 0.0015,
     notes: [
-      "fast preset: openai/gpt-6-luna, 1 step, Fast Search ($1/1k calls); flex tier halves token prices.",
+      "fast effort level: openai/gpt-6-luna, 1 step, Fast Search ($1/1k calls); flex tier halves token prices.",
       "Itemised cost is returned in usage.cost and used as the measurement cost.",
     ],
   },

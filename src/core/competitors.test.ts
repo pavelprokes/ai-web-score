@@ -66,3 +66,36 @@ describe("hostname spellings", () => {
     ]);
   });
 });
+
+describe("rivalsCaveat", () => {
+  const tracked = new Map([
+    ["Robotika", 6],
+    ["Scratch klub", 2],
+  ]);
+
+  it("names the untracked brand AI names more often than every tracked rival, in enough questions", async () => {
+    const { rivalsCaveat } = await import("./competitors");
+    const suggestions = [
+      { name: "Bridge Academy", answers: 9, questions: 4, domains: [] },
+      { name: "Logiscool", answers: 14, questions: 2, domains: [] },
+    ];
+    // Logiscool is named more, but in only two questions: not enough to doubt the share.
+    expect(rivalsCaveat(tracked, suggestions)).toEqual({ name: "Bridge Academy", answers: 9, topTracked: 6 });
+  });
+
+  it("stays quiet when the tracked rivals are named at least as often", async () => {
+    const { rivalsCaveat } = await import("./competitors");
+    expect(rivalsCaveat(tracked, [{ name: "Bridge Academy", answers: 6, questions: 5, domains: [] }])).toBeNull();
+    expect(rivalsCaveat(tracked, [])).toBeNull();
+  });
+
+  it("stays quiet without tracked rivals, and for websites and directories AI names as sources", async () => {
+    const { rivalsCaveat } = await import("./competitors");
+    expect(rivalsCaveat(new Map(), [{ name: "Bridge Academy", answers: 9, questions: 4, domains: [] }])).toBeNull();
+    expect(rivalsCaveat(tracked, [{ name: "kurzy.cz", answers: 20, questions: 6, domains: [] }])).toBeNull();
+    expect(rivalsCaveat(tracked, [{ name: "Svatbona", answers: 20, questions: 6, domains: ["www.svatbona.cz"] }])).toBeNull();
+    expect(rivalsCaveat(tracked, [{ name: "Wikipedie", answers: 20, questions: 6, domains: ["cs.wikipedia.org"] }])).toBeNull();
+    // A competitor with its own (unknown) domain still counts.
+    expect(rivalsCaveat(tracked, [{ name: "CODE Rebels", answers: 9, questions: 4, domains: ["coderebels.cz"] }])?.name).toBe("CODE Rebels");
+  });
+});

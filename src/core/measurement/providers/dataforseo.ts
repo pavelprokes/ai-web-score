@@ -145,7 +145,41 @@ interface LlmScraperResult {
   sources?: DfsSource[] | null;
   search_results?: DfsSource[] | null;
   fan_out_queries?: string[] | null;
-  items?: Array<{ type: string; sources?: DfsSource[] | null }> | null;
+  items?: Array<{ type: string; sources?: DfsSource[] | null; title?: string | null; snippet?: string | null; url?: string | null }> | null;
+}
+
+/**
+ * ChatGPT ads (`chat_gpt_ad` items since 2026-05-28: title, snippet, url, advertiser). Paid placement is not a
+ * recommendation, so its text must never count as a mention nor its landing page as a citation. DataForSEO does not
+ * document whether `markdown` repeats the ad, so a line that reads as the ad is removed: it carries the ad's snippet,
+ * or its title together with an ad label or the ad's link. A title alone is often just the advertiser's name, which an
+ * organic recommendation may carry too, so it never removes a line on its own.
+ */
+const AD_LABEL = /\b(sponsored|sponzor\w*|reklama|ad)\b/i;
+const MIN_AD_TEXT = 8;
+function stripAds(result: LlmScraperResult): { markdown: string; adUrls: Set<string> } {
+  const ads = (result.items ?? []).filter((i) => i.type === "chat_gpt_ad");
+  const adUrls = new Set(ads.map((a) => a.url).filter((u): u is string => !!u));
+  const markdown = result.markdown ?? "";
+  if (ads.length === 0) return { markdown, adUrls };
+  const text = (t: string | null | undefined) => (t && t.trim().length >= MIN_AD_TEXT ? t.trim() : null);
+  const isAdLine = (line: string) =>
+    ads.some((a) => {
+      const snippet = text(a.snippet);
+      if (snippet && line.includes(snippet)) return true;
+      const title = text(a.title);
+      if (!title || !line.includes(title)) return false;
+      const host = a.url ? safeHost(a.url) : null;
+      return AD_LABEL.test(line) || (!!a.url && line.includes(a.url)) || (!!host && line.includes(host));
+    });
+  return { markdown: markdown.split("\n").filter((line) => !isAdLine(line)).join("\n"), adUrls };
+}
+function safeHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }
 
 interface AiOverviewElement {
@@ -171,12 +205,14 @@ function dedupe<T extends { url: string }>(xs: T[]): T[] {
 }
 
 export function parseLlmScraper(result: LlmScraperResult, fallbackModel: string): NormalizedAnswer {
-  const itemSources = (result.items ?? []).flatMap((i) => i.sources ?? []);
-  const citations = dedupe([...toCitations(result.sources), ...toCitations(itemSources)]);
-  const sources = dedupe([...toSources(result.search_results), ...citations]);
+  const { markdown, adUrls } = stripAds(result);
+  const organic = <T extends { url: string }>(xs: T[]) => xs.filter((x) => !adUrls.has(x.url));
+  const itemSources = (result.items ?? []).filter((i) => i.type !== "chat_gpt_ad").flatMap((i) => i.sources ?? []);
+  const citations = organic(dedupe([...toCitations(result.sources), ...toCitations(itemSources)]));
+  const sources = organic(dedupe([...toSources(result.search_results), ...citations]));
   const queries = result.fan_out_queries ?? [];
   return {
-    answerText: result.markdown ?? "",
+    answerText: markdown,
     citations,
     sources,
     searchWasUsed: citations.length > 0 || sources.length > 0 || queries.length > 0,

@@ -1,5 +1,5 @@
 import type { NormalizedAnswer } from "../measurement/types";
-import { buildEntityPattern, findEntity, hostMatches, hostOf, normalizeText } from "./matcher";
+import { findEntityInText, hostMatches, hostOf, normalizeText } from "./matcher";
 
 /**
  * Raw AI visibility signals (§10) — the long-term source of truth. Deterministic
@@ -95,10 +95,10 @@ export function extractSignals(
   const text = answer.answerText ?? "";
   const norm = normalizeText(text);
 
-  const brandHits = findEntity(norm, buildEntityPattern([brand.name, ...brand.aliases, ...brand.domains]));
+  const brandHits = findEntityInText(text, norm, [brand.name, ...brand.aliases, ...brand.domains]);
   const compHits = new Map<string, number[]>();
   for (const c of competitors) {
-    const hits = findEntity(norm, buildEntityPattern([c.name, ...c.aliases, ...c.domains]));
+    const hits = findEntityInText(text, norm, [c.name, ...c.aliases, ...c.domains]);
     if (hits.length) compHits.set(c.key, hits.map((h) => h.start));
   }
 

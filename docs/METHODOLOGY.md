@@ -119,6 +119,19 @@ LLM analyzer, via the Batches API, for every answer that mentions the brand and 
 sample of answers that only list competitors (competitor discovery). Analysing every answer would cost
 about as much as the consumer-UI measurement itself.
 Signals are versioned (`extract-v1`, `analyze-v1`) and can be recomputed from raw responses.
+A multi-word alias written as a name, without a domain form ("Se vezmou", "Vzdělání budoucnosti"), counts only when
+the answer writes it as a name (capital first letter) or hyphenated ("se-vezmou"): otherwise ordinary phrases such as
+"páry, které se vezmou" read as the brand. Aliases written in lower case or starting with a digit match as before.
+Known limit: the phrase at the start of a sentence or in a heading ("Se vezmou v létě…") still counts; the hand count
+on production (HANDOFF, Phase 0) says whether that matters. Overlapping hits of several aliases are one mention.
+When matching changes (`MATCHER_REVISION`), the scheduler re-reads the stored answers of every domain that has any,
+once (`signals.reextract`), keeping the LLM judgements; the applied revision is kept in `app_settings`
+(`signals.matcherRevision`), not in a job row, because finished jobs are purged after 14 days.
+ChatGPT ads (`chat_gpt_ad`) are removed from the answer text and their landing pages from the citations: paid
+placement is never a mention. A line is removed when it carries the ad's snippet, or its title together with an ad
+label ("Sponsored", "Sponzorováno", "Reklama", "Ad") or the ad's link; a title alone is often the advertiser's name,
+which an organic recommendation may carry too. Answers stored before this change keep any ad text (their raw
+responses are cleared after 7 days, so they cannot be re-parsed).
 
 ## 6. Scoring
 

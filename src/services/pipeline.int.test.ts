@@ -707,6 +707,21 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.delete(s.jobs).where(eq(s.jobs.type, "recommendations.generate"));
     await schedulerTick();
     expect(await keys()).toEqual(all.filter((k) => !k.includes(demo!.id)));
+    // A matching change re-reads every monitored domain's answers once per MATCHER_REVISION, not on every tick.
+    const { MATCHER_REVISION } = await import("@/core/signals/matcher");
+    // As on the first deploy of the revision: earlier ticks of this suite already queued (and ran) it.
+    await db.delete(s.appSettings).where(eq(s.appSettings.key, "signals.matcherRevision"));
+    await db.delete(s.jobs).where(eq(s.jobs.type, "signals.reextract"));
+    await schedulerTick();
+    const reextracts = (await db.select().from(s.jobs).where(eq(s.jobs.type, "signals.reextract"))).filter((j) => j.dedupeKey?.endsWith(`:matcher-${MATCHER_REVISION}`));
+    expect(reextracts.filter((j) => j.dedupeKey === `reextract:${demo!.id}:matcher-${MATCHER_REVISION}`)).toHaveLength(1);
+    expect(reextracts.some((j) => j.dedupeKey!.includes(paused.id))).toBe(true);
+    // The applied revision is a setting: finished jobs purged after 14 days do not queue the re-read again.
+    await db.delete(s.jobs).where(eq(s.jobs.type, "signals.reextract"));
+    await schedulerTick();
+    expect(await db.select().from(s.jobs).where(eq(s.jobs.type, "signals.reextract"))).toHaveLength(0);
+    const [setting] = await db.select().from(s.appSettings).where(eq(s.appSettings.key, "signals.matcherRevision"));
+    expect(setting?.value).toBe(MATCHER_REVISION);
 
     await shiftSets(-8);
     try {
