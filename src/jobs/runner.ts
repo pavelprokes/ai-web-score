@@ -17,7 +17,8 @@ import { reextractSignals } from "@/services/competitors";
 import { classifyCitedHosts } from "@/services/host-types";
 import { checkSite } from "@/services/site-check";
 import { syncProviderRegistry } from "@/services/registry";
-import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, purgeOldJobs, reschedule, RescheduleJob, runAsJob } from "./queue";
+import { dailyCleanup } from "@/services/maintenance";
+import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, reschedule, RescheduleJob, runAsJob } from "./queue";
 
 type Handler = (payload: Record<string, unknown>) => Promise<unknown>;
 
@@ -40,6 +41,7 @@ const HANDLERS: Record<JobType, Handler> = {
   "signals.reextract": (p) => reextractSignals(s(p.domainId), p.after ? s(p.after) : null),
   "sources.classify": () => classifyCitedHosts(),
   "site.check": (p) => checkSite(s(p.domainId), { thenRecommend: p.thenRecommend !== false, recheck: p.recheck === true }),
+  "maintenance.cleanup": () => dailyCleanup(),
 };
 
 /** Discovery/prompt generation are long LLM calls — give them a longer lease. */
@@ -66,6 +68,7 @@ const MAX_JOB_SECONDS: Partial<Record<JobType, number>> = {
   "signals.reextract": 120, // 60 s of slices, then the score history rebuild
   "sources.classify": 120, // up to three short hostname-only LLM calls
   "site.check": 90, // ≤ 20 pages, 8 s each, 6 at a time; stops starting requests after 50 s
+  "maintenance.cleanup": 120, // batches of 500 rows; stops 15 s before the budget and comes back for the rest
 };
 const ALL_JOB_TYPES = Object.keys(HANDLERS) as JobType[];
 const DEFAULT_MAX_JOB_SECONDS = 60;
@@ -255,21 +258,9 @@ async function tick() {
     if (upToDate.has(d.id)) continue;
     await enqueue("recommendations.generate", { domainId: d.id }, { dedupeKey: `recommendations:${d.id}:${day}`, oncePerKey: true, maxAttempts: 2 });
   }
-  if (now.getUTCHours() === 3) {
-    await purgeOldJobs();
-    // Optional raw-evidence retention (Supabase free tier = 500 MB). Answers and signals are kept.
-    const days = Number(process.env.RAW_RESPONSE_RETENTION_DAYS || 0);
-    if (days > 0) {
-      // In batches: one statement over a large table could run longer than the stall timeout.
-      for (let i = 0; i < 50; i++) {
-        const cleared = await db.execute(sql`update measurements set raw_response = null
-          where id in (select id from measurements
-                       where raw_response is not null and finished_at < now() - make_interval(days => ${days}) limit 500)
-          returning id`);
-        if (cleared.length < 500) break;
-      }
-    }
-  }
+  // Daily clean-up from 03:00 UTC, once per day (a tick missed at 03:xx is caught up by a later one). It ran inside
+  // the tick before, only when a tick fell in that hour, and kept raw payloads forever unless the variable was set.
+  if (now.getUTCHours() >= 3) await enqueue("maintenance.cleanup", {}, { dedupeKey: `cleanup:${day}`, oncePerKey: true, maxAttempts: 3 });
   return { duePlans: due.length };
 }
 

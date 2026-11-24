@@ -49,11 +49,13 @@ pnpm cli action <domainId> run-now
 4. Row Level Security is enabled on every table (no policies). Supabase's Data API (anon/authenticated
    keys) therefore cannot read anything; the app connects as the table owner and is unaffected.
    Do not add the Supabase client/anon key to this app.
-5. Storage budget: raw provider responses dominate (≈10–50 KB each before TOAST compression). Set
-   `RAW_RESPONSE_RETENTION_DAYS` (e.g. 180) if you approach the free-tier limit — answers, citations and
-   signals are kept, only raw JSON is dropped. Clearing frees space for reuse but does not shrink the
-   database: run `VACUUM FULL measurements` once afterwards. /providers shows the size (all databases, as
-   Supabase meters it) and warns at 80 % of `DATABASE_LIMIT_MB` (default 500).
+5. Storage budget: the daily `maintenance.cleanup` job (from 03:00 UTC) clears raw provider responses after
+   `RAW_RESPONSE_RETENTION_DAYS` (default 7, 0 keeps them), signal rows of an old extractor version and
+   finished jobs after 14 days, and records the database size. Answers, citations and signals are kept;
+   `ANSWER_TEXT_RETENTION_DAYS` (off by default) also clears answer text. Clearing frees space for reuse but
+   does not shrink the database: run `VACUUM FULL measurements` once afterwards. /providers shows the size
+   (all databases, as Supabase meters it), its growth per day and when it would reach `DATABASE_LIMIT_MB`
+   (default 500), and warns at 80 % or 30 days before.
 
 ## Vercel (Pro)
 

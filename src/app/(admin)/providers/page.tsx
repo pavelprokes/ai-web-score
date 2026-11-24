@@ -6,6 +6,7 @@ import { Flash } from "@/components/Flash";
 import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
 import { providerAccounts } from "@/services/accounts";
+import { databaseSizeHistory, sizeTrend } from "@/services/maintenance";
 import { Accounts } from "@/components/Accounts";
 import { InternalModels } from "@/components/InternalModels";
 import { LLM_TASKS, llmModel, type LlmTask } from "@/lib/llm";
@@ -43,11 +44,12 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   await requireAdminPage();
   const { done, error } = await searchParams;
   const tasks = Object.keys(LLM_TASKS) as LlmTask[];
-  const [data, errors, accounts, models] = await Promise.all([
+  const [data, errors, accounts, models, sizes] = await Promise.all([
     providersOverview(),
     recentProviderErrors(),
     providerAccounts(),
     Promise.all(tasks.map(llmModel)),
+    databaseSizeHistory().catch(() => []),
   ]);
   const now = new Date();
   const low = accounts.filter((a) => a.low).map((a) => `${a.label} balance is low (${usd(a.balanceUsd)}).`);
@@ -58,7 +60,11 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
   const withoutCredentials = rows.filter((p) => p.enabled && p.missingEnv.length > 0).length;
   const labels = new Map(rows.map((p) => [p.id, p.label]));
   const databaseMb = data.databaseBytes === null ? null : Math.round(data.databaseBytes / 1024 ** 2);
-  const databaseFull = databaseMb !== null && databaseMb > DATABASE_LIMIT_MB * 0.8;
+  // Recorded once a day by the clean-up job; null until three days are recorded.
+  const trend = sizeTrend(sizes, DATABASE_LIMIT_MB, now);
+  const fullSoon = trend?.daysToLimit != null && trend.daysToLimit < 30;
+  const databaseFull = databaseMb !== null && (databaseMb > DATABASE_LIMIT_MB * 0.8 || fullSoon);
+  const growth = trend ? `${trend.mbPerDay >= 0 ? "+" : "−"}${num(Math.abs(Math.round(trend.mbPerDay * 10) / 10))} MB a day${trend.daysToLimit != null ? `, at the limit in about ${num(trend.daysToLimit)} days` : ""}` : null;
 
   return (
     <>
@@ -73,9 +79,10 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
       {/* Not in Flash: this stays for weeks and must not replace the confirmation of an action. */}
       {databaseFull && (
         <div className="alert" role="status">
-          <Badge tone="warning">Storage</Badge> Database is at {num(databaseMb!)} MB of {num(DATABASE_LIMIT_MB)} MB; at the limit Supabase makes it
-          read-only and measuring stops. Set RAW_RESPONSE_RETENTION_DAYS and then run <code>VACUUM FULL measurements</code> (clearing alone
-          does not shrink the database), or upgrade the plan and set DATABASE_LIMIT_MB.
+          <Badge tone="warning">Storage</Badge> Database is at {num(databaseMb!)} MB of {num(DATABASE_LIMIT_MB)} MB{growth ? ` (${growth})` : ""}; at the limit Supabase makes it
+          read-only and measuring stops. The daily clean-up already clears raw payloads after RAW_RESPONSE_RETENTION_DAYS (default 7);
+          what still grows is the answers themselves. Upgrade the plan and set DATABASE_LIMIT_MB, or set ANSWER_TEXT_RETENTION_DAYS and then
+          run <code>VACUUM FULL measurements</code> (clearing alone does not shrink the database).
         </div>
       )}
 
@@ -91,7 +98,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
           <StatTile
             label="Database"
             value={`${num(databaseMb)} MB`}
-            detail={`of ${num(DATABASE_LIMIT_MB)} MB on the Supabase plan${databaseFull ? " · running out of space" : ""}`}
+            detail={`of ${num(DATABASE_LIMIT_MB)} MB on the Supabase plan${growth ? ` · ${growth}` : ""}${databaseFull ? " · running out of space" : ""}`}
           />
         )}
       </dl>
