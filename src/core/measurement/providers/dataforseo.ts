@@ -342,7 +342,7 @@ function createAdapter(args: {
       // A few in parallel: one by one, a full batch would take minutes.
       return mapWithConcurrency(pending, COLLECT_CONCURRENCY, async (p): Promise<CollectOutcome> => {
         // Close to the job's deadline, stop asking: what was fetched gets saved, the rest waits for the next run.
-        if (deadlineRemainingMs() < COLLECT_TIMEOUT_MS + 10_000) return { measurementId: p.measurementId, status: "PENDING" };
+        if (deadlineRemainingMs() < COLLECT_TIMEOUT_MS + 10_000) return { measurementId: p.measurementId, status: "PENDING", unchecked: true };
         try {
           const env = await dfs<unknown>(`${path}/task_get/advanced/${p.externalTaskId}`, undefined, COLLECT_TIMEOUT_MS);
           const task = env.tasks[0];
@@ -367,7 +367,7 @@ function createAdapter(args: {
           };
         } catch (e) {
           const retryable = e instanceof ProviderError ? e.retryable : true;
-          if (retryable) return { measurementId: p.measurementId, status: "PENDING" };
+          if (retryable) return { measurementId: p.measurementId, status: "PENDING", unchecked: true };
           return { measurementId: p.measurementId, status: "FAILED", error: String(e), retryable };
         }
       });

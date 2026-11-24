@@ -55,6 +55,15 @@ const CHECKS: Check[] = [
     bad: (r) => n(r.failed) > 0,
   },
   {
+    name: "Saved answers without signals, last 3 days",
+    threshold: "any (the answer was saved but its signals were not: it never reaches the score)",
+    query: `select provider_id, count(*)::int as without_signals from measurements m
+            where status = 'SUCCEEDED' and finished_at > now() - interval '3 days'
+              and not exists (select 1 from measurement_signals s where s.measurement_id = m.id)
+            group by 1`,
+    bad: (r) => n(r.without_signals) > 0,
+  },
+  {
     name: "Database size",
     threshold: "over 400 MB (free tier: 500 MB; requests fail with 402 above it)",
     query: `select pg_size_pretty(pg_database_size(current_database())) as size,

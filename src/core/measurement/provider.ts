@@ -73,7 +73,11 @@ export interface PendingTask {
 export type CollectOutcome =
   | { measurementId: string; status: "SUCCEEDED"; result: ProviderResult }
   | { measurementId: string; status: "FAILED"; error: string; retryable: boolean }
-  | { measurementId: string; status: "PENDING" };
+  /**
+   * `unchecked`: the provider was not asked about this task in this poll (out of time, or the request failed), so
+   * nothing is known about it; only a task the provider itself reports as unfinished counts towards the give-up bound.
+   */
+  | { measurementId: string; status: "PENDING"; unchecked?: boolean };
 
 export interface ProviderAdapter {
   id: string;
@@ -124,7 +128,10 @@ export class ProviderError extends Error {
   }
 }
 
-export type ProviderErrorClass = "RATE_LIMIT" | "QUOTA" | "AUTH" | "BAD_REQUEST" | "UPSTREAM" | "TIMEOUT" | "OTHER";
+export type ProviderErrorClass = "RATE_LIMIT" | "QUOTA" | "AUTH" | "BAD_REQUEST" | "UPSTREAM" | "TIMEOUT" | "STORAGE" | "OTHER";
+
+/** Prefix of a measurement error the app raised while saving a delivered answer (not the provider's). */
+export const SAVE_FAILURE_PREFIX = "Could not save the answer";
 
 /**
  * What a stored provider error message means, from its HTTP status ("HTTP 401: {…}", see httpJson), the
@@ -135,6 +142,7 @@ export type ProviderErrorClass = "RATE_LIMIT" | "QUOTA" | "AUTH" | "BAD_REQUEST"
 export function classifyProviderError(message: string): ProviderErrorClass {
   // "Skipped: <provider> rejected N requests … (<the error>)" belongs to the class of the error it quotes.
   const text = message.replace(/^Skipped: [^(]*\(/, "");
+  if (text.startsWith(SAVE_FAILURE_PREFIX)) return "STORAGE";
   const code = Number(/^(?:\w*Error: )?(?:HTTP |DataForSEO )?(\d{3,5})\b/.exec(text)?.[1] ?? NaN);
   if (/insufficient_quota|payment_required|credit balance is too low/i.test(text) || [402, 40200, 40203, 40210].includes(code)) return "QUOTA";
   if (/rate_limit/i.test(text) || [429, 40202, 40209].includes(code)) return "RATE_LIMIT";

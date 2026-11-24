@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { describeError } from "@/db/pg-safe";
 import { deadlinePassed, runWithDeadline } from "@/lib/deadline";
 
 /**
@@ -147,7 +148,8 @@ export async function complete(id: string) {
 }
 
 export async function fail(job: Job, error: unknown, retryable = true) {
-  const message = error instanceof Error ? error.message : String(error);
+  // The cause first: drizzle's message is the query with its parameters and filled all 2000 characters.
+  const message = describeError(error);
   const final = !retryable || job.attempts >= job.maxAttempts;
   // Exponential backoff: 30 s, 2 min, 8 min, … ±50 %, so jobs that failed together do not retry together.
   const delay = 30 * 4 ** Math.max(0, job.attempts - 1) * (0.5 + Math.random());

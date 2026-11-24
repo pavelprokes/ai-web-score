@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { cellStates, domains, measurementSignals, measurements, promptVersions, providers, runs } from "@/db/schema";
 import { getProvider } from "@/core/measurement/providers";
-import { classifyProviderError, ProviderError, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
+import { classifyProviderError, ProviderError, SAVE_FAILURE_PREFIX, type ProviderConfigurationSeed, type ProviderResult } from "@/core/measurement/provider";
 import type { MeasurementRequest } from "@/core/measurement/types";
 import { computeCost, selectPrice } from "@/core/pricing/cost";
 import { type CellState, confidence, initialCellState, recommendedIntervalDays, recommendedSampleCount, updateCell } from "@/core/sampling/cell-state";
@@ -13,8 +13,10 @@ import { extractSignals, presenceIndex, type RawSignals, type TrackedEntity } fr
 import type { DomainProfile } from "@/core/domain-profile";
 import type { PromptRole } from "@/core/prompt";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
+import { describeError, isPgDataError, pgSafeJson } from "@/db/pg-safe";
 import { latestProfile } from "./discovery";
 import { llmAvailable } from "@/lib/llm";
+import { deadlineRemainingMs } from "@/lib/deadline";
 import { loadPriceBook, priceModelKey } from "./registry";
 import { enqueueUmamiSend } from "./umami";
 
@@ -25,6 +27,10 @@ import { enqueueUmamiSend } from "./umami";
  */
 
 const MAX_ATTEMPTS = 3;
+/** Time a collect job keeps for saving: past it, the remaining answers wait for the next poll (5 s later). */
+const SAVE_RESERVE_MS = 15_000;
+/** A task the provider has not been asked about (polls ran out of time or failed) is given up only after this long. */
+const UNCHECKED_GIVE_UP_MS = 14 * 24 * 3600_000;
 /** A rate-limited answer is put back in the queue for this long before a 429 counts as a failure. */
 const RATE_LIMIT_PATIENCE_MS = 2 * 3600_000;
 
@@ -81,6 +87,12 @@ export async function executeMeasurement(measurementId: string) {
     const result = await adapter.execute(req, m.configuration as ProviderConfigurationSeed);
     await finalizeMeasurement(m.id, result, startedAt);
   } catch (e) {
+    // The answer arrived (and was paid for) but Postgres rejects a value in it: asking again would buy the same answer.
+    if (isPgDataError(e)) {
+      console.error(`[measure] ${m.providerId} ${m.id}: could not save the result: ${describeError(e, 1000)}`);
+      await recordSaveFailure(m, e);
+      return;
+    }
     // HTTP 429 means "not now", not a failed answer: nothing was sent or billed. Give the attempt back
     // and let the job return later; the age bound ends it if the limit never clears. An exhausted
     // balance (OpenAI answers it with 429 `insufficient_quota`) does not clear by waiting and fails at once (recordFailure).
@@ -147,35 +159,86 @@ export async function collectAsync(providerId: string) {
     })),
   );
   let stillPending = 0;
+  let unchecked = 0;
+  let outOfTime = false;
   for (const o of outcomes) {
     const m = pending.find((x) => x.id === o.measurementId);
     if (!m) continue;
-    if (o.status === "SUCCEEDED") await finalizeMeasurement(m.id, o.result, m.startedAt ?? m.scheduledAt);
-    else if (o.status === "FAILED") {
-      if (o.retryable && m.attempts < MAX_ATTEMPTS) {
-        await db.update(measurements).set({ status: "SCHEDULED", externalTaskId: null }).where(eq(measurements.id, m.id));
-        await enqueue("measurement.submit", { runId: m.runId, configurationId: m.configurationId }, { dedupeKey: `submit:${m.runId}:${m.configurationId}` });
+    // Saving takes ~8 queries per answer: stop before the job's budget does, the rest is saved by the next poll.
+    if (deadlineRemainingMs() < SAVE_RESERVE_MS) {
+      outOfTime = true;
+      break;
+    }
+    try {
+      if (o.status === "SUCCEEDED") await finalizeMeasurement(m.id, o.result, m.startedAt ?? m.scheduledAt);
+      else if (o.status === "FAILED") {
+        if (o.retryable && m.attempts < MAX_ATTEMPTS) {
+          await db.update(measurements).set({ status: "SCHEDULED", externalTaskId: null }).where(eq(measurements.id, m.id));
+          await enqueue("measurement.submit", { runId: m.runId, configurationId: m.configurationId }, { dedupeKey: `submit:${m.runId}:${m.configurationId}` });
+        } else {
+          // Final: a plain Error would count as retryable and leave the answer SUBMITTED forever.
+          await recordFailure(m, new ProviderError(o.error, false), m.attempts);
+        }
       } else {
-        // Final: a plain Error would count as retryable and leave the answer SUBMITTED forever.
-        await recordFailure(m, new ProviderError(o.error, false), m.attempts);
+        stillPending++;
+        if (o.unchecked) unchecked++;
+        // Give up on tasks the provider still reports unfinished after 48 h (it lost them). A task it was not
+        // asked about in this poll proves nothing: a backlog older than 48 h is read over several polls.
+        const age = Date.now() - (m.startedAt ?? m.scheduledAt).getTime();
+        // Final without stopping the provider: as a retryable error at attempt 1 it was only noted, every poll, forever.
+        if (age > (o.unchecked ? UNCHECKED_GIVE_UP_MS : 48 * 3600_000)) await recordFailure(m, new Error("Async result timed out"), m.attempts, { final: true });
       }
-    } else {
-      stillPending++;
-      // Give up on tasks older than 48 h (provider lost them).
-      const age = Date.now() - (m.startedAt ?? m.scheduledAt).getTime();
-      if (age > 48 * 3600_000) await recordFailure(m, new Error("Async result timed out"), m.attempts);
+    } catch (e) {
+      // One answer that cannot be saved must not hold back the rest: the oldest comes first in every batch, so a
+      // throw here stopped all of the provider's answers (a NUL in one ChatGPT answer, 2026-11-19 … 11-24).
+      console.error(`[measure] ${providerId} ${m.id}: could not save the result: ${describeError(e, 1000)}`);
+      if (!(await recordSaveFailure(m, e))) stillPending++;
     }
   }
-  if (stillPending > 0 || pending.length === 200) throw new RescheduleJob(stillPending > 0 ? 300 : 5);
+  // Out of time, or tasks not asked about yet: come back soon. Tasks the provider reports unfinished: in 5 minutes.
+  if (outOfTime) throw new RescheduleJob(5);
+  if (unchecked > 0) throw new RescheduleJob(30);
+  if (stillPending > 0) throw new RescheduleJob(300);
+  if (pending.length === 200) throw new RescheduleJob(5);
+}
+
+/**
+ * A delivered answer that could not be saved. A value Postgres rejects (class 22) cannot be saved by trying again;
+ * anything else (a dropped pooler connection) is tried again at the next poll, up to MAX_ATTEMPTS saves. Counted
+ * in `errors`, not `attempts` (the provider answered at the first attempt), and never stops the provider: it is
+ * the app's failure. Returns whether the answer is finished.
+ */
+async function recordSaveFailure(m: MeasurementRow, error: unknown): Promise<boolean> {
+  const db = getDb();
+  const earlier = ((m.errors as Array<{ message?: string }> | null) ?? []).filter((x) => x.message?.startsWith(SAVE_FAILURE_PREFIX)).length;
+  const final = isPgDataError(error) || earlier + 1 >= MAX_ATTEMPTS;
+  const errors = [...((m.errors as unknown[]) ?? []), { at: new Date().toISOString(), message: `${SAVE_FAILURE_PREFIX}: ${describeError(error, 900)}` }];
+  try {
+    const changed = await db
+      .update(measurements)
+      .set({ errors, ...(final ? { status: "FAILED", finishedAt: new Date() } : {}) })
+      .where(and(eq(measurements.id, m.id), inArray(measurements.status, ["SCHEDULED", "SUBMITTED"])))
+      .returning({ id: measurements.id });
+    if (changed.length === 0) return true;
+    if (final) {
+      await db.update(runs).set({ failedCount: sql`${runs.failedCount} + 1` }).where(eq(runs.id, m.runId));
+      await maybeFinishRun(m.runId);
+    }
+    return final;
+  } catch (e) {
+    console.error(`[measure] ${m.id}: could not record the failed save: ${describeError(e, 300)}`);
+    return false;
+  }
 }
 
 /** Returns whether the answer is finished (failed for good, or no longer in flight). */
-async function recordFailure(m: MeasurementRow, error: unknown, attempts: number): Promise<boolean> {
+async function recordFailure(m: MeasurementRow, error: unknown, attempts: number, opts: { final?: boolean } = {}): Promise<boolean> {
   const db = getDb();
-  const message = error instanceof Error ? error.message : String(error);
+  // A provider's own message is kept verbatim (stopRejectedProvider compares it); anything else leads with its cause.
+  const message = error instanceof ProviderError ? error.message : describeError(error);
   // Out of credit does not clear by retrying, whatever the status says (OpenAI: 429 `insufficient_quota`).
   const retryable = (error instanceof ProviderError ? error.retryable : true) && classifyProviderError(message) !== "QUOTA";
-  const final = !retryable || attempts >= MAX_ATTEMPTS;
+  const final = opts.final === true || !retryable || attempts >= MAX_ATTEMPTS;
   const errors = [...((m.errors as unknown[]) ?? []), { at: new Date().toISOString(), message: message.slice(0, 1000) }];
   // Only an answer still in flight can fail. A whole rejected batch reaches this once per answer after
   // stopRejectedProvider has already failed (and counted) the rest of it; those were counted twice.
@@ -239,8 +302,10 @@ async function maybeFinishRun(runId: string) {
 }
 
 /** Persist evidence, cost, raw signals and the updated statistical cell state. */
-export async function finalizeMeasurement(id: string, result: ProviderResult, startedAt: Date) {
+export async function finalizeMeasurement(id: string, providerResult: ProviderResult, startedAt: Date) {
   const db = getDb();
+  // Provider text is third-party: a NUL or a lone surrogate would make every write below fail (pg-safe.ts).
+  const result: ProviderResult = { ...providerResult, answer: pgSafeJson(providerResult.answer), raw: pgSafeJson(providerResult.raw) };
   const [m] = await db.select().from(measurements).where(eq(measurements.id, id));
   // Late results for a cancelled run are dropped (the run was closed by the admin).
   if (!m || m.status === "SUCCEEDED" || m.status === "CANCELLED") return;

@@ -86,7 +86,7 @@ describe("job time budget", () => {
     try {
       const pending = [{ measurementId: "m1", externalTaskId: "t1", configuration: chatgptUi.configurations[0]!, submittedAt: new Date().toISOString() }];
       const out = await runWithDeadline(new AbortController().signal, Date.now() + 5_000, () => chatgptUi.collect!(pending));
-      expect(out).toEqual([{ measurementId: "m1", status: "PENDING" }]);
+      expect(out).toEqual([{ measurementId: "m1", status: "PENDING", unchecked: true }]);
       expect(calls).toBe(0);
     } finally {
       globalThis.fetch = realFetch;
