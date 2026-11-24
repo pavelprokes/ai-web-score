@@ -26,7 +26,8 @@ export type JobType =
   | "recommendations.generate"
   | "signals.reextract"
   | "sources.classify"
-  | "site.check";
+  | "site.check"
+  | "maintenance.cleanup";
 
 export interface Job {
   id: string;

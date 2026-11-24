@@ -1105,6 +1105,57 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
+  it("cleans up daily: raw payloads after 7 days, superseded signals, answer text only when asked; records the size", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { dailyCleanup, databaseSizeHistory } = await import("@/services/maintenance");
+    const { EXTRACTOR_VERSION } = await import("@/core/signals/extract");
+    const db = getDb();
+    const [old, recent] = await db
+      .select()
+      .from(s.measurements)
+      .where(and(eq(s.measurements.status, "SUCCEEDED"), isNotNull(s.measurements.answerText)))
+      .limit(2);
+    const days = (n: number) => new Date(Date.now() - n * 86_400_000);
+    await db.update(s.measurements).set({ finishedAt: days(10), rawResponse: { result: [{ x: 1 }] } }).where(eq(s.measurements.id, old!.id));
+    await db.update(s.measurements).set({ finishedAt: days(2), rawResponse: { result: [{ x: 2 }] } }).where(eq(s.measurements.id, recent!.id));
+    // A row of an earlier extractor next to the current one, 40 days old: no join reads it.
+    const [current] = await db.select().from(s.measurementSignals).where(eq(s.measurementSignals.measurementId, old!.id));
+    expect(current?.extractorVersion).toBe(EXTRACTOR_VERSION);
+    const { extractorVersion: _v, measurementId: _m, createdAt: _c, ...rest } = current!;
+    await db.insert(s.measurementSignals).values({ ...rest, measurementId: old!.id, extractorVersion: "extract-v0", createdAt: days(40) });
+
+    delete process.env.RAW_RESPONSE_RETENTION_DAYS;
+    delete process.env.ANSWER_TEXT_RETENTION_DAYS;
+    const report = await dailyCleanup();
+    expect(report.done).toBe(true);
+    expect(report.rawCleared).toBeGreaterThanOrEqual(1);
+    expect(report.signalsDeleted).toBe(1);
+    expect(report.answersCleared).toBe(0);
+    const row = async (id: string) => (await db.select().from(s.measurements).where(eq(s.measurements.id, id)))[0]!;
+    expect((await row(old!.id)).rawResponse).toBeNull();
+    expect((await row(recent!.id)).rawResponse).toEqual({ result: [{ x: 2 }] });
+    expect((await row(old!.id)).answerText).toBe(old!.answerText);
+    const versions = (await db.select().from(s.measurementSignals).where(eq(s.measurementSignals.measurementId, old!.id))).map((x) => x.extractorVersion);
+    expect(versions).toEqual([EXTRACTOR_VERSION]);
+    const history = await databaseSizeHistory();
+    expect(history.at(-1)).toMatchObject({ day: new Date().toISOString().slice(0, 10) });
+    expect(history.at(-1)!.mb).toBeGreaterThan(0);
+
+    // Answer text is cleared only when the owner sets a retention; citations and signals stay.
+    process.env.ANSWER_TEXT_RETENTION_DAYS = "5";
+    try {
+      const second = await dailyCleanup();
+      expect(second.answersCleared).toBeGreaterThanOrEqual(1);
+      expect((await row(old!.id)).answerText).toBeNull();
+      expect((await row(old!.id)).citations).toEqual(old!.citations);
+      expect((await row(recent!.id)).answerText).toBe(recent!.answerText);
+      expect(await databaseSizeHistory()).toHaveLength(history.length); // one entry per day
+    } finally {
+      delete process.env.ANSWER_TEXT_RETENTION_DAYS;
+    }
+  });
+
   it("stops a provider for the run after one out-of-credit rejection, even after earlier answers", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

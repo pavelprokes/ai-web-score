@@ -14,6 +14,7 @@ import type { DomainProfile } from "@/core/domain-profile";
 import type { PromptRole } from "@/core/prompt";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
 import { describeError, isPgDataError, pgSafeJson } from "@/db/pg-safe";
+import { slimRawResponse } from "@/core/measurement/raw";
 import { latestProfile } from "./discovery";
 import { llmAvailable } from "@/lib/llm";
 import { deadlineRemainingMs } from "@/lib/deadline";
@@ -342,7 +343,7 @@ export async function finalizeMeasurement(id: string, providerResult: ProviderRe
         status: "SUCCEEDED",
         finishedAt,
         durationMs: finishedAt.getTime() - startedAt.getTime(),
-        rawResponse: result.raw as object,
+        rawResponse: slimRawResponse(result.raw, result.answer.answerText) as object,
         answerText: result.answer.answerText,
         citations: result.answer.citations,
         sources: result.answer.sources,
