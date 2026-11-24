@@ -60,6 +60,10 @@ Test files run serially (`fileParallelism: false`) because DB suites share and r
 - Adding a provider: implement `ProviderAdapter` (`src/core/measurement/provider.ts`) in
   `src/core/measurement/providers/<name>.ts` and register it in `providers/index.ts`.
 - Discovery prompts never contain the brand, never force web search, always set location.
+- Every change that can move a domain's numbers (measurement, signal extraction, scoring, providers, the prompt set) adds
+  an entry to `src/core/changelog.ts` in the same PR: what, why / what it does to the numbers, and the UTC day it took
+  effect on production. It becomes a numbered line on every domain's score chart and an entry in its change log, so a
+  step in a trend can be explained later. A domain's own changes (scoring switch, notes) are recorded at runtime.
 - Admin UI targets WCAG 2.2 AA (light + dark contrast, keyboard, status not by colour alone, 320 px reflow).
 - Admin UI is built on hig-web-kit (Apple HIG, vendored in `src/styles/hig-web-kit/`, commit in its README) in its AA mode
   (`<html data-hig-mode="aa">`): colours only via `--hig-*` tokens (aliased in `globals.css`), kit classes

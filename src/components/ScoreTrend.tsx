@@ -61,7 +61,15 @@ function format(v: number | null, metric: Metric) {
   return metric === "overall" ? `${v.toFixed(0)}/100` : `${v.toFixed(0)} %`;
 }
 
-export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; providers: TrendSeries[] }) {
+/** A recorded change (what, why, when) drawn as a dashed, numbered line; listed under the chart with the same number. */
+export interface TrendEvent {
+  /** ISO date or timestamp; the line sits on its UTC day. */
+  at: string;
+  title: string;
+  why: string;
+}
+
+export function ScoreTrend({ combined, providers, events = [] }: { combined: TrendPoint[]; providers: TrendSeries[]; events?: TrendEvent[] }) {
   const [metric, setMetric] = useState<Metric>("overall");
   const [rangeDays, setRangeDays] = useState(90);
   const [showProviders, setShowProviders] = useState(true);
@@ -113,6 +121,18 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
     }
     return out;
   }, [combined, from]);
+
+  // Changes inside the shown days, oldest first, numbered as in the list under the chart.
+  const shownEvents = useMemo(() => {
+    if (!days.length) return [];
+    const first = days[0]!;
+    const last = days[days.length - 1]!;
+    return events
+      .map((e) => ({ ...e, day: dayKey(e.at) }))
+      .filter((e) => e.day >= first && e.day <= last)
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map((e, i) => ({ ...e, n: i + 1 }));
+  }, [events, days]);
 
   const innerW = width - M.left - M.right;
   const innerH = HEIGHT - M.top - M.bottom;
@@ -250,7 +270,7 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
         className="trend__plot"
         tabIndex={0}
         role="group"
-        aria-label={`${metricDef.label} over the last ${rangeDays} days. Use the left and right arrow keys to read values; the same data is in the table below.`}
+        aria-label={`${metricDef.label} over the last ${rangeDays} days.${shownEvents.length ? ` ${shownEvents.length} recorded ${shownEvents.length === 1 ? "change is" : "changes are"} marked and listed below the chart.` : ""} Use the left and right arrow keys to read values; the same data is in the table below.`}
         onKeyDown={onKey}
         onFocus={() => active === null && xs.length && setActive(xs.length - 1)}
         onBlur={() => setActive(null)}
@@ -272,6 +292,19 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
           {mixChanges.map((c) => (
             <line key={c.day} x1={x(Date.parse(c.day))} x2={x(Date.parse(c.day))} y1={M.top} y2={M.top + innerH} className="trend__mix" />
           ))}
+          {shownEvents.map((e, i) => {
+            const ex = x(Date.parse(e.day));
+            // Numbers of changes a few pixels apart are stacked instead of drawn over each other.
+            const stack = shownEvents.slice(0, i).filter((p) => Math.abs(x(Date.parse(p.day)) - ex) < 16).length;
+            return (
+              <g key={`${e.day}-${e.n}`}>
+                <line x1={ex} x2={ex} y1={M.top} y2={M.top + innerH} className="trend__event" />
+                <text x={ex + 3} y={M.top + 10 + stack * 12} className="trend__event-num">
+                  {e.n}
+                </text>
+              </g>
+            );
+          })}
           {metricDef.rate && band && <path d={band} className="fill-band" />}
           {series
             .slice()
@@ -322,6 +355,14 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
         {active !== null && (
           <div className="trend__tip" style={{ left: tipLeft, transform: tipOnLeft ? "translateX(calc(-100% - 12px))" : "translateX(12px)" }} aria-hidden="true">
             <div className="trend__tip-date">{longDateFmt.format(new Date(xs[active]!))}</div>
+            {shownEvents
+              .filter((e) => e.day === days[active])
+              .map((e) => (
+                <div key={e.n} className="trend__tip-row">
+                  <strong>{e.n}</strong>
+                  <span>{e.title}</span>
+                </div>
+              ))}
             {series.map((s) => {
               const v = s.values[active]!;
               return (
@@ -343,6 +384,19 @@ export function ScoreTrend({ combined, providers }: { combined: TrendPoint[]; pr
       <p className="sr-only" aria-live="polite">
         {announce}
       </p>
+      {shownEvents.length > 0 && (
+        <div className="note trend__note">
+          <span aria-hidden="true">┆ </span>Recorded changes (numbered lines on the chart):
+          <ol className="trend__events">
+            {shownEvents.map((e) => (
+              <li key={`${e.day}-${e.n}`} value={e.n}>
+                <time dateTime={e.day}>{longDateFmt.format(new Date(e.day))}</time> — <strong>{e.title}</strong>
+                {e.why && <span className="changelog__why">{e.why}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <p className="note trend__note">
         Each point summarises the previous 28 days <MetricInfo id="rolling-window" />, so the line moves smoothly and a real change shows over several days.{" "}
         <Link prefetch={false} href="/metrics">What do the metrics mean?</Link>

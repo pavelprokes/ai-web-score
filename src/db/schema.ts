@@ -554,3 +554,26 @@ export const jobs = pgTable(
       .where(sql`status in ('QUEUED','RUNNING') and dedupe_key is not null`),
   ],
 ).enableRLS();
+
+/**
+ * What changed, why and when: a dated line on the score charts and an entry in the domain's change log, so a step in
+ * a trend can be explained a year later. `domain_id` null = every domain (a methodology change, a provider switched
+ * on). `key` is set for entries synced from code (`src/core/changelog.ts`) and for automatic ones (one per event);
+ * a note written by hand has none.
+ */
+export const changeEvents = pgTable(
+  "change_events",
+  {
+    id: id(),
+    key: text("key").unique(),
+    domainId: text("domain_id").references(() => domains.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    /** METHODOLOGY | PROVIDER | SCORING | INCIDENT | PORTFOLIO | NOTE */
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    why: text("why").notNull().default(""),
+    createdBy: text("created_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("change_events_domain_at_idx").on(t.domainId, t.at)],
+).enableRLS();

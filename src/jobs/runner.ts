@@ -18,6 +18,7 @@ import { classifyCitedHosts } from "@/services/host-types";
 import { checkSite } from "@/services/site-check";
 import { syncProviderRegistry } from "@/services/registry";
 import { dailyCleanup } from "@/services/maintenance";
+import { syncChangelog } from "@/services/change-events";
 import { claim, complete, enqueue, fail, type Job, JobCancelledError, type JobType, nextDue, PermanentJobError, reschedule, RescheduleJob, runAsJob } from "./queue";
 
 type Handler = (payload: Record<string, unknown>) => Promise<unknown>;
@@ -167,6 +168,7 @@ async function tick() {
   const db = getDb();
   if (!registrySynced) {
     await syncProviderRegistry();
+    await syncChangelog();
     registrySynced = true;
   }
   // Close or resume runs a deploy/timeout interrupted before planning new work (which they would block).
