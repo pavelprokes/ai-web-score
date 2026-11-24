@@ -13,6 +13,7 @@ import { extractSignals, presenceIndex, type RawSignals, type TrackedEntity } fr
 import type { DomainProfile } from "@/core/domain-profile";
 import type { PromptRole } from "@/core/prompt";
 import { enqueue, RescheduleJob } from "@/jobs/queue";
+import { describeError, isPgDataError, pgSafeJson } from "@/db/pg-safe";
 import { latestProfile } from "./discovery";
 import { llmAvailable } from "@/lib/llm";
 import { loadPriceBook, priceModelKey } from "./registry";
@@ -150,20 +151,34 @@ export async function collectAsync(providerId: string) {
   for (const o of outcomes) {
     const m = pending.find((x) => x.id === o.measurementId);
     if (!m) continue;
-    if (o.status === "SUCCEEDED") await finalizeMeasurement(m.id, o.result, m.startedAt ?? m.scheduledAt);
-    else if (o.status === "FAILED") {
-      if (o.retryable && m.attempts < MAX_ATTEMPTS) {
-        await db.update(measurements).set({ status: "SCHEDULED", externalTaskId: null }).where(eq(measurements.id, m.id));
-        await enqueue("measurement.submit", { runId: m.runId, configurationId: m.configurationId }, { dedupeKey: `submit:${m.runId}:${m.configurationId}` });
+    const age = Date.now() - (m.startedAt ?? m.scheduledAt).getTime();
+    try {
+      if (o.status === "SUCCEEDED") await finalizeMeasurement(m.id, o.result, m.startedAt ?? m.scheduledAt);
+      else if (o.status === "FAILED") {
+        if (o.retryable && m.attempts < MAX_ATTEMPTS) {
+          await db.update(measurements).set({ status: "SCHEDULED", externalTaskId: null }).where(eq(measurements.id, m.id));
+          await enqueue("measurement.submit", { runId: m.runId, configurationId: m.configurationId }, { dedupeKey: `submit:${m.runId}:${m.configurationId}` });
+        } else {
+          // Final: a plain Error would count as retryable and leave the answer SUBMITTED forever.
+          await recordFailure(m, new ProviderError(o.error, false), m.attempts);
+        }
       } else {
-        // Final: a plain Error would count as retryable and leave the answer SUBMITTED forever.
-        await recordFailure(m, new ProviderError(o.error, false), m.attempts);
+        stillPending++;
+        // Give up on tasks older than 48 h (provider lost them).
+        if (age > 48 * 3600_000) await recordFailure(m, new Error("Async result timed out"), m.attempts);
       }
-    } else {
-      stillPending++;
-      // Give up on tasks older than 48 h (provider lost them).
-      const age = Date.now() - (m.startedAt ?? m.scheduledAt).getTime();
-      if (age > 48 * 3600_000) await recordFailure(m, new Error("Async result timed out"), m.attempts);
+    } catch (e) {
+      // One answer that cannot be saved must not hold back the rest: the oldest comes first in every batch, so a
+      // throw here stopped all of the provider's answers (a NUL in one ChatGPT answer, 2026-11-19 … 11-24).
+      // A value Postgres rejects, or a failure that outlived the 48 h bound, fails that answer for good, as a
+      // storage error rather than a provider rejection (no stopRejectedProvider); anything else waits for the next poll.
+      const message = describeError(e, 1000);
+      console.error(`[measure] ${providerId} ${m.id}: could not save the result: ${message}`);
+      if (isPgDataError(e) || age > 48 * 3600_000) {
+        await recordFailure(m, new Error(`Could not save the answer: ${message}`), Math.max(m.attempts, MAX_ATTEMPTS)).catch((err) =>
+          console.error(`[measure] ${m.id}: could not record the failure: ${describeError(err, 300)}`),
+        );
+      } else stillPending++;
     }
   }
   if (stillPending > 0 || pending.length === 200) throw new RescheduleJob(stillPending > 0 ? 300 : 5);
@@ -172,7 +187,8 @@ export async function collectAsync(providerId: string) {
 /** Returns whether the answer is finished (failed for good, or no longer in flight). */
 async function recordFailure(m: MeasurementRow, error: unknown, attempts: number): Promise<boolean> {
   const db = getDb();
-  const message = error instanceof Error ? error.message : String(error);
+  // A provider's own message is kept verbatim (stopRejectedProvider compares it); anything else leads with its cause.
+  const message = error instanceof ProviderError ? error.message : describeError(error);
   // Out of credit does not clear by retrying, whatever the status says (OpenAI: 429 `insufficient_quota`).
   const retryable = (error instanceof ProviderError ? error.retryable : true) && classifyProviderError(message) !== "QUOTA";
   const final = !retryable || attempts >= MAX_ATTEMPTS;
@@ -239,8 +255,10 @@ async function maybeFinishRun(runId: string) {
 }
 
 /** Persist evidence, cost, raw signals and the updated statistical cell state. */
-export async function finalizeMeasurement(id: string, result: ProviderResult, startedAt: Date) {
+export async function finalizeMeasurement(id: string, providerResult: ProviderResult, startedAt: Date) {
   const db = getDb();
+  // Provider text is third-party: a NUL or a lone surrogate would make every write below fail (pg-safe.ts).
+  const result: ProviderResult = { ...providerResult, answer: pgSafeJson(providerResult.answer), raw: pgSafeJson(providerResult.raw) };
   const [m] = await db.select().from(measurements).where(eq(measurements.id, id));
   // Late results for a cancelled run are dropped (the run was closed by the admin).
   if (!m || m.status === "SUCCEEDED" || m.status === "CANCELLED") return;
