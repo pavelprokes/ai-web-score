@@ -1,0 +1,755 @@
+/*! hig-web-kit v0.3.0 | MIT | Not affiliated with Apple Inc. | Generated from tokens/tokens.json — do not edit */
+/* Framework-free components following Apple's HIG. Requires hig.css (+ glass.css for bars, menus, sheets).
+   Behaviour (switch, segmented, tabs, menus, dialogs) comes from hig-web-kit/components (initComponents()).
+   Borders use --hig-control-border, which is transparent in Apple mode and a 3:1 gray in AA mode. */
+
+/* predictable sizing for every kit element and its children */
+:where([class^="hig-"], [class*=" hig-"]), :where([class^="hig-"], [class*=" hig-"]) *, :where([class^="hig-"], [class*=" hig-"])::before, :where([class^="hig-"], [class*=" hig-"])::after { box-sizing: border-box; }
+
+/* the hidden attribute always wins (tab panels, clear buttons) */
+:where(.hig-tabpanel, .hig-input__clear, .hig-menu)[hidden] { display: none !important; }
+
+.hig-icon { width: 1.25em; height: 1.25em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── Buttons ── */
+.hig-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px;
+  font: 600 1.0625rem/1.2 var(--hig-font-sans); white-space: nowrap; cursor: pointer;
+  background: var(--hig-fill-2); color: var(--hig-accent-text);
+  transition: scale var(--hig-duration) var(--hig-ease-spring), opacity .2s, background-color .2s;
+}
+.hig-btn:active { opacity: .7; }
+.hig-btn:disabled, .hig-btn[aria-disabled="true"] { opacity: .4; cursor: default; }
+.hig-btn--prominent { background: var(--hig-accent-fill); color: var(--hig-on-accent); }
+.hig-btn--plain { background: transparent; padding-inline: 8px; }
+.hig-btn--destructive { color: var(--hig-destructive-text); }
+.hig-btn--destructive.hig-btn--prominent { background: var(--hig-destructive-fill); color: var(--hig-on-destructive); }
+.hig-btn--neutral { color: var(--hig-label); }
+.hig-btn--xs { min-height: 28px; padding: 0 12px; font-size: .8125rem; }
+.hig-btn--sm { min-height: 32px; padding: 0 14px; font-size: .9375rem; }
+.hig-btn--lg { min-height: 52px; padding: 0 26px; }
+.hig-btn--xl { min-height: 64px; padding: 0 32px; font-size: 1.25rem; }
+.hig-btn--block { width: 100%; }
+.hig-btn--rect { border-radius: var(--hig-radius-md); }
+.hig-btn[aria-busy="true"] { pointer-events: none; }
+.hig-icon-btn {
+  width: 44px; height: 44px; display: inline-grid; place-items: center; flex: none;
+  border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; padding: 0;
+}
+.hig-icon-btn .hig-icon { width: 22px; height: 22px; }
+.hig-spinner { width: 18px; height: 18px; position: relative; display: inline-block; }
+.hig-spinner i {
+  position: absolute; left: 50%; top: 0; width: 2.2px; height: 30%; margin-left: -1.1px; border-radius: 2px;
+  background: currentColor; transform-origin: 50% 166%; animation: hig-spin-fade .8s linear infinite;
+}
+@keyframes hig-spin-fade { from { opacity: 1 } to { opacity: .2 } }
+
+/* ── Switch (use in list rows; outside lists prefer a toggle button) ── */
+.hig-switch {
+  width: 64px; height: 28px; flex: none; position: relative; padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--hig-fill); box-shadow: inset 0 0 0 1px var(--hig-control-border);
+  transition: background-color .25s var(--hig-ease-out); touch-action: none;
+}
+.hig-switch[aria-checked="true"] { background: var(--hig-switch-on); box-shadow: none; }
+.hig-switch__thumb {
+  position: absolute; top: 2px; left: 2px; width: 38px; height: 24px; border-radius: 999px; background: #fff;
+  box-shadow: 0 3px 8px rgb(0 0 0 / .15), 0 1px 1px rgb(0 0 0 / .16);
+  transition: translate var(--hig-duration) var(--hig-ease-spring), scale var(--hig-duration) var(--hig-ease-spring), background-color .2s;
+}
+.hig-switch[aria-checked="true"] .hig-switch__thumb { translate: 22px 0; }
+.hig-switch.is-pressed .hig-switch__thumb { /* thumb turns into a glass lens while held */
+  scale: 1.35 1.45; background: rgb(255 255 255 / .25);
+  -webkit-backdrop-filter: blur(2px) saturate(200%); backdrop-filter: blur(2px) saturate(200%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .8), inset 0 0 0 .5px rgb(255 255 255 / .5), 0 4px 14px rgb(0 0 0 / .18);
+}
+.hig-toggle-btn[aria-pressed="true"] { background: var(--hig-accent-fill); color: var(--hig-on-accent); }
+
+/* ── Segmented control ── */
+.hig-segmented {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; position: relative;
+  height: 36px; padding: 3px; border-radius: 999px; background: var(--hig-fill-3);
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
+}
+.hig-segmented > button {
+  position: relative; z-index: 2; border: 0; border-radius: 999px; background: none; color: var(--hig-label);
+  font: 500 .875rem/1 var(--hig-font-sans); cursor: pointer; padding: 0 10px;
+}
+.hig-segmented > button[aria-checked="true"], .hig-segmented > button[aria-selected="true"] { font-weight: 600; }
+.hig-segmented__thumb {
+  position: absolute; z-index: 1; top: 3px; bottom: 3px; left: 3px; border-radius: 999px;
+  background: var(--hig-bg-elevated); box-shadow: 0 3px 8px rgb(0 0 0 / .12), 0 1px 1px rgb(0 0 0 / .04);
+  transition: translate var(--hig-duration) var(--hig-ease-spring), width var(--hig-duration) var(--hig-ease-spring);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-hig-scheme="light"]) .hig-segmented__thumb { background: #636366; } }
+:root[data-hig-scheme="dark"] .hig-segmented__thumb { background: #636366; }
+[data-hig-mode="aa"] .hig-segmented__thumb { box-shadow: 0 0 0 1.5px var(--hig-control-border), 0 3px 8px rgb(0 0 0 / .12); }
+
+/* ── Slider ── */
+.hig-slider { -webkit-appearance: none; appearance: none; width: 100%; min-width: 0; height: 28px; margin: 0; background: transparent; --p: 50%; }
+.hig-slider::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--hig-control-border);
+  background: linear-gradient(to right, var(--hig-accent) var(--p), var(--hig-fill) var(--p));
+}
+.hig-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--hig-fill); box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--hig-accent); }
+.hig-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 38px; height: 24px; margin-top: -9px; border-radius: 999px; background: #fff;
+  box-shadow: 0 0 0 1px var(--hig-control-border), 0 3px 8px rgb(0 0 0 / .15), 0 1px 1px rgb(0 0 0 / .16);
+  transition: transform .35s var(--hig-ease-spring), background-color .2s;
+}
+.hig-slider::-moz-range-thumb { width: 38px; height: 24px; border: 0; border-radius: 999px; background: #fff; box-shadow: 0 0 0 1px var(--hig-control-border), 0 3px 8px rgb(0 0 0 / .15); transition: transform .35s var(--hig-ease-spring); }
+.hig-slider:active::-webkit-slider-thumb {
+  transform: scale(1.4, 1.5); background: rgb(255 255 255 / .35);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .9), inset 0 0 0 .5px rgb(255 255 255 / .6), 0 4px 14px rgb(0 0 0 / .2);
+}
+.hig-slider:active::-moz-range-thumb { transform: scale(1.4, 1.5); background: rgb(255 255 255 / .35); }
+
+/* ── Stepper ── */
+.hig-stepper { display: inline-flex; align-items: center; height: 36px; border-radius: 999px; background: var(--hig-fill-3); box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-stepper > button { width: 48px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 999px; background: none; color: var(--hig-label); cursor: pointer; }
+.hig-stepper > button:active { background: var(--hig-fill-2); }
+.hig-stepper > .hig-stepper__divider { width: 1px; height: 18px; background: var(--hig-sep); }
+
+/* ── Progress ── */
+.hig-progress { height: 6px; border-radius: 999px; background: var(--hig-fill); overflow: hidden; box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-progress > i { display: block; height: 100%; width: var(--value, 0%); background: var(--hig-accent); border-radius: inherit; transition: width .6s var(--hig-ease-out); }
+
+/* ── Text field & search ── */
+.hig-field { display: grid; gap: 6px; }
+.hig-field > label { font: var(--hig-text-footnote); color: var(--hig-label-2); padding-left: 4px; }
+.hig-input {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: var(--hig-radius-field);
+  background: var(--hig-fill-3); box-shadow: inset 0 0 0 1px var(--hig-control-border);
+}
+.hig-input:focus-within { box-shadow: 0 0 0 2px var(--hig-focus-ring); }
+.hig-input > input, .hig-input > textarea { flex: 1; min-width: 0; border: 0; padding: 10px 0; background: transparent; font: inherit; color: var(--hig-label); outline: none; }
+.hig-input > input::placeholder, .hig-input > textarea::placeholder { color: var(--hig-placeholder); opacity: 1; }
+.hig-input--search { border-radius: 999px; }
+.hig-input__clear { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 999px; background: var(--hig-label-3); color: var(--hig-bg-2); cursor: pointer; }
+[data-hig-mode="aa"] .hig-input__clear { background: var(--hig-control-border); }
+.hig-field__hint { font: var(--hig-text-footnote); color: var(--hig-label-2); padding-left: 4px; }
+.hig-field.is-invalid .hig-input { box-shadow: 0 0 0 2px var(--hig-destructive-text); }
+.hig-field.is-invalid .hig-field__hint { color: var(--hig-destructive-text); }
+
+/* ── Inset grouped list ── */
+.hig-section-head { font: var(--hig-text-footnote); color: var(--hig-label-2); margin: 0 20px 6px; }
+.hig-section-foot { font: var(--hig-text-footnote); color: var(--hig-label-2); margin: 6px 20px 0; }
+.hig-list { background: var(--hig-grouped-bg-2); border-radius: var(--hig-radius-card); overflow: hidden; margin: 0; padding: 0; list-style: none; }
+.hig-row {
+  display: flex; align-items: center; gap: 12px; position: relative; width: 100%; min-height: 52px; padding: 8px 16px;
+  border: 0; background: none; color: inherit; font: inherit; text-align: left;
+}
+.hig-row + .hig-row::before { content: ""; position: absolute; top: 0; right: 0; left: var(--hig-sep-inset, 16px); border-top: .5px solid var(--hig-sep); }
+.hig-row--icon { --hig-sep-inset: 58px; }
+button.hig-row, a.hig-row { cursor: pointer; text-decoration: none; }
+button.hig-row:active, a.hig-row:active { background: var(--hig-fill-3); }
+.hig-row__title { flex: 1; min-width: 0; }
+.hig-row__value { color: var(--hig-label-2); font-variant-numeric: tabular-nums; }
+.hig-row__subtitle { display: block; margin-top: 2px; font: var(--hig-text-footnote); color: var(--hig-label-2); }
+/* a row whose body stacks a title and a full-width control (e.g. a progress bar) */
+.hig-row__body { flex: 1; min-width: 0; display: grid; gap: 8px; padding-block: 4px; }
+.hig-row__line { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.hig-row__chevron { color: var(--hig-label-3); width: 14px; height: 14px; stroke-width: 2.6; }
+[data-hig-mode="aa"] .hig-row__chevron { color: var(--hig-label-2); }
+.hig-icon-square { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 8px; color: #fff; }
+.hig-icon-square .hig-icon { width: 18px; height: 18px; }
+
+/* ── Badge ── */
+.hig-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-grid; place-items: center; background: var(--hig-red); color: #fff; font: 600 .75rem/1 var(--hig-font-sans); }
+[data-hig-mode="aa"] .hig-badge { background: var(--hig-destructive-fill); color: var(--hig-on-destructive); }
+
+/* ── Toolbar / navigation bar (transparent; groups are glass capsules) ── */
+.hig-toolbar {
+  position: fixed; inset: 0 0 auto 0; z-index: 30; pointer-events: none;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) var(--hig-size-gutter) 0;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+}
+.hig-toolbar > * { pointer-events: auto; }
+.hig-toolbar__lead, .hig-toolbar__trail { display: flex; gap: 8px; align-items: center; }
+.hig-toolbar__trail { justify-content: flex-end; }
+.hig-group { display: flex; border-radius: 999px; }
+.hig-inline-title { font: var(--hig-text-headline); white-space: nowrap; opacity: 0; translate: 0 6px; transition: opacity .25s, translate .35s var(--hig-ease-spring); }
+[data-hig-scrolled] .hig-inline-title { opacity: 1; translate: 0 0; }
+.hig-large-title { font: var(--hig-text-large-title); margin: 8px 4px 0; text-wrap: balance; }
+
+/* ── Tab bar (floating capsule) ── */
+.hig-tabdock {
+  position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); z-index: 30;
+  display: flex; justify-content: center; align-items: center; gap: 10px; padding-inline: var(--hig-size-gutter); pointer-events: none;
+}
+.hig-tabdock > * { pointer-events: auto; }
+.hig-tabbar { display: flex; position: relative; min-width: 0; padding: 4px; border-radius: 999px; }
+.hig-tab {
+  position: relative; z-index: 2; width: 84px; min-width: 64px; flex: 0 1 auto; height: 54px; border: 0; border-radius: 999px; background: none; cursor: pointer; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  color: var(--hig-glass-label); font: 600 .65625rem/1.2 var(--hig-font-sans);
+  transition: color .2s, width var(--hig-duration) var(--hig-ease-spring), opacity .2s;
+}
+.hig-tab .hig-icon { width: 24px; height: 24px; }
+.hig-tab[aria-selected="true"] { color: var(--hig-accent-text); }
+.hig-tab[aria-selected="true"] .hig-icon { fill: currentColor; }
+.hig-glass--on-dark .hig-tab[aria-selected="true"] { color: #4db2ff; }
+[data-hig-mode="aa"] .hig-tab[aria-selected="true"] { color: var(--hig-glass-label); }
+[data-hig-mode="aa"] .hig-tab[aria-selected="true"] .hig-icon { color: var(--hig-accent-text); }
+[data-hig-mode="aa"] .hig-glass--on-dark .hig-tab[aria-selected="true"] .hig-icon { color: #8ccfff; }
+.hig-tabbar__lens {
+  position: absolute; z-index: 1; top: 4px; left: 4px; width: 84px; height: 54px; border-radius: 999px; background: var(--hig-fill-3);
+  transition: translate var(--hig-duration) var(--hig-ease-spring), width var(--hig-duration) var(--hig-ease-spring), opacity .2s;
+}
+[data-hig-mode="aa"] .hig-tabbar__lens { background: var(--hig-fill-2); box-shadow: inset 0 0 0 1.5px var(--hig-control-border); }
+.hig-search-tab { width: 62px; height: 62px; display: grid; place-items: center; border: 0; border-radius: 999px; cursor: pointer; color: inherit; }
+.hig-search-tab .hig-icon { width: 24px; height: 24px; }
+.hig-tabdock.is-minimized .hig-tab:not([aria-selected="true"]) { width: 0; min-width: 0; opacity: 0; }
+.hig-tabdock.is-minimized .hig-tab { height: 44px; }
+.hig-tabdock.is-minimized .hig-tab span { display: none; }
+.hig-tabdock.is-minimized .hig-tabbar__lens { opacity: 0; }
+.hig-tabdock.is-minimized .hig-search-tab { width: 52px; height: 52px; }
+
+/* ── Menu (grows out of its trigger) ── */
+.hig-menu-anchor { position: relative; display: inline-block; }
+.hig-menu { position: absolute; z-index: 40; top: calc(100% + 8px); left: 0; min-width: 250px; padding: 6px; border-radius: var(--hig-radius-menu); display: grid; transform-origin: 30px -20px; }
+.hig-menu[hidden] { display: none !important; }
+.hig-menu__item {
+  display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 18px;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; position: relative; z-index: 2;
+}
+.hig-menu__item:hover, .hig-menu__item:focus-visible { background: var(--hig-fill-3); outline: none; }
+.hig-menu__item:focus-visible { box-shadow: inset 0 0 0 2px var(--hig-focus-ring); }
+.hig-menu__item .hig-menu__check { width: 18px; visibility: hidden; }
+.hig-menu__item[aria-checked="true"] .hig-menu__check { visibility: visible; }
+.hig-menu__item--destructive { color: var(--hig-destructive-text); }
+.hig-menu__item:disabled { color: var(--hig-label-3); cursor: default; }
+.hig-menu__label { flex: 1; }
+.hig-menu__separator { height: 8px; position: relative; z-index: 2; }
+.hig-menu__separator::after { content: ""; position: absolute; left: 14px; right: 14px; top: 3.5px; border-top: .5px solid var(--hig-sep); }
+@media (pointer: fine) and (min-width: 900px) {
+  .hig-menu { border-radius: var(--hig-radius-md); min-width: 200px; padding: 5px; }
+  .hig-menu__item { min-height: 28px; border-radius: 6px; padding: 0 10px; }
+}
+
+/* ── Dialogs: sheet, alert, action sheet (use <dialog> + showModal) ── */
+/* UA reset wrapped in :where() so it stays at class specificity and the component rules below (padding, max-width) win. */
+:where(dialog).hig-sheet, :where(dialog).hig-alert, :where(dialog).hig-action-sheet { color: var(--hig-label); border: 0; padding: 0; max-width: none; max-height: none; }
+:where(dialog).hig-sheet::backdrop, :where(dialog).hig-alert::backdrop, :where(dialog).hig-action-sheet::backdrop { background: var(--hig-scrim); }
+.hig-sheet {
+  position: fixed; inset: auto 8px calc(env(safe-area-inset-bottom, 0px) + 8px) 8px; margin: 0 auto; width: auto; max-width: 640px;
+  height: min(52vh, 460px); border-radius: var(--hig-radius-window); overflow: hidden; display: none; flex-direction: column;
+  transition: height .5s var(--hig-ease-spring), inset .5s var(--hig-ease-spring), border-radius .5s var(--hig-ease-spring), background-color .3s;
+}
+.hig-sheet[open] { display: flex; animation: hig-sheet-in .55s var(--hig-ease-spring) both; }
+.hig-sheet.is-large {
+  height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px); inset: auto 0 0 0;
+  border-radius: var(--hig-radius-window) var(--hig-radius-window) 0 0; background: color-mix(in srgb, var(--hig-bg-elevated) 96%, transparent);
+}
+.hig-sheet.is-closing, .hig-action-sheet.is-closing { animation: hig-sheet-out .3s var(--hig-ease-out) both; }
+@keyframes hig-sheet-in { from { translate: 0 105%; } }
+@keyframes hig-sheet-out { to { translate: 0 105%; } }
+.hig-sheet__grabber { width: 36px; height: 5px; margin: 6px auto 0; flex: none; padding: 0; border: 0; border-radius: 999px; background: var(--hig-label-3); cursor: pointer; position: relative; z-index: 2; }
+[data-hig-mode="aa"] .hig-sheet__grabber { background: var(--hig-control-border); }
+.hig-sheet__bar { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding: 8px 12px; position: relative; z-index: 2; }
+.hig-sheet__title { margin: 0; text-align: center; font: var(--hig-text-headline); }
+.hig-sheet__body { padding: 4px 16px 24px; overflow: auto; position: relative; z-index: 2; display: grid; gap: 16px; align-content: start; }
+.hig-alert {
+  position: fixed; inset: 0; margin: auto; height: fit-content; width: min(300px, calc(100vw - 48px));
+  border-radius: var(--hig-radius-alert); padding: 22px 18px 16px; text-align: left;
+}
+.hig-alert[open] { animation: hig-alert-in .4s var(--hig-ease-spring) both; }
+@keyframes hig-alert-in { from { scale: 1.15; -webkit-backdrop-filter: blur(0); backdrop-filter: blur(0); } }
+.hig-alert__title { margin: 0 4px 6px; font: var(--hig-text-headline); position: relative; z-index: 2; }
+.hig-alert__message { margin: 0 4px 18px; font: var(--hig-text-subhead); color: var(--hig-label-2); position: relative; z-index: 2; }
+.hig-alert__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: relative; z-index: 2; }
+.hig-alert__actions--stacked { grid-template-columns: 1fr; }
+.hig-action-sheet { position: fixed; inset: auto 8px calc(env(safe-area-inset-bottom, 0px) + 8px) 8px; margin: 0 auto; width: auto; max-width: 420px; background: transparent; display: none; }
+.hig-action-sheet[open] { display: grid; gap: 8px; animation: hig-sheet-in .5s var(--hig-ease-spring) both; }
+.hig-action-sheet__group { display: grid; padding: 6px; border-radius: 28px; }
+.hig-action-sheet__title { text-align: center; font: var(--hig-text-footnote); color: var(--hig-label-2); padding: 10px 16px 8px; position: relative; z-index: 2; }
+.hig-action-sheet__group > button { min-height: 52px; border: 0; border-radius: 22px; background: none; color: inherit; font: var(--hig-text-body); cursor: pointer; position: relative; z-index: 2; }
+.hig-action-sheet__group > button:active { background: var(--hig-fill-3); }
+.hig-action-sheet__group > .hig-action-sheet__destructive { color: var(--hig-destructive-text); }
+.hig-action-sheet__group > .hig-action-sheet__cancel { font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-hig-motion="standard"]) :is(.hig-switch__thumb, .hig-segmented__thumb, .hig-tab, .hig-tabbar__lens, .hig-sheet, .hig-btn) { transition-duration: .01ms; }
+  :root:not([data-hig-motion="standard"]) :is(.hig-sheet[open], .hig-alert[open], .hig-action-sheet[open], .hig-sheet.is-closing) { animation: none; }
+  :root:not([data-hig-motion="standard"]) .hig-switch.is-pressed .hig-switch__thumb { scale: 1; }
+}
+:root[data-hig-motion="reduce"] :is(.hig-switch__thumb, .hig-segmented__thumb, .hig-tab, .hig-tabbar__lens, .hig-sheet, .hig-btn) { transition-duration: .01ms; }
+:root[data-hig-motion="reduce"] :is(.hig-sheet[open], .hig-alert[open], .hig-action-sheet[open], .hig-sheet.is-closing) { animation: none; }
+:root[data-hig-motion="reduce"] .hig-switch.is-pressed .hig-switch__thumb { scale: 1; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Extended components (v0.2): forms · navigation & layout · status · content
+   ════════════════════════════════════════════════════════════════════════════ */
+:where(:root) {
+  --hig-i-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --hig-i-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E");
+  --hig-i-updown: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l4-4 4 4M8 15l4 4 4-4'/%3E%3C/svg%3E");
+  --hig-i-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.8l2.8 5.8 6.3.9-4.6 4.4 1.1 6.3L12 17.2l-5.6 3 1.1-6.3L2.9 9.5l6.3-.9z'/%3E%3C/svg%3E");
+}
+.hig-mask-icon { display: inline-block; width: 1em; height: 1em; flex: none; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+
+/* ── Checkbox & radio ──
+   <label class="hig-check"><input type="checkbox" class="hig-checkbox"> Label</label>
+   HIG: checkboxes and radios are desktop controls (iOS uses switches in rows); radios come in groups of 2–5,
+   more options → pop-up button. The box always has a visible outline (label-3; control-border in AA mode). */
+.hig-check { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; color: var(--hig-label); }
+.hig-check:has(:disabled) { color: var(--hig-label-3); cursor: default; }
+.hig-checkbox, .hig-radio {
+  -webkit-appearance: none; appearance: none; flex: none; margin: 0; width: 22px; height: 22px;
+  display: inline-grid; place-items: center; cursor: inherit; position: relative;
+  background: var(--hig-bg-elevated); border-radius: 7px;
+  box-shadow: inset 0 0 0 1.5px var(--hig-label-3);
+  transition: background-color .15s, box-shadow .15s;
+}
+[data-hig-mode="aa"] :is(.hig-checkbox, .hig-radio) { box-shadow: inset 0 0 0 1.5px var(--hig-control-border); }
+.hig-radio { border-radius: 50%; }
+.hig-checkbox::before, .hig-radio::before { content: ""; width: 14px; height: 14px; background: var(--hig-on-accent); scale: 0; transition: scale var(--hig-duration-fast) var(--hig-ease-out); }
+.hig-checkbox::before { -webkit-mask: var(--hig-i-check) center / contain no-repeat; mask: var(--hig-i-check) center / contain no-repeat; }
+.hig-radio::before { width: 8px; height: 8px; border-radius: 50%; }
+:is(.hig-checkbox, .hig-radio):is(:checked, :indeterminate) { background: var(--hig-accent-fill); box-shadow: none; }
+:is(.hig-checkbox, .hig-radio):is(:checked, :indeterminate)::before { scale: 1; }
+.hig-checkbox:indeterminate::before { -webkit-mask: none; mask: none; width: 10px; height: 2.5px; border-radius: 2px; }
+:is(.hig-checkbox, .hig-radio):focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: 2px; }
+:is(.hig-checkbox, .hig-radio):disabled { opacity: .45; }
+.hig-check--trailing { flex-direction: row-reverse; justify-content: space-between; width: 100%; }
+.hig-choices { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; }
+.hig-choices > legend { padding: 0 0 4px; font: var(--hig-text-footnote); color: var(--hig-label-2); }
+.hig-choices--row { display: flex; flex-wrap: wrap; column-gap: 24px; }
+.hig-choices--nested { padding-left: 32px; }
+@media (pointer: fine) and (min-width: 900px) {
+  .hig-check { min-height: 28px; gap: 8px; }
+  .hig-checkbox, .hig-radio { width: 18px; height: 18px; border-radius: 5px; }
+  .hig-radio { border-radius: 50%; }
+  .hig-checkbox::before { width: 12px; height: 12px; }
+  .hig-radio::before { width: 7px; height: 7px; }
+}
+
+/* ── Pop-up button (exclusive choice; label shows the current value) ──
+   <button class="hig-btn hig-popup" aria-haspopup="menu" aria-controls="m" data-hig-popup>
+     <span class="hig-popup__value">Medium</span></button> + a .hig-menu with menuitemradio items */
+.hig-popup { gap: 4px; }
+.hig-popup::after { content: ""; width: 15px; height: 15px; flex: none; margin-right: -4px; background: currentColor; -webkit-mask: var(--hig-i-updown) center / contain no-repeat; mask: var(--hig-i-updown) center / contain no-repeat; }
+.hig-row .hig-popup { min-height: 36px; padding-inline: 4px; background: none; color: var(--hig-label-2); font-weight: 400; }
+[data-hig-mode="aa"] .hig-row .hig-popup { color: var(--hig-accent-text); }
+
+/* ── Native select styled as a field ── <div class="hig-select"><select>…</select></div> */
+.hig-select { position: relative; display: grid; }
+.hig-select > select {
+  -webkit-appearance: none; appearance: none; min-height: 44px; width: 100%; margin: 0; padding: 0 40px 0 12px;
+  border: 0; border-radius: var(--hig-radius-field); background: var(--hig-fill-3); color: var(--hig-label); font: inherit; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--hig-control-border);
+}
+.hig-select > select:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--hig-focus-ring); }
+.hig-select::after { content: ""; position: absolute; right: 14px; top: 50%; width: 16px; height: 16px; translate: 0 -50%; pointer-events: none; background: var(--hig-label-2); -webkit-mask: var(--hig-i-updown) center / contain no-repeat; mask: var(--hig-i-updown) center / contain no-repeat; }
+
+/* ── Multiline text ── <div class="hig-input hig-input--multiline"><textarea rows="3"></textarea></div> */
+.hig-input--multiline { align-items: stretch; }
+.hig-input > textarea { resize: none; min-height: calc(3lh + 20px); max-height: calc(12lh + 20px); field-sizing: content; line-height: 1.35; }
+.hig-field__count { font: var(--hig-text-footnote); color: var(--hig-label-2); text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
+
+/* ── Compact date / time picker (iOS "compact" style: a capsule showing the value) ── */
+.hig-date {
+  -webkit-appearance: none; appearance: none; min-height: 36px; padding: 0 12px; margin: 0; border: 0; border-radius: 999px;
+  background: var(--hig-fill-3); color: var(--hig-label); font: 400 1.0625rem/1 var(--hig-font-sans); font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px var(--hig-control-border); color-scheme: light dark; cursor: pointer; min-width: 0; max-width: 100%;
+}
+.hig-date:focus { outline: none; color: var(--hig-accent-text); box-shadow: 0 0 0 2px var(--hig-focus-ring); }
+.hig-date::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; margin-left: 6px; }
+.hig-date::-webkit-datetime-edit { padding: 0; }
+
+/* ── Token field (comma or Return turns text into a token) ──
+   <div class="hig-input hig-tokens" data-hig-tokens><span class="hig-token">Robotics<button class="hig-token__remove" aria-label="Remove Robotics"></button></span><input></div> */
+.hig-tokens { flex-wrap: wrap; gap: 6px; padding: 6px 8px; cursor: text; }
+.hig-tokens > input { min-width: 8ch; padding: 4px 4px; }
+.hig-token {
+  display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 4px 0 12px; border-radius: 999px;
+  background: var(--hig-fill-2); color: var(--hig-label); font: 500 .9375rem/1 var(--hig-font-sans); white-space: nowrap;
+}
+[data-hig-mode="aa"] .hig-token { box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-token__remove { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--hig-label-2); cursor: pointer; display: grid; place-items: center; }
+.hig-token__remove::before { content: ""; width: 10px; height: 10px; background: currentColor; clip-path: polygon(20% 0, 50% 30%, 80% 0, 100% 20%, 70% 50%, 100% 80%, 80% 100%, 50% 70%, 20% 100%, 0 80%, 30% 50%, 0 20%); }
+.hig-token__remove:hover { background: var(--hig-fill-3); }
+.hig-token__remove:focus-visible { outline: 2px solid var(--hig-focus-ring); outline-offset: 0; }
+
+/* ── Sidebar (floats in the glass layer; more opaque glass) ──
+   <nav class="hig-glass hig-glass--large hig-sidebar" aria-label="…"><p class="hig-sidebar__heading">…</p>
+     <a class="hig-sidebar__item" aria-current="page"><svg class="hig-icon"/>All</a>… </nav> */
+.hig-sidebar { --pad: 10px; display: flex; flex-direction: column; gap: 2px; padding: var(--pad); border-radius: 26px; min-width: 0; overflow: auto; }
+.hig-sidebar__heading, .hig-sidebar__group > summary {
+  margin: 12px 10px 4px; font: 600 .8125rem/1.3 var(--hig-font-sans); color: var(--hig-label-2); list-style: none;
+}
+.hig-sidebar > .hig-sidebar__heading:first-child { margin-top: 4px; }
+.hig-sidebar__group { display: grid; gap: 2px; }
+.hig-sidebar__group > summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; min-height: 28px; margin-inline: 0; padding-inline: 10px; border-radius: calc(26px - var(--pad)); }
+.hig-sidebar__group > summary::-webkit-details-marker { display: none; }
+.hig-sidebar__group > summary::after { content: ""; width: 12px; height: 12px; background: currentColor; rotate: 90deg; transition: rotate .25s var(--hig-ease-out); -webkit-mask: var(--hig-i-chevron) center / contain no-repeat; mask: var(--hig-i-chevron) center / contain no-repeat; }
+.hig-sidebar__group:not([open]) > summary::after { rotate: 0deg; }
+.hig-sidebar__item {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border: 0; border-radius: calc(26px - var(--pad));
+  background: none; color: var(--hig-label); font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
+.hig-sidebar__item .hig-icon { color: var(--hig-accent-text); width: 22px; height: 22px; }
+.hig-sidebar__item:hover { background: var(--hig-fill-4); }
+.hig-sidebar__item[aria-current="page"], .hig-sidebar__item[aria-current="true"], .hig-sidebar__item[aria-selected="true"] { background: var(--hig-fill-2); font-weight: 600; }
+[data-hig-mode="aa"] .hig-sidebar__item:is([aria-current="page"], [aria-current="true"], [aria-selected="true"]) { box-shadow: inset 0 0 0 1.5px var(--hig-control-border); }
+.hig-sidebar__item:focus-visible, .hig-sidebar__group > summary:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--hig-focus-ring); }
+.hig-sidebar__count { margin-left: auto; color: var(--hig-label-2); font-variant-numeric: tabular-nums; font-weight: 400; }
+@media (pointer: fine) and (min-width: 900px) { .hig-sidebar__item { min-height: 32px; } .hig-sidebar__item .hig-icon { width: 18px; height: 18px; } }
+
+/* ── Split view (stacks in compact width) ──
+   <div class="hig-split"><div class="hig-split__layout"><nav class="hig-sidebar">…</nav><div class="hig-split__detail">…</div></div></div> */
+.hig-split { container: hig-split / inline-size; }
+.hig-split__layout { display: grid; gap: 12px; min-height: 0; }
+.hig-split__list { display: grid; align-content: start; min-width: 0; }
+.hig-split__detail { min-width: 0; }
+@container hig-split (min-width: 560px) {
+  .hig-split__layout { grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); }
+}
+@container hig-split (min-width: 860px) {
+  .hig-split--three .hig-split__layout { grid-template-columns: minmax(180px, 220px) minmax(220px, 300px) minmax(0, 1fr); gap: 0; }
+  .hig-split--three .hig-split__list { border-right: 1px solid var(--hig-sep); padding-inline: 12px; }
+  .hig-split--three .hig-split__detail { padding-left: 20px; }
+}
+
+/* ── Page control + paged scroller ──
+   <div class="hig-pager" id="p" tabindex="0"><div class="hig-pager__page">…</div>…</div>
+   <div class="hig-page-control" data-hig-pager="p"></div>   (dots are generated) */
+.hig-pager { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; border-radius: var(--hig-radius-card); }
+.hig-pager::-webkit-scrollbar { display: none; }
+.hig-pager__page { scroll-snap-align: start; scroll-snap-stop: always; min-width: 0; }
+.hig-page-control { display: flex; justify-content: center; width: fit-content; margin-inline: auto; padding: 0 4px; border-radius: 999px; transition: background-color .2s; }
+.hig-page-control:hover, .hig-page-control:focus-within { background: var(--hig-fill-4); }
+.hig-page-control--prominent { background: var(--hig-fill-3); }
+.hig-page-control > button { width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; display: grid; place-items: center; }
+.hig-page-control > button::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: var(--hig-label-3); transition: width .3s var(--hig-ease-spring), background-color .2s; }
+[data-hig-mode="aa"] .hig-page-control > button::before { background: var(--hig-control-border); }
+.hig-page-control > button[aria-current="true"]::before { background: var(--hig-label); }
+[data-hig-mode="aa"] .hig-page-control > button[aria-current="true"]::before { width: 18px; } /* not colour alone */
+.hig-page-control > button:focus-visible { outline: none; }
+.hig-page-control > button:focus-visible::before { box-shadow: 0 0 0 2px var(--hig-bg), 0 0 0 4px var(--hig-focus-ring); }
+
+/* ── Disclosure (points trailing when collapsed, down when expanded) ──
+   <details class="hig-disclosure"><summary>Advanced Options</summary><div class="hig-disclosure__body">…</div></details> */
+.hig-disclosure > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; list-style: none; color: var(--hig-label); }
+.hig-disclosure > summary::-webkit-details-marker { display: none; }
+.hig-disclosure > summary::after { content: ""; margin-left: auto; width: 14px; height: 14px; flex: none; background: var(--hig-accent-text); transition: rotate .3s var(--hig-ease-out); -webkit-mask: var(--hig-i-chevron) center / contain no-repeat; mask: var(--hig-i-chevron) center / contain no-repeat; }
+.hig-disclosure[open] > summary::after { rotate: 90deg; }
+.hig-disclosure > summary:focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: 2px; border-radius: 8px; }
+.hig-disclosure__body { padding: 4px 0 12px; }
+.hig-disclosure::details-content { block-size: 0; overflow: clip; transition: block-size .35s var(--hig-ease-out), content-visibility .35s allow-discrete; }
+.hig-disclosure[open]::details-content { block-size: auto; }
+@supports (interpolate-size: allow-keywords) { .hig-disclosure { interpolate-size: allow-keywords; } }
+.hig-list > .hig-disclosure { position: relative; }
+.hig-list > .hig-disclosure > summary { min-height: 52px; padding: 8px 16px; }
+.hig-list > .hig-disclosure > .hig-disclosure__body { padding: 0 16px 12px; }
+.hig-list > :is(.hig-row, .hig-disclosure) + .hig-disclosure::before,
+.hig-list > .hig-disclosure + .hig-row::before { content: ""; position: absolute; top: 0; right: 0; left: 16px; border-top: .5px solid var(--hig-sep); }
+
+/* ── Scope bar / filter chips ──
+   Exclusive: <div class="hig-scope" role="radiogroup"><button class="hig-chip" role="radio" aria-checked="true">All</button>…</div>
+   Independent filters: <button class="hig-chip" aria-pressed="false">Unread</button> */
+.hig-scope { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; margin: -2px; }
+.hig-scope::-webkit-scrollbar { display: none; }
+.hig-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: var(--hig-fill-3); color: var(--hig-label); font: 500 .9375rem/1 var(--hig-font-sans); cursor: pointer; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--hig-control-border); transition: background-color .2s, color .2s;
+}
+.hig-chip:is([aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]) { background: var(--hig-label); color: var(--hig-bg); box-shadow: none; font-weight: 600; }
+.hig-chip:focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: 2px; }
+.hig-chip .hig-icon { width: 16px; height: 16px; }
+
+/* ── Path control / breadcrumbs (window body, never a toolbar) ── */
+.hig-path > ol { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; min-width: 0; font: var(--hig-text-subhead); }
+.hig-path li { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; }
+.hig-path li:last-child { flex: none; color: var(--hig-label); font-weight: 600; }
+.hig-path li + li::before { content: ""; width: 12px; height: 12px; margin: 0 6px; flex: none; background: var(--hig-label-3); -webkit-mask: var(--hig-i-chevron) center / contain no-repeat; mask: var(--hig-i-chevron) center / contain no-repeat; }
+[data-hig-mode="aa"] .hig-path li + li::before { background: var(--hig-label-2); }
+.hig-path a { color: var(--hig-label-2); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 2px; border-radius: 6px; }
+.hig-path a:hover { color: var(--hig-label); text-decoration: underline; }
+.hig-path a:focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: 0; }
+
+/* ── Activity indicator (CSS only; 8 fading spokes) ── <span class="hig-activity" role="progressbar" aria-label="Loading"></span> */
+.hig-activity {
+  --size: 20px; width: var(--size); height: var(--size); display: inline-block; flex: none; vertical-align: middle; color: var(--hig-label-2);
+  background: conic-gradient(from 22.5deg, transparent 12%, currentColor);
+  -webkit-mask: repeating-conic-gradient(from -5deg, #000 0 10deg, transparent 10deg 45deg), radial-gradient(closest-side, transparent 42%, #000 44% 97%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask: repeating-conic-gradient(from -5deg, #000 0 10deg, transparent 10deg 45deg) intersect, radial-gradient(closest-side, transparent 42%, #000 44% 97%, transparent 100%);
+  animation: hig-activity .8s steps(8) infinite;
+}
+.hig-activity--lg { --size: 36px; }
+@keyframes hig-activity { to { rotate: 1turn; } }
+
+/* ── Determinate circular progress ── <div class="hig-progress-ring" role="progressbar" aria-valuenow="40" style="--value:40%"></div> */
+.hig-progress-ring {
+  --size: 28px; --track: 3.5px; width: var(--size); height: var(--size); flex: none; border-radius: 50%; display: inline-block;
+  background: conic-gradient(var(--hig-accent) var(--value, 0%), var(--hig-fill) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track)));
+          mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track)));
+}
+.hig-progress-ring--label { --size: 44px; --track: 4px; position: relative; display: inline-grid; place-items: center; -webkit-mask: none; mask: none; background: none; }
+.hig-progress-ring--label::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--hig-accent) var(--value, 0%), var(--hig-fill) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track))); mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track))); }
+[data-hig-mode="aa"] .hig-progress-ring.hig-progress-ring--label { background: none; }
+[data-hig-mode="aa"] .hig-progress-ring--label::before { background: conic-gradient(var(--hig-accent) var(--value, 0%), var(--hig-control-border) 0); }
+.hig-progress-ring--label > span { font: 600 .6875rem/1 var(--hig-font-sans); font-variant-numeric: tabular-nums; }
+/* stop button inside a ring (App Store download style) */
+.hig-progress-ring--stop > span { width: 10px; height: 10px; border-radius: 2px; background: var(--hig-accent); }
+[data-hig-mode="aa"] .hig-progress-ring { background: conic-gradient(var(--hig-accent) var(--value, 0%), var(--hig-control-border) 0); }
+
+/* ── Gauges ──
+   Circular capacity gauge: <div class="hig-gauge" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="72" style="--value:72">
+     <span class="hig-gauge__value">72</span><span class="hig-gauge__min">0</span><span class="hig-gauge__max">100</span></div>
+   Linear gauge with an indicator: <div class="hig-gauge-bar" role="meter" … style="--value:35"></div> */
+.hig-gauge { --size: 72px; --track: 7px; --color: var(--hig-accent); position: relative; width: var(--size); height: var(--size); display: inline-grid; place-items: center; flex: none; }
+.hig-gauge::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 225deg, var(--color) calc(var(--value, 0) * 2.7deg), var(--hig-fill) 0 270deg, transparent 0);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track)));
+          mask: radial-gradient(closest-side, transparent calc(100% - var(--track) - .5px), #000 calc(100% - var(--track)));
+}
+[data-hig-mode="aa"] .hig-gauge::before { background: conic-gradient(from 225deg, var(--color) calc(var(--value, 0) * 2.7deg), var(--hig-control-border) 0 270deg, transparent 0); }
+.hig-gauge__value { font: 600 1.25rem/1 var(--hig-font-rounded); font-variant-numeric: tabular-nums; }
+.hig-gauge__value small { font-size: .6em; font-weight: 600; color: var(--hig-label-2); margin-left: 1px; }
+/* endpoint labels sit just below the two ends of the 270° arc */
+.hig-gauge__min, .hig-gauge__max { position: absolute; top: calc(85.4% + 2px); translate: -50% 0; font: 600 .6875rem/1 var(--hig-font-sans); color: var(--hig-label-2); font-variant-numeric: tabular-nums; }
+.hig-gauge__min { left: 14.6%; } .hig-gauge__max { left: 85.4%; }
+.hig-gauge--sm { --size: 52px; --track: 5px; } .hig-gauge--sm .hig-gauge__value { font-size: 1rem; }
+.hig-gauge--lg { --size: 104px; --track: 9px; } .hig-gauge--lg .hig-gauge__value { font-size: 1.75rem; }
+/* a gauge with its caption: <figure class="hig-gauge-item"><div class="hig-gauge">…</div><figcaption>Attendance</figcaption></figure> */
+.hig-gauge-item { margin: 0; display: grid; justify-items: center; gap: 14px; text-align: center; }
+.hig-gauge-item > figcaption { font: var(--hig-text-footnote); color: var(--hig-label-2); }
+.hig-gauge-item > figcaption b { display: block; font: var(--hig-text-subhead); font-weight: 600; color: var(--hig-label); }
+.hig-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 20px 12px; }
+.hig-gauge-bar { --color: var(--hig-accent); position: relative; height: 6px; border-radius: 999px; background: var(--hig-gauge-gradient, var(--hig-fill)); box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-gauge-bar::after {
+  content: ""; position: absolute; top: 50%; left: clamp(0px, calc(var(--value, 0) * 1% - 8px), calc(100% - 16px)); width: 16px; height: 16px; translate: 0 -50%;
+  border-radius: 50%; background: #fff; box-shadow: 0 0 0 1.5px var(--hig-control-border), 0 1px 4px rgb(0 0 0 / .3);
+}
+.hig-gauge-scale { display: flex; justify-content: space-between; margin-top: 8px; font: var(--hig-text-footnote); color: var(--hig-label-2); font-variant-numeric: tabular-nums; }
+.hig-gauge-bar--heat { --hig-gauge-gradient: linear-gradient(90deg, var(--hig-blue), var(--hig-green), var(--hig-yellow), var(--hig-orange), var(--hig-red)); }
+
+/* ── Rating indicator (whole stars only) ── <span class="hig-rating" role="img" aria-label="4 of 5 stars" style="--value:4"></span> */
+.hig-rating {
+  --size: 16px; display: inline-block; width: calc(var(--size) * 5); height: var(--size); color: var(--hig-label-2);
+  background: linear-gradient(90deg, currentColor calc(var(--value, 0) * 20%), var(--hig-fill) 0);
+  -webkit-mask: var(--hig-i-star) 0 0 / var(--size) var(--size) repeat-x; mask: var(--hig-i-star) 0 0 / var(--size) var(--size) repeat-x;
+}
+[data-hig-mode="aa"] .hig-rating { color: var(--hig-label); background: linear-gradient(90deg, currentColor calc(var(--value, 0) * 20%), var(--hig-control-border) 0); }
+
+/* ── Badge positioning & dot ── */
+.hig-badge-anchor { position: relative; display: inline-flex; }
+.hig-badge-anchor > .hig-badge { position: absolute; top: -2px; right: -4px; box-shadow: 0 0 0 2px var(--hig-bg); }
+.hig-badge--dot { min-width: 10px; width: 10px; height: 10px; padding: 0; }
+.hig-badge-anchor > .hig-badge--dot { top: 0; right: 0; }
+.hig-badge-anchor > .hig-avatar + .hig-badge { top: auto; bottom: 0; right: 0; }
+/* neutral count used inside list rows and sidebars (Mail-style), not red */
+.hig-count { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px; display: inline-grid; place-items: center; background: var(--hig-fill-3); color: var(--hig-label-2); font: 600 .8125rem/1 var(--hig-font-sans); font-variant-numeric: tabular-nums; }
+[data-hig-mode="aa"] .hig-count { color: var(--hig-label); }
+
+/* ── Popover (Popover API; becomes a bottom sheet in compact width) ──
+   <button popovertarget="p1">…</button>
+   <div class="hig-glass hig-glass--large hig-popover" id="p1" popover><span class="hig-popover__arrow"></span>…</div> */
+.hig-popover {
+  position: fixed; inset: auto; margin: 0; padding: 16px; border: 0; overflow: visible;
+  width: max-content; max-width: min(340px, calc(100vw - 16px)); border-radius: var(--hig-radius-lg); color: var(--hig-label);
+}
+.hig-popover:popover-open { animation: hig-popover-in .35s var(--hig-ease-spring) both; }
+@keyframes hig-popover-in { from { opacity: 0; scale: .85; } }
+.hig-popover > .hig-popover__arrow {
+  position: absolute; z-index: 0; top: -10px; left: var(--arrow-x, 50%); width: 24px; height: 10px; translate: -50% 0;
+  background: var(--hig-glass-tint-large); clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  -webkit-backdrop-filter: blur(var(--hig-glass-blur-large)) saturate(180%); backdrop-filter: blur(var(--hig-glass-blur-large)) saturate(180%);
+}
+.hig-popover.is-above > .hig-popover__arrow { top: auto; bottom: -10px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.hig-popover__title { margin: 0 0 6px; font: var(--hig-text-headline); }
+@media (max-width: 599px) {
+  .hig-popover { inset: auto 8px calc(env(safe-area-inset-bottom, 0px) + 8px) 8px !important; width: auto; max-width: none; border-radius: var(--hig-radius-window); padding: 20px; }
+  .hig-popover > .hig-popover__arrow { display: none; }
+  .hig-popover:popover-open { animation-name: hig-sheet-in; }
+}
+.hig-popover::backdrop { background: transparent; }
+@media (max-width: 599px) { .hig-popover::backdrop { background: var(--hig-scrim); } }
+
+/* ── Tooltip / help tag (pointer only; created by components.js from data-hig-tooltip) ── */
+.hig-tooltip {
+  position: fixed; z-index: 70; max-width: 260px; padding: 5px 9px; border-radius: 8px; pointer-events: auto;
+  background: var(--hig-bg-elevated); color: var(--hig-label); font: 400 .8125rem/1.3 var(--hig-font-sans);
+  box-shadow: 0 4px 16px var(--hig-glass-shadow-color), 0 0 0 .5px var(--hig-sep);
+  animation: hig-fade-in .15s var(--hig-ease-out) both;
+}
+[data-hig-mode="aa"] .hig-tooltip { box-shadow: 0 4px 16px var(--hig-glass-shadow-color), 0 0 0 1px var(--hig-control-border); }
+@keyframes hig-fade-in { from { opacity: 0; } }
+
+/* ── Empty state (ContentUnavailableView) ── */
+.hig-empty { display: grid; justify-items: center; gap: 6px; padding: 40px 24px; text-align: center; max-width: 420px; margin-inline: auto; }
+.hig-empty__icon { width: 52px; height: 52px; color: var(--hig-label-2); margin-bottom: 8px; stroke-width: 1.6; }
+.hig-empty__title { margin: 0; font: var(--hig-text-title-2); font-weight: 700; color: var(--hig-label); }
+.hig-empty__text { margin: 0; color: var(--hig-label-2); text-wrap: pretty; }
+.hig-empty > .hig-btn, .hig-empty__actions { margin-top: 14px; }
+
+/* ── Skeleton (placeholder shapes; container gets aria-busy="true") ── */
+.hig-skeleton { display: block; border-radius: 8px; background: var(--hig-fill-3); position: relative; overflow: hidden; }
+.hig-skeleton::after { content: ""; position: absolute; inset: 0; translate: -100% 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / .35), transparent); animation: hig-shimmer 1.6s ease-in-out infinite; }
+@media (prefers-color-scheme: dark) { :root:not([data-hig-scheme="light"]) .hig-skeleton::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / .07), transparent); } }
+:root[data-hig-scheme="dark"] .hig-skeleton::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / .07), transparent); }
+.hig-skeleton--text { height: .9em; margin: .25em 0; border-radius: 6px; }
+.hig-skeleton--title { height: 1.3em; width: 55%; border-radius: 7px; }
+.hig-skeleton--circle { border-radius: 50%; aspect-ratio: 1; }
+@keyframes hig-shimmer { to { translate: 100% 0; } }
+
+/* ── Notification banner (inline) and HUD toast (showToast()) ── */
+/* Solid by default (a preview inside content); add .hig-glass .hig-glass--large when it floats over the page. */
+.hig-banner { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; align-items: start; padding: 12px 14px; border-radius: var(--hig-radius-card); color: var(--hig-label); background: var(--hig-bg-elevated); box-shadow: 0 4px 20px var(--hig-glass-shadow-color), 0 0 0 .5px var(--hig-sep); }
+.hig-banner.hig-glass { box-shadow: var(--hig-glass-shadow), inset 0 1px 0 0 var(--hig-glass-rim), inset 0 0 0 .5px var(--hig-glass-rim-dim); }
+.hig-banner__icon { grid-row: span 2; width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; color: #fff; }
+.hig-banner__icon .hig-icon { width: 22px; height: 22px; }
+.hig-banner__title { font: var(--hig-text-subhead); font-weight: 600; }
+.hig-banner__time { font: var(--hig-text-footnote); color: var(--hig-label-2); }
+.hig-banner__text { grid-column: 2 / 4; font: var(--hig-text-subhead); color: var(--hig-label); }
+.hig-toast-region { position: fixed; z-index: 80; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + var(--hig-toast-offset, 12px)); display: grid; justify-items: center; gap: 8px; pointer-events: none; padding-inline: 16px; }
+.hig-toast { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 20px 8px 14px; border-radius: 999px; font: 600 .9375rem/1.25 var(--hig-font-sans); pointer-events: auto; max-width: min(420px, 100%); animation: hig-toast-in .5s var(--hig-ease-spring) both; }
+.hig-toast .hig-icon { width: 22px; height: 22px; color: var(--hig-accent-text); }
+.hig-toast.is-leaving { animation: hig-toast-out .3s var(--hig-ease-out) both; }
+@keyframes hig-toast-in { from { opacity: 0; translate: 0 -24px; scale: .9; } }
+@keyframes hig-toast-out { to { opacity: 0; translate: 0 -16px; scale: .95; } }
+
+/* ── Table (macOS style: sortable headers, alternating rows) ──
+   <div class="hig-table-wrap"><table class="hig-table"><thead><tr><th aria-sort="ascending"><button class="hig-table__sort">Name</button></th>… */
+.hig-table-wrap { overflow: auto; border-radius: var(--hig-radius-lg); background: var(--hig-grouped-bg-2); }
+[data-hig-mode="aa"] .hig-table-wrap { box-shadow: inset 0 0 0 1px var(--hig-control-border); }
+.hig-table { width: 100%; border-collapse: separate; border-spacing: 0; font: var(--hig-text-subhead); color: var(--hig-label); }
+.hig-table th { position: sticky; top: 0; z-index: 1; background: var(--hig-grouped-bg-2); padding: 10px 14px; text-align: left; font: var(--hig-text-footnote); font-weight: 600; color: var(--hig-label-2); white-space: nowrap; border-bottom: .5px solid var(--hig-sep); }
+.hig-table td { padding: 10px 14px; vertical-align: middle; }
+.hig-table tbody tr:nth-child(even) td { background: var(--hig-fill-4); }
+.hig-table tbody tr:hover td { background: var(--hig-fill-3); }
+.hig-table tr[aria-selected="true"] td { background: var(--hig-accent-fill); color: var(--hig-on-accent); }
+.hig-table :is(th, td).is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.hig-table__sort { all: unset; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; border-radius: 4px; }
+.hig-table__sort:focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: 2px; }
+.hig-table__sort::after { content: ""; width: 10px; height: 10px; background: currentColor; opacity: 0; rotate: 90deg; -webkit-mask: var(--hig-i-chevron) center / contain no-repeat; mask: var(--hig-i-chevron) center / contain no-repeat; transition: rotate .2s; }
+th[aria-sort] .hig-table__sort { color: var(--hig-label); }
+th[aria-sort] .hig-table__sort::after { opacity: 1; }
+th[aria-sort="ascending"] .hig-table__sort::after { rotate: -90deg; }
+@media (pointer: fine) and (min-width: 900px) { .hig-table td { padding-block: 6px; } .hig-table th { padding-block: 7px; } }
+
+/* ── Swipe actions on list rows (actions stay reachable by keyboard: focusing one reveals it) ──
+   <li class="hig-swipe"><div class="hig-swipe__actions"><button class="hig-swipe__action">Flag</button><button class="hig-swipe__action hig-swipe__action--destructive">Delete</button></div>
+     <div class="hig-row hig-swipe__content">…</div></li> */
+.hig-swipe { position: relative; overflow: hidden; list-style: none; }
+.hig-swipe + .hig-swipe::before { content: ""; position: absolute; z-index: 2; top: 0; right: 0; left: var(--hig-sep-inset, 16px); border-top: .5px solid var(--hig-sep); }
+.hig-swipe__actions { position: absolute; inset: 0 0 0 auto; display: flex; }
+.hig-swipe__action {
+  min-width: 76px; padding: 0 14px; border: 0; display: grid; place-content: center; justify-items: center; gap: 4px;
+  background: var(--action-bg, #636366); color: #fff; font: 500 .9375rem/1 var(--hig-font-sans); cursor: pointer;
+}
+.hig-swipe__action .hig-icon { width: 20px; height: 20px; }
+.hig-swipe__action--accent { --action-bg: var(--hig-accent-fill); color: var(--hig-on-accent); }
+.hig-swipe__action--destructive { --action-bg: var(--hig-destructive-fill); color: var(--hig-on-destructive); }
+.hig-swipe__action:focus-visible { outline: 3px solid #fff; outline-offset: -5px; }
+.hig-swipe__content { position: relative; z-index: 1; background: var(--hig-grouped-bg-2); translate: var(--x, 0) 0; touch-action: pan-y; user-select: none; }
+.hig-swipe:not(.is-dragging) .hig-swipe__content { transition: translate .45s var(--hig-ease-spring); }
+.hig-swipe.is-open .hig-swipe__content, .hig-swipe:has(.hig-swipe__action:focus-visible) .hig-swipe__content { translate: calc(-1 * var(--hig-swipe-w, 152px)) 0; }
+
+/* ── Context menu (right-click / long press; the item lifts, the page dims) ── */
+.hig-menu--context { position: fixed; top: 0; left: 0; transform-origin: var(--origin, top left); }
+.hig-context-scrim { position: fixed; inset: 0; z-index: 34; background: rgb(0 0 0 / .18); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: hig-fade-in .25s both; }
+.is-lifted { position: relative; z-index: 36; scale: 1.02; box-shadow: 0 12px 40px rgb(0 0 0 / .22); transition: scale .35s var(--hig-ease-spring), box-shadow .3s; }
+
+/* ── Avatar ── <span class="hig-avatar" aria-hidden="true">PP</span> · <img class="hig-avatar" alt="…"> */
+.hig-avatar {
+  --size: 40px; width: var(--size); height: var(--size); flex: none; border-radius: 50%; display: inline-grid; place-items: center; overflow: hidden; object-fit: cover;
+  background: linear-gradient(#a5abb8, #858994); color: #fff; font: 600 calc(var(--size) * .4)/1 var(--hig-font-rounded); letter-spacing: .02em; user-select: none;
+}
+[data-hig-mode="aa"] .hig-avatar { background: linear-gradient(#6e737d, #555960); }
+.hig-avatar--sm { --size: 28px; } .hig-avatar--lg { --size: 64px; } .hig-avatar--xl { --size: 96px; }
+.hig-avatar-stack { display: inline-flex; }
+.hig-avatar-stack > .hig-avatar { box-shadow: 0 0 0 2px var(--hig-ring, var(--hig-grouped-bg-2)); }
+.hig-avatar-stack > .hig-avatar + .hig-avatar { margin-left: calc(var(--size) * -.2); }
+
+/* ── Card & widget (content layer: solid, never glass) ── */
+.hig-card { background: var(--hig-grouped-bg-2); border-radius: var(--hig-radius-card); padding: 16px; display: grid; gap: 8px; align-content: start; color: var(--hig-label); }
+.hig-card__eyebrow { font: var(--hig-text-footnote); font-weight: 600; color: var(--hig-label-2); }
+.hig-card__title { margin: 0; font: var(--hig-text-headline); }
+.hig-card__text { margin: 0; font: var(--hig-text-subhead); color: var(--hig-label-2); }
+a.hig-card, button.hig-card { text-decoration: none; border: 0; text-align: left; font: inherit; cursor: pointer; transition: scale .3s var(--hig-ease-spring); }
+:is(a, button).hig-card:active { scale: .98; }
+.hig-widget { --pad: 16px; aspect-ratio: 1; padding: var(--pad); border-radius: 24px; background: var(--hig-grouped-bg-2); color: var(--hig-label); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.hig-widget--medium { aspect-ratio: 2.1; }
+.hig-widget--tinted { background: var(--hig-accent-fill); color: var(--hig-on-accent); --hig-label-2: color-mix(in srgb, var(--hig-on-accent) 85%, transparent); }
+.hig-widget__label { font: var(--hig-text-footnote); font-weight: 600; color: var(--hig-label-2); }
+.hig-widget__value { font: 700 2.125rem/1.1 var(--hig-font-rounded); font-variant-numeric: tabular-nums; margin-top: auto; }
+.hig-widget__caption { font: var(--hig-text-footnote); color: var(--hig-label-2); }
+.hig-widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+.hig-widgets > .hig-widget--medium { grid-column: span 2; }
+
+/* ── Image grid / collection ── */
+.hig-grid { --min: 96px; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--min), 1fr)); gap: 2px; margin: 0; padding: 0; list-style: none; }
+.hig-grid__item { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; overflow: hidden; background: var(--hig-fill-3); cursor: pointer; }
+.hig-grid__item > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hig-grid__item:focus-visible { outline: 3px solid var(--hig-focus-ring); outline-offset: -3px; z-index: 1; }
+.hig-grid__item[aria-pressed="true"]::after, .hig-grid__item[aria-selected="true"]::after {
+  content: ""; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--hig-accent-fill); box-shadow: 0 0 0 2px #fff;
+}
+.hig-grid__item[aria-pressed="true"]::before, .hig-grid__item[aria-selected="true"]::before {
+  content: ""; position: absolute; z-index: 1; right: 11px; bottom: 11px; width: 12px; height: 12px; background: #fff;
+  -webkit-mask: var(--hig-i-check) center / contain no-repeat; mask: var(--hig-i-check) center / contain no-repeat;
+}
+.hig-grid--cards { --min: 150px; gap: 16px; }
+.hig-grid--cards > .hig-grid__card { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.hig-grid--cards .hig-grid__item { border-radius: var(--hig-radius-md); aspect-ratio: 4 / 3; }
+.hig-grid__caption { font: var(--hig-text-subhead); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hig-grid__meta { font: var(--hig-text-footnote); color: var(--hig-label-2); margin-top: -4px; }
+
+/* ── Accent color picker (Settings → Accent Color, like macOS) ──
+   <div class="hig-swatches" role="radiogroup" aria-label="Accent color">
+     <button class="hig-swatch" role="radio" aria-checked="true" aria-label="Blue" style="--swatch:#0088ff"></button>… */
+.hig-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.hig-swatch {
+  width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; display: grid; place-items: center; position: relative; flex: none;
+}
+.hig-swatch::before { content: ""; width: 28px; height: 28px; border-radius: 50%; background: var(--swatch); box-shadow: inset 0 0 0 1px rgb(0 0 0 / .12); transition: scale .3s var(--hig-ease-spring); }
+.hig-swatch[aria-checked="true"]::before { box-shadow: 0 0 0 3px var(--hig-bg-elevated), 0 0 0 5px var(--swatch); }
+[data-hig-mode="aa"] .hig-swatch[aria-checked="true"]::before { box-shadow: 0 0 0 3px var(--hig-bg-elevated), 0 0 0 5px var(--hig-label); }
+.hig-swatch[aria-checked="true"]::after { content: ""; position: absolute; width: 12px; height: 12px; background: #fff; -webkit-mask: var(--hig-i-check) center / contain no-repeat; mask: var(--hig-i-check) center / contain no-repeat; }
+.hig-swatch:active::before { scale: .9; }
+.hig-swatch:focus-visible { outline: none; }
+.hig-swatch:focus-visible::before { outline: 3px solid var(--hig-focus-ring); outline-offset: 5px; }
+.hig-swatch--custom::before { background: conic-gradient(#ff383c, #ffcc00, #34c759, #00c3d0, #0088ff, #cb30e0, #ff383c); }
+.hig-swatch--custom > input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
+/* hidden attribute wins for the new pieces too */
+:where(.hig-tooltip, .hig-toast, .hig-swipe__actions, .hig-sidebar)[hidden] { display: none !important; }
+
+/* Reduced motion for the extended components */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-hig-motion="standard"]) .hig-activity { animation-duration: 1.6s; }
+  :root:not([data-hig-motion="standard"]) .hig-skeleton::after { animation: none; opacity: 0; }
+  :root:not([data-hig-motion="standard"]) :is(.hig-popover:popover-open, .hig-toast, .hig-toast.is-leaving) { animation: none; }
+  :root:not([data-hig-motion="standard"]) :is(.hig-swipe__content, .is-lifted) { transition: none; }
+  :root:not([data-hig-motion="standard"]) .hig-disclosure::details-content { transition: none; }
+}
+:root[data-hig-motion="reduce"] .hig-activity { animation-duration: 1.6s; }
+:root[data-hig-motion="reduce"] .hig-skeleton::after { animation: none; opacity: 0; }
+:root[data-hig-motion="reduce"] :is(.hig-popover:popover-open, .hig-toast, .hig-toast.is-leaving) { animation: none; }
+:root[data-hig-motion="reduce"] :is(.hig-swipe__content, .is-lifted) { transition: none; }
+:root[data-hig-motion="reduce"] .hig-disclosure::details-content { transition: none; }
+
+/* Reduce Transparency / Increase Contrast: solid sidebar, popover and toast */
+:root[data-hig-transparency="reduce"] .hig-popover > .hig-popover__arrow, :root[data-hig-contrast="more"] .hig-popover > .hig-popover__arrow { background: var(--hig-bg-elevated); -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  :root:not([data-hig-transparency="standard"]) .hig-popover > .hig-popover__arrow { background: var(--hig-bg-elevated); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root:not([data-hig-transparency="standard"]) .hig-context-scrim { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--hig-scrim); }
+}
+:root[data-hig-transparency="reduce"] .hig-context-scrim { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--hig-scrim); }
+
+@media (forced-colors: active) {
+  .hig-checkbox, .hig-radio, .hig-chip, .hig-token, .hig-page-control > button::before { border: 1px solid CanvasText; }
+  :is(.hig-checkbox, .hig-radio):is(:checked, :indeterminate) { background: Highlight; }
+  .hig-checkbox::before, .hig-radio::before { background: HighlightText; }
+  .hig-page-control > button[aria-current="true"]::before { background: CanvasText; }
+  .hig-activity, .hig-progress-ring, .hig-gauge::before, .hig-rating { forced-color-adjust: none; }
+}
