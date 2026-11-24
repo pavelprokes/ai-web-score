@@ -1017,13 +1017,13 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const { RescheduleJob } = await import("@/jobs/queue");
     const db = getDb();
     const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
-    // A domain without a profile: saving its answer throws an ordinary (not a data) error.
+    // A domain without a profile: saving its answer throws an ordinary (not a data) error every time.
     const [bare] = await db.insert(s.domains).values({ hostname: "unsaved-answer.example" }).returning();
     const [version] = await db.select().from(s.promptVersions).limit(1);
     const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
-    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 3 }).returning();
-    const t0 = Date.now() - 3600_000;
-    const row = (id: string, domainId: string, minutes: number) => ({
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL", plannedCount: 6 }).returning();
+    const days = (n: number) => new Date(Date.now() - n * 24 * 3600_000);
+    const row = (id: string, domainId: string, startedAt: Date, i: number) => ({
       id,
       runId: run!.id,
       domainId,
@@ -1031,59 +1031,76 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       configurationId: config!.id,
       providerId: "chatgpt-ui",
       model: config!.model,
-      sampleIndex: 300 + minutes,
+      sampleIndex: 300 + i,
       status: "SUBMITTED" as const,
       externalTaskId: `task-${id}`,
       attempts: 1,
-      startedAt: new Date(t0 + minutes * 60_000),
+      startedAt,
       configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
     });
-    // Oldest first, as collectAsync reads them: the unsaveable one, then the one with a NUL (2026-11-19), then a plain one.
-    await db.insert(s.measurements).values([row("poison-a", bare!.id, 0), row("poison-b", demo!.id, 1), row("poison-c", demo!.id, 2)]);
-    const markdown: Record<string, string> = {
-      "task-poison-a": "Kódování pro děti vede kroužky.",
-      "task-poison-b": "Na online kroužcích\u0000 bývá 4 až 8 dětí; Kódování pro děti má skupiny po šesti.",
-      "task-poison-c": "Kódování pro děti je dobrá volba.",
-    };
+    // Oldest first, as collectAsync reads them. Like the production backlog, most are older than 48 h.
+    await db.insert(s.measurements).values([
+      // duration_ms does not fit an integer: Postgres rejects the value (22003), so no retry can save it.
+      row("save-data-error", demo!.id, new Date("1990-01-01T00:00:00Z"), 0),
+      row("save-no-profile", bare!.id, days(5), 1),
+      row("save-nul", demo!.id, days(5), 2), // 2026-11-19: a NUL in ChatGPT's answer
+      row("save-unchecked", demo!.id, days(4), 3), // the poll could not ask about it
+      row("save-lost", demo!.id, days(3), 4), // DataForSEO still says "in queue" after 3 days
+      row("save-plain", demo!.id, days(3), 5),
+    ]);
+    const markdown = (id: string) =>
+      id === "task-save-nul" ? "Na online kroužcích\u0000 bývá 4 až 8 dětí; Kódování pro děti má skupiny po šesti." : "Kódování pro děti je dobrá volba.";
     process.env.DATAFORSEO_LOGIN = "l";
     process.env.DATAFORSEO_PASSWORD = "p";
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string) => {
       const id = String(url).split("/").pop()!;
-      return new Response(
-        JSON.stringify({
-          status_code: 20000,
-          status_message: "Ok.",
-          tasks: [{ id, status_code: 20000, status_message: "Ok.", cost: 0, result: [{ model: "gpt-x", markdown: markdown[id], sources: [{ url: "https://a.example/\u0000" }], items: [] }] }],
-        }),
-      );
+      if (id === "task-save-unchecked") throw new TypeError("fetch failed");
+      const task =
+        id === "task-save-lost"
+          ? { id, status_code: 40602, status_message: "Task In Queue.", result: null }
+          : { id, status_code: 20000, status_message: "Ok.", cost: 0, result: [{ model: "gpt-x", markdown: markdown(id), sources: [{ url: "https://a.example/\u0000" }], items: [] }] };
+      return new Response(JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [task] }));
     }) as typeof fetch;
-    const status = async () =>
-      Object.fromEntries(
-        (await db.select().from(s.measurements).where(inArray(s.measurements.id, ["poison-a", "poison-b", "poison-c"]))).map((m) => [m.id, m]),
-      );
+    const ids = ["save-data-error", "save-no-profile", "save-nul", "save-unchecked", "save-lost", "save-plain"];
+    const rows = async () => Object.fromEntries((await db.select().from(s.measurements).where(inArray(s.measurements.id, ids))).map((m) => [m.id, m]));
+    const errorsOf = (m: { errors: unknown }) => JSON.stringify(m.errors);
     try {
-      // Before the fix the first answer's error ended the job and the two after it were never saved.
+      // Before the fix the first answer's error ended the job and nothing after it was saved.
       await expect(collectAsync("chatgpt-ui")).rejects.toBeInstanceOf(RescheduleJob);
-      let rows = await status();
-      expect(rows["poison-a"]!.status).toBe("SUBMITTED");
-      expect(rows["poison-b"]!.status).toBe("SUCCEEDED");
-      expect(rows["poison-c"]!.status).toBe("SUCCEEDED");
-      expect(rows["poison-b"]!.answerText).toBe("Na online kroužcích bývá 4 až 8 dětí; Kódování pro děti má skupiny po šesti.");
-      expect(JSON.stringify(rows["poison-b"]!.rawResponse)).not.toContain("\\u0000");
-      const [signal] = await db.select().from(s.measurementSignals).where(eq(s.measurementSignals.measurementId, "poison-b"));
+      let r = await rows();
+      expect(r["save-data-error"]!.status).toBe("FAILED");
+      expect(errorsOf(r["save-data-error"]!)).toMatch(/Could not save the answer: .*\[22003\]/);
+      expect(r["save-data-error"]!.attempts).toBe(1);
+      expect(r["save-no-profile"]!.status).toBe("SUBMITTED"); // an ordinary error is tried again, whatever its age
+      expect(r["save-nul"]!.status).toBe("SUCCEEDED");
+      expect(r["save-nul"]!.answerText).toBe("Na online kroužcích bývá 4 až 8 dětí; Kódování pro děti má skupiny po šesti.");
+      expect(JSON.stringify(r["save-nul"]!.rawResponse)).not.toContain("\\u0000");
+      const [signal] = await db.select().from(s.measurementSignals).where(eq(s.measurementSignals.measurementId, "save-nul"));
       expect(signal?.brandMentioned).toBe(true);
+      expect(r["save-unchecked"]!.status).toBe("SUBMITTED"); // not asked: no proof it is lost
+      expect(r["save-lost"]!.status).toBe("FAILED"); // the provider says unfinished after 48 h
+      expect(errorsOf(r["save-lost"]!)).toContain("Async result timed out");
+      expect(r["save-plain"]!.status).toBe("SUCCEEDED");
 
-      // Still failing after the 48 h bound: that answer fails for good, as a storage error.
-      await db.update(s.measurements).set({ startedAt: new Date(Date.now() - 49 * 3600_000) }).where(eq(s.measurements.id, "poison-a"));
-      await collectAsync("chatgpt-ui");
-      rows = await status();
-      expect(rows["poison-a"]!.status).toBe("FAILED");
-      expect(JSON.stringify(rows["poison-a"]!.errors)).toContain("Could not save the answer: Domain profile missing");
+      // The third failed save ends it, as the app's storage error, not the provider's.
+      await expect(collectAsync("chatgpt-ui")).rejects.toBeInstanceOf(RescheduleJob);
+      await expect(collectAsync("chatgpt-ui")).rejects.toBeInstanceOf(RescheduleJob);
+      r = await rows();
+      expect(r["save-no-profile"]!.status).toBe("FAILED");
+      expect((r["save-no-profile"]!.errors as Array<{ message: string }>).map((e) => e.message)).toEqual([
+        "Could not save the answer: Domain profile missing",
+        "Could not save the answer: Domain profile missing",
+        "Could not save the answer: Domain profile missing",
+      ]);
+      const { classifyProviderError } = await import("@/core/measurement/provider");
+      expect(classifyProviderError("Could not save the answer: Domain profile missing")).toBe("STORAGE");
+      expect(r["save-unchecked"]!.status).toBe("SUBMITTED");
     } finally {
       globalThis.fetch = realFetch;
       delete process.env.DATAFORSEO_LOGIN;
       delete process.env.DATAFORSEO_PASSWORD;
+      await db.update(s.measurements).set({ status: "CANCELLED" }).where(eq(s.measurements.id, "save-unchecked"));
       await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
     }
   });

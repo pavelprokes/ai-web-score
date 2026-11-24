@@ -40,6 +40,11 @@ const KINDS: Record<ProviderErrorClass, { tone: Tone; label: string; text: strin
     label: "Timed out",
     text: "The provider did not answer in time. Nothing to do: the next run asks these questions again.",
   },
+  STORAGE: {
+    tone: "serious",
+    label: "Answer not saved",
+    text: "The provider answered, but the app could not save the answer (the provider is not at fault). This needs a code fix: pass on the details below.",
+  },
   OTHER: {
     tone: "neutral",
     label: "Other error",
