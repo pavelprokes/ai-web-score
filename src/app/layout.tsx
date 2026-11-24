@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import "hig-web-kit/hig.css";
-import "hig-web-kit/components.css";
+import "../styles/hig-web-kit/hig.css";
+import "../styles/hig-web-kit/components.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
