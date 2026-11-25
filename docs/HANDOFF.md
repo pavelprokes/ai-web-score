@@ -96,6 +96,8 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #93 | Quiet-pace stopping-rule bias measured with the real cell state (−0.2 pp production-like) and pinned in `quiet-pace.test.ts` |
 | #94 | Recommendation diagnostics read rates per cell on geo-v3 domains (`cellRates`), with texts that say so |
 | #89 | Change markers: `change_events` (migration 0016), `src/core/changelog.ts` (backfilled history; **every change that can move numbers adds an entry**, CLAUDE.md), provider on/off and scoring switch recorded automatically, numbered dashed lines + list on the score chart, "Changes and notes" with a note form on the domain page |
+| #96 | Planner skips cells with a SCHEDULED / SUBMITTED answer from the last 14 days (any run); `spentThisMonth` counts posted async requests at the expected cost per sample |
+| #97 | "Needs your attention": an enabled assistant asked 6–48 h ago that saved no answer in 24 h (`silentProviders`); links to the error log or the runs |
 
 ## Next task
 
@@ -112,10 +114,10 @@ Keep this file current: update it at the end of each piece of work (state, merge
    prompts, reach weights (ChatGPT 0.72 vs ~0.55 market), a golden geo-v2 test.
 2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or
    `ANSWER_TEXT_RETENTION_DAYS`, or archiving answer text); photos domain (approve prompts or pause).
-3. **Follow-ups found in the ChatGPT incident:** the budget does not see the cost of submitted, uncollected async
-   answers (cost is written on save); the planner re-plans cells whose answers are still in flight (ChatGPT orders
-   rose 220 → 742/day while stuck); nothing alerts when a provider saves no answer for 24 h (prod:check has it but
-   is not run automatically) — candidate for "Needs your attention".
+3. **Follow-ups found in the ChatGPT incident: done** (#96, #97). Left: the budget forecast on the domain page still
+   ignores posted requests (the planner's budget counts them). ChatGPT was not ordered on svatebni-fotograf-cechy.cz
+   and vzdelanibudoucnosti.cz in the plans of 25 Nov 00:15/01:00 because the backlog had just been saved (0.9-day
+   minimum interval); check that the next cycle orders it again.
 4. vzdelanibudoucnosti.cz mention rate fell 47 % → 31 % between 10 and 24 Nov (matcher revision 2, Gemini added,
    ChatGPT gap all fall in it): read it again once the 28-day window holds only data after 24 Nov.
 
