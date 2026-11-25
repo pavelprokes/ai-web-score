@@ -1,6 +1,6 @@
 # Handoff — state of work and how to continue
 
-Read this first in a new session. Last updated 2026-11-13.
+Read this first in a new session. Last updated 2026-11-25.
 
 ## How to continue in a new session
 
@@ -88,8 +88,32 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #68 | Reports from stored signals: "Who AI names instead" (brand among tracked competitors), "Your pages AI cites" and the top pages per third-party site, "What assistants search for" (fan-out queries per topic), answer viewer filtered by prompt |
 | #70 | Team review and phased plan (`docs/meetings/2026-11-12-…`); scoring `geo-v3`, opt-in, no domain switched (one weight per prompt × assistant, intervals over prompts, no floor); quiet cells re-measured weekly under geo-v3 only; Perplexity one sample per cycle; prior mean 0.13; cost simulation knobs `FAKE_SILENT_CELL_SHARE`, `SIMULATE_SCORING_VERSION` |
 | #71 | Metric labels ("Named when asked by name", "Re-check every", "Certainty"), actionable "Not enough data"; `pnpm prod:check`; domain action `reextract-signals`; ROADMAP by phases |
+| #86 | **ChatGPT answers were not saved 19–24 Nov** (2,803 stuck SUBMITTED): one answer carried U+0000, jsonb refused it and the oldest-first collect loop stopped at it every time. Provider results are cleaned (`src/db/pg-safe.ts`), each answer is saved on its own (STORAGE error class, 3 saves), tasks a poll did not ask about are not given up after 48 h, saving stops before the job budget, `last_error` leads with the cause. Backlog drained on production the same night |
+| #87 | hig-web-kit CSS vendored in `src/styles/hig-web-kit/`: `pnpm install` / `pnpm build` now work in cloud sessions |
+| #88 | Daily `maintenance.cleanup` job (03:00 UTC): raw payloads after `RAW_RESPONSE_RETENTION_DAYS` (default 7), old-extractor signal rows, jobs; optional `ANSWER_TEXT_RETENTION_DAYS` (off); DataForSEO markdown not stored twice; DB size recorded daily, /providers shows growth per day and days to the limit |
+| #89 | Change markers: `change_events` (migration 0016), `src/core/changelog.ts` (backfilled history; **every change that can move numbers adds an entry**, CLAUDE.md), provider on/off and scoring switch recorded automatically, numbered dashed lines + list on the score chart, "Changes and notes" with a note form on the domain page |
 
 ## Next task
+
+**2026-11-25 session (Supabase MCP connected, so production SQL works from a cloud session through it; it connects as
+`postgres` with write access — ask the owner to set the connector to read-only).** Done: #86–#89 above.
+
+1. **Switch vzdelanibudoucnosti.cz to geo-v3** (owner asked; ChatGPT backlog is drained, markers exist):
+   `PATCH /api/domains/ef5c983e-3c5c-403d-801c-f27fe5511649 {"scoringVersion":"geo-v3","changeReason":"…"}`.
+   Expected from the data of 2026-11-24: mention rate ≈ 20 % (geo-v2 shows 31–33 %), prompt-bootstrap interval
+   ≈ 15–26 %. Accept: within 0.5 pp of the SQL mean of per-prompt rates, interval within 20 % of the bootstrap. Then
+   svatebni-fotograf-cechy.cz a week later, se-vezmou.cz after (Overall < 10 or "Not enough data" expected), photos
+   only after its portfolio is restored (4 active prompts of 62). Never switch back.
+2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or
+   `ANSWER_TEXT_RETENTION_DAYS`, or archiving answer text); photos domain (approve prompts or pause).
+3. **Follow-ups found in the ChatGPT incident:** the budget does not see the cost of submitted, uncollected async
+   answers (cost is written on save); the planner re-plans cells whose answers are still in flight (ChatGPT orders
+   rose 220 → 742/day while stuck); nothing alerts when a provider saves no answer for 24 h (prod:check has it but
+   is not run automatically) — candidate for "Needs your attention".
+4. vzdelanibudoucnosti.cz mention rate fell 47 % → 31 % between 10 and 24 Nov (matcher revision 2, Gemini added,
+   ChatGPT gap all fall in it): read it again once the 28-day window holds only data after 24 Nov.
+
+Earlier next task (2026-11-13):
 
 **2026-11-13: claude-seo review** (`docs/meetings/2026-11-13-claude-seo-review-plan.md`, #74, phase A merged as #75)
 and the team meeting on phases B and C (`docs/meetings/2026-11-13-phases-b-c-team.md`, #76). C1 source types is in
