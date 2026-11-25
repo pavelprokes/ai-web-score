@@ -18,7 +18,7 @@ import type { ProviderConfigurationSeed } from "@/core/measurement/provider";
 import type { PromptRole } from "@/core/prompt";
 import { type CellState, confidence, initialCellState } from "@/core/sampling/cell-state";
 import { cycleBudget, DEFAULT_PLAN_OPTIONS, type PlanCell, planCycle, quietPaceSuspended, slowsQuietCells } from "@/core/sampling/planner";
-import { expectedCostPerSample } from "@/core/pricing/cost";
+import { configurationCost, type ConfigurationCost, postedRequestCost } from "./costs";
 import { enqueue } from "@/jobs/queue";
 
 /**
@@ -91,41 +91,19 @@ export async function liveCells(domainId: string, now = new Date()) {
  * cost is written when it is saved, so without them a provider whose results stop arriving looks free and the
  * planner keeps ordering (ChatGPT, 19–24 Nov 2026: orders rose from 220 to 742 a day while none came back).
  */
-export async function spentThisMonth(domainId: string, now = new Date(), inFlightCost?: (configurationId: string, providerId: string) => number) {
+export async function spentThisMonth(domainId: string, now = new Date(), inFlightCost?: ConfigurationCost) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const db = getDb();
   const [m] = await db
     .select({ s: sql<number>`coalesce(sum(${measurements.totalCostUsd}), 0)` })
     .from(measurements)
     .where(and(eq(measurements.domainId, domainId), gte(measurements.scheduledAt, start)));
-  let posted = 0;
-  if (inFlightCost) {
-    const rows = await db
-      .select({ configurationId: measurements.configurationId, providerId: measurements.providerId, n: sql<number>`count(*)::int` })
-      .from(measurements)
-      .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "SUBMITTED"), gte(measurements.scheduledAt, start)))
-      .groupBy(measurements.configurationId, measurements.providerId);
-    posted = rows.reduce((a, r) => a + Number(r.n) * inFlightCost(r.configurationId, r.providerId), 0);
-  }
+  const posted = inFlightCost ? await postedRequestCost(domainId, start, () => inFlightCost) : 0;
   const [l] = await db
     .select({ s: sql<number>`coalesce(sum(${llmUsage.costUsd}), 0)` })
     .from(llmUsage)
     .where(and(eq(llmUsage.domainId, domainId), gte(llmUsage.createdAt, start)));
   return Number(m?.s ?? 0) + Number(l?.s ?? 0) + posted;
-}
-
-async function observedCostByConfiguration(): Promise<Map<string, { avg: number; n: number }>> {
-  const since = new Date(Date.now() - 30 * 86_400_000);
-  const rows = await getDb()
-    .select({
-      id: measurements.configurationId,
-      avg: sql<number>`avg(${measurements.totalCostUsd})`,
-      n: sql<number>`count(*)::int`,
-    })
-    .from(measurements)
-    .where(and(eq(measurements.status, "SUCCEEDED"), gte(measurements.finishedAt, since)))
-    .groupBy(measurements.configurationId);
-  return new Map(rows.map((r) => [r.id, { avg: Number(r.avg), n: Number(r.n) }]));
 }
 
 /** A RUNNING run older than this is treated as stuck and no longer blocks new runs. */
@@ -183,17 +161,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
 
   const states = await db.select().from(cellStates).where(eq(cellStates.domainId, domainId));
   const stateOf = new Map(states.map((s) => [`${s.promptVersionId}|${s.configurationId}`, s.state as CellState]));
-  const observed = await observedCostByConfiguration();
-  const costOfConfig = (configurationId: string, providerId: string) => {
-    let est = 0;
-    try {
-      est = getProvider(providerId).capability.estimatedCostPerMeasurement;
-    } catch {
-      // A provider removed from code: its observed average (if any) is all there is.
-    }
-    const o = observed.get(configurationId);
-    return expectedCostPerSample(o?.avg ?? null, o?.n ?? 0, est);
-  };
+  const costOfConfig = await configurationCost();
   const costOf = (c: ConfigRow) => costOfConfig(c.id, c.providerId);
 
   // A cell whose answer is still on its way (queued or posted, from any run) is not ordered again: its state has
