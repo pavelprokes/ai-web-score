@@ -1270,6 +1270,55 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.delete(s.domains).where(eq(s.domains.id, other!.id));
   });
 
+  it("does not order a cell again while its answer is on its way, and counts posted requests as spent", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { planMeasurements, spentThisMonth } = await import("@/services/planning");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    // No run in flight for the domain: the per-domain guard would otherwise stop planning before cells are chosen.
+    await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(and(eq(s.runs.domainId, demo!.id), eq(s.runs.status, "RUNNING")));
+    await db.update(s.domains).set({ status: "ACTIVE", monthlyBudgetUsd: 100 }).where(eq(s.domains.id, demo!.id));
+    const [mock] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.id, "mock:default"));
+    const active = await db
+      .select({ v: s.promptVersions })
+      .from(s.prompts)
+      .innerJoin(s.promptVersions, and(eq(s.promptVersions.promptId, s.prompts.id), eq(s.promptVersions.version, s.prompts.currentVersion)))
+      .where(and(eq(s.prompts.domainId, demo!.id), eq(s.prompts.status, "ACTIVE")));
+    const stuck = active[0]!.v;
+    const [oldRun] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "CRON", status: "FAILED" }).returning();
+    await db.insert(s.measurements).values({
+      id: "in-flight-1",
+      runId: oldRun!.id,
+      domainId: demo!.id,
+      promptVersionId: stuck.id,
+      configurationId: mock!.id,
+      providerId: "mock",
+      model: mock!.model,
+      sampleIndex: 900,
+      status: "SUBMITTED",
+      externalTaskId: "t-stuck",
+      startedAt: new Date(Date.now() - 3 * 86_400_000),
+      configuration: { id: mock!.id, model: mock!.model, params: {}, role: "STANDARD" },
+    });
+
+    const before = await spentThisMonth(demo!.id);
+    const withPosted = await spentThisMonth(demo!.id, new Date(), () => 0.25);
+    expect(withPosted - before).toBeCloseTo(0.25, 6);
+
+    // A manual run measures every core cell it can: the stuck one is still left out.
+    const planned0 = await planMeasurements(demo!.id, "MANUAL");
+    expect(planned0).not.toBeNull();
+    const newRunId = planned0!.runId;
+    const planned = await db.select().from(s.measurements).where(eq(s.measurements.runId, newRunId));
+    expect(planned.length).toBeGreaterThan(0);
+    expect(planned.some((m) => m.promptVersionId === stuck.id && m.configurationId === mock!.id && m.purpose === "STANDARD")).toBe(false);
+    expect(planned.some((m) => m.promptVersionId !== stuck.id && m.configurationId === mock!.id)).toBe(true);
+
+    await db.update(s.measurements).set({ status: "CANCELLED" }).where(inArray(s.measurements.runId, [newRunId, oldRun!.id]));
+    await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, newRunId));
+  });
+
   it("stops a provider for the run after one out-of-credit rejection, even after earlier answers", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
