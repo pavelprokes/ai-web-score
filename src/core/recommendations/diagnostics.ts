@@ -82,6 +82,12 @@ export interface DiagnosticsInput {
   hostLabels?: ReadonlyMap<string, HostLabel>;
   /** The latest weekly site check and the one before it (absent before the first check). */
   site?: { latest: SiteSnapshotData; previous: SiteSnapshotData | null };
+  /**
+   * Read rates per prompt × assistant cell, as the domain's scoring version does (`rules.cellWeights`, geo-v3): each
+   * cell counts once with its own rate. Pooled answers lean towards the cells the planner measures most, and under
+   * geo-v3 quiet cells are measured less often still. Counts (sources, untracked brands) stay counts.
+   */
+  cellRates?: boolean;
 }
 
 // ─── robots.txt ──────────────────────────────────────────────────────────────
@@ -105,9 +111,30 @@ function agentSeverity(a: AiAgent): number {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const rate = (xs: boolean[]) => (xs.length ? xs.filter(Boolean).length / xs.length : 0);
+/**
+ * Mean of `value` over the answers it applies to (null = does not apply). Pooled: every answer counts once. Per
+ * cell: each prompt × assistant cell counts once with the mean of its own answers.
+ */
+function meanOf(list: AnswerObservation[], value: (a: AnswerObservation) => number | null, cells: boolean): number | null {
+  const applies = list.filter((a) => value(a) !== null);
+  if (applies.length === 0) return null;
+  if (!cells) return applies.reduce((s, a) => s + value(a)!, 0) / applies.length;
+  const byCell = new Map<string, number[]>();
+  for (const a of applies) {
+    const key = `${a.providerId}|${a.promptId}`;
+    byCell.set(key, [...(byCell.get(key) ?? []), value(a)!]);
+  }
+  const means = [...byCell.values()].map((xs) => xs.reduce((s, x) => s + x, 0) / xs.length);
+  return means.reduce((s, x) => s + x, 0) / means.length;
+}
+/** How a rate was read, for the finding's text: per cell it is an average over questions, not a share of answers. */
+const basis = (answers: number, cells: boolean) => (cells ? `averaged per question and assistant over ${answers} answers` : `of ${answers} answers`);
+const rateOf = (list: AnswerObservation[], pick: (a: AnswerObservation) => boolean | null, cells: boolean) =>
+  meanOf(list, (a) => {
+    const v = pick(a);
+    return v === null ? null : v ? 1 : 0;
+  }, cells) ?? 0;
 const pct = (x: number) => `${Math.round(x * 100)} %`;
-const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
 function hostOf(domainOrUrl: string): string {
   try {
@@ -270,14 +297,14 @@ function structuredData({ digest, profile }: DiagnosticsInput): Finding[] {
   return out;
 }
 
-function topicGaps({ answers, clusters }: DiagnosticsInput): Finding[] {
+function topicGaps({ answers, clusters, cellRates = false }: DiagnosticsInput): Finding[] {
   const out: Finding[] = [];
   const byCluster = new Map<string, AnswerObservation[]>();
   for (const a of answers) byCluster.set(a.clusterKey, [...(byCluster.get(a.clusterKey) ?? []), a]);
   for (const [key, list] of byCluster) {
     if (list.length < MIN_ANSWERS) continue;
-    const mention = rate(list.map((a) => a.signals.brandMentioned));
-    const competitorShare = rate(list.map((a) => a.signals.competitorsMentioned.length > 0));
+    const mention = rateOf(list, (a) => a.signals.brandMentioned, cellRates);
+    const competitorShare = rateOf(list, (a) => a.signals.competitorsMentioned.length > 0, cellRates);
     if (mention >= 0.25 || competitorShare < 0.3) continue;
     const cluster = clusters.find((c) => c.key === key);
     const weight = cluster?.weight ?? 0.5;
@@ -289,7 +316,7 @@ function topicGaps({ answers, clusters }: DiagnosticsInput): Finding[] {
       category: "CONTENT",
       severity: Math.min(1, 0.35 + 0.5 * weight * (1 - mention)),
       title: `Missing from answers about "${name}"`,
-      detail: `Mentioned in ${pct(mention)} of ${list.length} answers on this topic, while competitors appear in ${pct(competitorShare)} (${competitors.map((c) => c.value).join(", ") || "—"}).`,
+      detail: `Mentioned in ${pct(mention)} ${basis(list.length, cellRates)} on this topic, while competitors appear in ${pct(competitorShare)} (${competitors.map((c) => c.value).join(", ") || "—"}).`,
       evidence: {
         cluster: name,
         answers: list.length,
@@ -381,11 +408,11 @@ function citationSources({ answers, profile, hostname, ignoredCompetitors, hostL
   ];
 }
 
-function mentionedNotCited({ answers, hostname }: DiagnosticsInput): Finding[] {
+function mentionedNotCited({ answers, hostname, cellRates = false }: DiagnosticsInput): Finding[] {
   const withSearch = answers.filter((a) => a.signals.searchWasUsed || a.signals.citedUrls.length > 0);
   const mentioned = withSearch.filter((a) => a.signals.brandMentioned);
   if (mentioned.length < MIN_ANSWERS) return [];
-  const cited = rate(mentioned.map((a) => a.signals.domainCited));
+  const cited = rateOf(mentioned, (a) => a.signals.domainCited, cellRates);
   if (cited >= 0.3) return [];
   return [
     {
@@ -393,7 +420,9 @@ function mentionedNotCited({ answers, hostname }: DiagnosticsInput): Finding[] {
       category: "CONTENT",
       severity: 0.5,
       title: "Mentioned, but your own pages are rarely the source",
-      detail: `${hostname} is cited in only ${pct(cited)} of the ${mentioned.length} searched answers that mention the brand; assistants describe you from other sites.`,
+      detail: cellRates
+        ? `${hostname} is cited in only ${pct(cited)} of the searched answers that mention the brand (averaged per question and assistant over ${mentioned.length} answers); assistants describe you from other sites.`
+        : `${hostname} is cited in only ${pct(cited)} of the ${mentioned.length} searched answers that mention the brand; assistants describe you from other sites.`,
       evidence: { mentionedAnswers: mentioned.length, citationRate: cited },
       metric: "citation-rate",
       action: {
@@ -409,10 +438,10 @@ function mentionedNotCited({ answers, hostname }: DiagnosticsInput): Finding[] {
   ];
 }
 
-function weakPosition({ answers }: DiagnosticsInput): Finding[] {
+function weakPosition({ answers, cellRates = false }: DiagnosticsInput): Finding[] {
   const positions = answers.map((a) => a.signals.recommendationPosition).filter((p): p is number => p !== null);
   if (positions.length < MIN_ANSWERS) return [];
-  const avg = mean(positions)!;
+  const avg = meanOf(answers, (a) => a.signals.recommendationPosition, cellRates)!;
   if (avg <= 3) return [];
   return [
     {
@@ -420,7 +449,7 @@ function weakPosition({ answers }: DiagnosticsInput): Finding[] {
       category: "COMPETITION",
       severity: 0.35,
       title: "Recommended, but far down the list",
-      detail: `When assistants list options, you appear at position ${avg.toFixed(1)} on average (${positions.length} lists).`,
+      detail: `When assistants list options, you appear at position ${avg.toFixed(1)} on average (${positions.length} lists${cellRates ? ", averaged per question and assistant" : ""}).`,
       evidence: { averagePosition: avg, lists: positions.length },
       metric: "average-position",
       action: {
@@ -435,7 +464,7 @@ function weakPosition({ answers }: DiagnosticsInput): Finding[] {
   ];
 }
 
-function accuracy({ answers, profile }: DiagnosticsInput): Finding[] {
+function accuracy({ answers, profile, cellRates = false }: DiagnosticsInput): Finding[] {
   const out: Finding[] = [];
   const fields: Array<{ field: "brandDescriptionAccuracy" | "productAccuracy" | "pricingAccuracy"; label: string; category: string }> = [
     { field: "brandDescriptionAccuracy", label: "who you are", category: "IDENTITY" },
@@ -445,7 +474,7 @@ function accuracy({ answers, profile }: DiagnosticsInput): Finding[] {
   for (const { field, label, category } of fields) {
     const values = answers.map((a) => a.signals[field]).filter((v): v is number => typeof v === "number");
     if (values.length < 3) continue;
-    const avg = mean(values)!;
+    const avg = meanOf(answers, (a) => (typeof a.signals[field] === "number" ? (a.signals[field] as number) : null), cellRates)!;
     if (avg >= 0.7) continue;
     const facts = profile.factSheet.filter((f) => f.category === category).map((f) => f.claim).slice(0, 5);
     out.push({
@@ -453,7 +482,7 @@ function accuracy({ answers, profile }: DiagnosticsInput): Finding[] {
       category: "ACCURACY",
       severity: 0.4 + (0.7 - avg),
       title: `Assistants get ${label} wrong`,
-      detail: `Answers agree with the fact sheet on ${label} only ${pct(avg)} of the time (${values.length} judged answers).`,
+      detail: `Answers agree with the fact sheet on ${label} only ${pct(avg)} of the time (${values.length} judged answers${cellRates ? ", averaged per question and assistant" : ""}).`,
       evidence: { field, averageAccuracy: avg, judgedAnswers: values.length, facts },
       metric: "accuracy",
       action: {
@@ -469,12 +498,12 @@ function accuracy({ answers, profile }: DiagnosticsInput): Finding[] {
   return out;
 }
 
-function sentiment({ answers }: DiagnosticsInput): Finding[] {
+function sentiment({ answers, cellRates = false }: DiagnosticsInput): Finding[] {
   const mentioned = answers.filter((a) => a.signals.brandMentioned);
   const values = mentioned.map((a) => a.signals.sentiment).filter((v): v is number => typeof v === "number");
   const discouraged = mentioned.filter((a) => a.signals.negativeRecommendation === true).length;
   if (values.length < 3) return [];
-  const avg = mean(values)!;
+  const avg = meanOf(mentioned, (a) => (typeof a.signals.sentiment === "number" ? a.signals.sentiment : null), cellRates)!;
   if (avg >= 0.1 && discouraged === 0) return [];
   return [
     {
@@ -532,10 +561,12 @@ export const PROVIDER_HINTS: Record<string, Array<{ step: string; source: string
   ],
 };
 
-function providerGaps({ answers, providerLabels }: DiagnosticsInput): Finding[] {
-  const byProvider = new Map<string, boolean[]>();
-  for (const a of answers) byProvider.set(a.providerId, [...(byProvider.get(a.providerId) ?? []), a.signals.brandMentioned]);
-  const rates = [...byProvider.entries()].filter(([, v]) => v.length >= MIN_ANSWERS + 1).map(([id, v]) => ({ id, rate: rate(v), n: v.length }));
+function providerGaps({ answers, providerLabels, cellRates = false }: DiagnosticsInput): Finding[] {
+  const byProvider = new Map<string, AnswerObservation[]>();
+  for (const a of answers) byProvider.set(a.providerId, [...(byProvider.get(a.providerId) ?? []), a]);
+  const rates = [...byProvider.entries()]
+    .filter(([, v]) => v.length >= MIN_ANSWERS + 1)
+    .map(([id, v]) => ({ id, rate: rateOf(v, (a) => a.signals.brandMentioned, cellRates), n: v.length }));
   if (rates.length < 2) return [];
   const best = rates.reduce((a, b) => (b.rate > a.rate ? b : a));
   return rates
@@ -547,7 +578,9 @@ function providerGaps({ answers, providerLabels }: DiagnosticsInput): Finding[] 
         category: "PROVIDER" as const,
         severity: Math.min(0.8, 0.3 + (best.rate - r.rate)),
         title: `Much weaker in ${label}`,
-        detail: `Mentioned in ${pct(r.rate)} of ${r.n} ${label} answers versus ${pct(best.rate)} in ${providerLabels?.[best.id] ?? best.id}.`,
+        detail: cellRates
+          ? `Mentioned in ${pct(r.rate)} of ${label} answers (averaged per question over ${r.n}) versus ${pct(best.rate)} in ${providerLabels?.[best.id] ?? best.id}.`
+          : `Mentioned in ${pct(r.rate)} of ${r.n} ${label} answers versus ${pct(best.rate)} in ${providerLabels?.[best.id] ?? best.id}.`,
         evidence: { provider: r.id, mentionRate: r.rate, answers: r.n, bestProvider: best.id, bestRate: best.rate, sources: (PROVIDER_HINTS[r.id] ?? []).map((h) => h.source) },
         metric: "mention-rate" as const,
         action: {

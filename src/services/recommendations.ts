@@ -1,3 +1,4 @@
+import { getScoringVersion } from "@/core/scoring/scoring";
 import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
@@ -87,6 +88,8 @@ async function collectFindings(domainId: string) {
     ignoredCompetitors: domain.ignoredCompetitors,
     hostLabels,
     site: snapshot ? { latest: snapshot, previous: confirmingSnapshot(snapshots) } : undefined,
+    // geo-v3 domains read diagnostic rates per cell, like their score.
+    cellRates: getScoringVersion(domain.scoringVersion).rules?.cellWeights === true,
   });
   return { domain, profile, answers, clusters, findings, siteCheckedAt: snapshot?.checkedAt ?? null };
 }
