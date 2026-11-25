@@ -89,7 +89,10 @@ next PR, before the second domain.
 - **Window.** The 2–4 week window matches the recommendation of "Don't Measure Once".
 
 **Where the definition is weaker than it looks.**
-1. **The quiet-cell pace biases rates down.** The pace is a stopping rule driven by the outcome. Stopping
+1. **The quiet-cell pace biases rates down.** *(Measured 2026-11-25 with the real cell state, pinned in
+   `src/core/scoring/quiet-pace.test.ts`: −0.2 pp on a production-like domain, −0.15 pp at ChatGPT's 3-day pace
+   and −0.7 pp at 7 days in a harsh world; intervals still cover. Smaller than the bound below, so no estimator
+   change.)* The pace is a stopping rule driven by the outcome. Stopping
    optimistically biases a sample mean up; stopping a cell after a run of zeros biases it down (Shin, Ramdas &
    Rinaldo 2019).
    - Bound: after eight empty answers, a further ChatGPT answer names the brand 3.1 % of the time (RESEARCH §7).

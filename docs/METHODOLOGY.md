@@ -193,6 +193,13 @@ switched back, and the diagnostics need the same per-cell reading before they qu
 With honest intervals "Not enough data" will show for domains whose prompts disagree a lot, until they have
 more prompts — the threshold stays ±10 points.
 
+The quiet pace is a stopping rule that depends on the outcome (a cell is slowed after a run of empty answers),
+which biases sample means down. `src/core/scoring/quiet-pace.test.ts` runs the real cell state and geo-v3 on a
+simulated portfolio and pins the effect: about −0.2 pp on a production-like domain, at most −1 pp when half the
+cells name the brand 2–6 % of the time, intervals still covering ≥ 90 %. That is a tenth of the interval, so the
+estimator reads each cell's answers as they are (no posterior shrinkage); a planner change that slows quiet
+cells further fails the test.
+
 ## 7. Calibration & optimization
 
 Shadow measurements run the reference (plus a replicate on half of the groups) and the candidate on the
