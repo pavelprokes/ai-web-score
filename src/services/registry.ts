@@ -1,3 +1,4 @@
+import { recordChange } from "./change-events";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { capabilityProfiles, priceEntries, providerConfigurations, providers } from "@/db/schema";
@@ -127,15 +128,29 @@ export class ProviderSetupError extends Error {}
 export async function updateProvider(
   id: string,
   change: { enabled?: boolean; reach?: number; configurations?: Record<string, { enabled: boolean }> },
+  by?: string,
 ) {
   const adapter = getProvider(id);
   const missing = missingEnv(adapter);
   if (change.enabled && missing.length) throw new ProviderSetupError(`Missing environment: ${missing.join(", ")}`);
   const db = getDb();
+  const [before] = await db.select({ enabled: providers.enabled }).from(providers).where(eq(providers.id, id));
   const patch: Partial<typeof providers.$inferInsert> = { updatedAt: new Date() };
   if (change.enabled !== undefined) patch.enabled = change.enabled;
   if (change.reach !== undefined) patch.reach = change.reach;
   await db.update(providers).set(patch).where(eq(providers.id, id));
+  // Switching an assistant on or off changes the combined score of every domain: a line on the charts.
+  if (change.enabled !== undefined && before && before.enabled !== change.enabled) {
+    await recordChange({
+      domainId: null,
+      kind: "PROVIDER",
+      title: `${adapter.label} ${change.enabled ? "switched on" : "switched off"}`,
+      why: change.enabled
+        ? "Its answers enter the combined score, phasing in over 7 days; compare each assistant's own line across this day."
+        : "Its answers stop; the combined score now rests on the other assistants, so it is not comparable across this day.",
+      createdBy: by ?? null,
+    });
+  }
   for (const [configId, c] of Object.entries(change.configurations ?? {})) {
     await db
       .update(providerConfigurations)

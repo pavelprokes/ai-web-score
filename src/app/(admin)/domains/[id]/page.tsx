@@ -23,6 +23,8 @@ import { ProviderErrors } from "@/components/ProviderErrors";
 import { recentProviderErrors } from "@/services/errors";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
+import { ChangeLog } from "@/components/ChangeLog";
+import { changesFor } from "@/services/change-events";
 import { attentionItems, opensSection, type AttentionItem } from "@/components/attention";
 import { num, pct, usd } from "@/components/format";
 import { Badge, BudgetMeter, DomainStatus, Rate, RunStatus, Score, Section, StatTile, TableScroll, TimeAgo, type Tone } from "@/components/ui";
@@ -56,7 +58,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus, changes] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus, changes, changeLog] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -70,6 +72,7 @@ export default async function DomainPage({
     lastSiteCheckAt(id),
     websiteFixStatus(id),
     recentSiteChanges(id),
+    changesFor(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -137,6 +140,7 @@ export default async function DomainPage({
       {history && history.domain.length > 0 && (
         <Section title="Score over time" id="trend-heading">
           <ScoreTrend
+            events={changeLog.map((e) => ({ at: e.at.toISOString(), title: e.title, why: e.why }))}
             combined={history.domain}
             providers={history.providers
               .map((p) => ({ ...p, label: providerLabel(p.id), slot: providerSlot(p.id) }))
@@ -144,6 +148,18 @@ export default async function DomainPage({
           />
         </Section>
       )}
+
+      <Section
+        title="Changes and notes"
+        id="changes-heading"
+        fold={{ summary: changeLog.length ? `${changeLog.length} recorded · latest ${changeLog[0]!.at.toISOString().slice(0, 10)}: ${changeLog[0]!.title}` : "None recorded" }}
+      >
+        <p className="note">
+          What changed in measuring this domain, why and when. Each entry is a numbered dashed line on the score chart, so a step in the trend can be
+          explained later. Add a note for changes outside this app too (a new page, a campaign, a site migration).
+        </p>
+        <ChangeLog domainId={d.id} events={changeLog} />
+      </Section>
 
       <Recommendations detail={detail} recs={recs} siteCheckedAt={siteCheck} fixStatus={fixStatus} returnTo={returnTo} busy={busyMap.get(d.id)} now={now} />
 

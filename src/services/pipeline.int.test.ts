@@ -1156,6 +1156,51 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     }
   });
 
+  it("records changes for the charts: code changelog synced once, provider switches, domain notes", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { syncChangelog, changesFor, recordChange, deleteNote } = await import("@/services/change-events");
+    const { updateProvider } = await import("@/services/registry");
+    const { CHANGELOG } = await import("@/core/changelog");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [other] = await db.insert(s.domains).values({ hostname: "other-changes.example" }).returning();
+
+    await syncChangelog();
+    await syncChangelog(); // a second deploy adds nothing
+    const synced = await db.select().from(s.changeEvents).where(sql`${s.changeEvents.key} like 'changelog:%'`);
+    expect(synced).toHaveLength(CHANGELOG.length);
+    expect(synced.every((e) => e.domainId === null)).toBe(true);
+
+    // Switching an assistant records one line for every domain; setting the same state again records nothing.
+    const [mock] = await db.select().from(s.providers).where(eq(s.providers.id, "mock"));
+    await updateProvider("mock", { enabled: !mock!.enabled }, "admin@example.test");
+    await updateProvider("mock", { enabled: !mock!.enabled }, "admin@example.test");
+    await updateProvider("mock", { enabled: mock!.enabled });
+    const switches = await db.select().from(s.changeEvents).where(eq(s.changeEvents.kind, "PROVIDER"));
+    expect(switches.filter((e) => e.key === null)).toHaveLength(2);
+
+    await recordChange({ domainId: demo!.id, kind: "NOTE", title: "New pricing page", why: "Expect more citations of /pricing." });
+    await recordChange({ domainId: other!.id, kind: "NOTE", title: "Other domain's note" });
+    await recordChange({ domainId: demo!.id, kind: "SCORING", title: "Scoring geo-v2 → geo-v3", key: "scoring:x" });
+    await recordChange({ domainId: demo!.id, kind: "SCORING", title: "Scoring geo-v2 → geo-v3", key: "scoring:x" }); // once
+    const log = await changesFor(demo!.id);
+    expect(log.map((e) => e.title)).toContain("New pricing page");
+    expect(log.map((e) => e.title)).not.toContain("Other domain's note");
+    expect(log.filter((e) => e.title === "Scoring geo-v2 → geo-v3")).toHaveLength(1);
+    expect(log.filter((e) => e.domainId === null).length).toBeGreaterThanOrEqual(CHANGELOG.length);
+    expect(log[0]!.at.getTime()).toBeGreaterThanOrEqual(log[log.length - 1]!.at.getTime()); // newest first
+
+    // Only a hand-written note of that domain can be deleted.
+    const note = log.find((e) => e.title === "New pricing page")!;
+    const scoring = log.find((e) => e.kind === "SCORING")!;
+    expect(note.note).toBe(true);
+    expect(await deleteNote(other!.id, note.id)).toBe(false);
+    expect(await deleteNote(demo!.id, scoring.id)).toBe(false);
+    expect(await deleteNote(demo!.id, note.id)).toBe(true);
+    await db.delete(s.domains).where(eq(s.domains.id, other!.id));
+  });
+
   it("stops a provider for the run after one out-of-credit rejection, even after earlier answers", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");

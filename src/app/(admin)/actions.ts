@@ -19,6 +19,7 @@ import { promoteConfiguration } from "@/services/optimizer";
 import { RecommendationNotFound, setRecommendationStatus } from "@/services/recommendations";
 import { InvalidBalanceError, setAccountBalance } from "@/services/accounts";
 import { CompetitorError, ignoreCompetitor, trackCompetitor, untrackCompetitor } from "@/services/competitors";
+import { deleteNote, recordChange } from "@/services/change-events";
 
 export interface AddDomainState {
   error?: string;
@@ -189,14 +190,14 @@ export async function domainAction(formData: FormData) {
 export type ProviderActionName = "enable" | "disable" | "promote";
 
 export async function providerAction(formData: FormData) {
-  await requireAdminAction();
+  const admin = await requireAdminAction();
   const providerId = String(formData.get("providerId"));
   const action = String(formData.get("action")) as ProviderActionName;
   let message: string;
   let failed = false;
   try {
     if (action === "enable" || action === "disable") {
-      await updateProvider(providerId, { enabled: action === "enable" });
+      await updateProvider(providerId, { enabled: action === "enable" }, admin);
       message = action === "enable" ? "Provider enabled." : "Provider disabled.";
     } else if (action === "promote") {
       await promoteConfiguration(String(formData.get("configurationId")));
@@ -256,4 +257,24 @@ export async function llmModelAction(formData: FormData) {
   }
   revalidatePath("/providers");
   redirect(`/providers?done=${encodeURIComponent("Models saved.")}#models-heading`);
+}
+
+/** A note in the domain's change log: shown as a dated line on its charts (what happened, why). */
+export async function domainNoteAction(formData: FormData) {
+  const admin = await requireAdminAction();
+  const id = String(formData.get("domainId"));
+  const back = `/domains/${id}`;
+  if (formData.get("action") === "delete") {
+    await deleteNote(id, String(formData.get("noteId")));
+    revalidatePath(back);
+    redirect(`${back}?done=${encodeURIComponent("Note deleted.")}#changes-heading`);
+  }
+  const title = String(formData.get("title") ?? "").trim();
+  const why = String(formData.get("why") ?? "").trim();
+  const day = String(formData.get("day") ?? "").trim();
+  const at = /^\d{4}-\d{2}-\d{2}$/.test(day) ? new Date(`${day}T12:00:00Z`) : new Date();
+  if (!title || Number.isNaN(at.getTime())) redirect(`${back}?error=${encodeURIComponent("Write what changed (and the day it happened).")}#changes-heading`);
+  await recordChange({ domainId: id, kind: "NOTE", title, why, at, createdBy: admin });
+  revalidatePath(back);
+  redirect(`${back}?done=${encodeURIComponent("Note added to the change log and the charts.")}#changes-heading`);
 }
