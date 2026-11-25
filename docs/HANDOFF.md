@@ -98,6 +98,7 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #89 | Change markers: `change_events` (migration 0016), `src/core/changelog.ts` (backfilled history; **every change that can move numbers adds an entry**, CLAUDE.md), provider on/off and scoring switch recorded automatically, numbered dashed lines + list on the score chart, "Changes and notes" with a note form on the domain page |
 | #96 | Planner skips cells with a SCHEDULED / SUBMITTED answer from the last 14 days (any run); `spentThisMonth` counts posted async requests at the expected cost per sample |
 | #97 | "Needs your attention": an enabled assistant asked 6–48 h ago that saved no answer in 24 h (`silentProviders`); links to the error log or the runs |
+| #99 | Budget forecast on the domain page counts posted, uncollected async requests (shared `postedRequestCost` / `configurationCost` in `costs.ts`, as the planner); golden test of geo-v2 (`geo-v2-golden.int.test.ts`, fixture written by the pre-#70 code, reproduced to 12 digits; rewrite with `GOLDEN_UPDATE=1` only together with a changelog entry) |
 
 ## Next task
 
@@ -111,11 +112,10 @@ Keep this file current: update it at the end of each piece of work (state, merge
    measurement spend) and that woken cells return to the normal pace; then switch svatebni-fotograf-cechy.cz (run
    the check SQL first), se-vezmou.cz after (Overall ≈ 0.5 expected), photos only after its portfolio is restored.
    Never switch back. Open from the review: protocol criterion wording, CR2 / wild bootstrap for topics with few
-   prompts, reach weights (ChatGPT 0.72 vs ~0.55 market), a golden geo-v2 test.
+   prompts, reach weights (ChatGPT 0.72 vs ~0.55 market). The golden geo-v2 test is done (#99).
 2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or
    `ANSWER_TEXT_RETENTION_DAYS`, or archiving answer text); photos domain (approve prompts or pause).
-3. **Follow-ups found in the ChatGPT incident: done** (#96, #97). Left: the budget forecast on the domain page still
-   ignores posted requests (the planner's budget counts them). ChatGPT was not ordered on svatebni-fotograf-cechy.cz
+3. **Follow-ups found in the ChatGPT incident: done** (#96, #97, #99). ChatGPT was not ordered on svatebni-fotograf-cechy.cz
    and vzdelanibudoucnosti.cz in the plans of 25 Nov 00:15/01:00 because the backlog had just been saved (0.9-day
    minimum interval); check that the next cycle orders it again.
 4. vzdelanibudoucnosti.cz mention rate fell 47 % → 31 % between 10 and 24 Nov (matcher revision 2, Gemini added,
