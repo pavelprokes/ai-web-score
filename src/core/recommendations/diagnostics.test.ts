@@ -241,3 +241,33 @@ describe("diagnose on branded answers", () => {
     expect(diagnose(input({ answers })).map((f) => f.key)).toContain("topic-gap:yoga");
   });
 });
+
+describe("per-cell rates (domains on geo-v3)", () => {
+  // Assistant X names the brand only for one prompt, which the planner measured ten times; assistant Y names it for
+  // half of its answers to every prompt. Pooled, X looks stronger (10 of 16 vs 8 of 16); per cell it is the weak one.
+  const answers: AnswerObservation[] = [
+    ...Array.from({ length: 10 }, () => answer({ brandMentioned: true }, { providerId: "x", promptId: "a" })),
+    ...["b", "c", "d"].flatMap((p) => Array.from({ length: 2 }, () => answer({}, { providerId: "x", promptId: p }))),
+    ...["a", "b", "c", "d"].flatMap((p) => [answer({ brandMentioned: true }, { providerId: "y", promptId: p }), answer({}, { providerId: "y", promptId: p })]),
+    ...["a", "b", "c", "d"].flatMap((p) => [answer({ brandMentioned: true }, { providerId: "y", promptId: p }), answer({}, { providerId: "y", promptId: p })]),
+  ];
+  const keys = (cellRates: boolean) => diagnose(input({ answers, cellRates })).map((f) => f.key);
+
+  it("reads each prompt × assistant cell once, like the geo-v3 score", () => {
+    expect(keys(false)).not.toContain("provider-gap:x");
+    expect(keys(true)).toContain("provider-gap:x");
+    const gap = diagnose(input({ answers, cellRates: true })).find((f) => f.key === "provider-gap:x")!;
+    expect(gap.evidence).toMatchObject({ mentionRate: 0.25, bestProvider: "y", bestRate: 0.5, answers: 16 });
+  });
+
+  it("averages a quality over cells, not over answers", () => {
+    // Position 1 in one cell measured eight times, position 5 in three cells measured twice: 1.67 pooled, 4 per cell.
+    const listed = [
+      ...Array.from({ length: 8 }, () => answer({ brandMentioned: true, recommendationPosition: 1 }, { promptId: "a" })),
+      ...["b", "c", "d"].flatMap((p) => Array.from({ length: 2 }, () => answer({ brandMentioned: true, recommendationPosition: 5 }, { promptId: p }))),
+    ];
+    const weak = (cellRates: boolean) => diagnose(input({ answers: listed, cellRates })).find((f) => f.key === "position:low");
+    expect(weak(false)).toBeUndefined();
+    expect(weak(true)?.evidence).toMatchObject({ averagePosition: 4, lists: 14 });
+  });
+});

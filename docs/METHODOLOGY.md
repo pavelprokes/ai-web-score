@@ -185,10 +185,12 @@ been replayed on production data) answers three defects measured there (RESEARCH
   that name the brand (19 points for a brand named in 0.8 % of answers). The Sentiment and Accuracy metrics
   themselves are unchanged.
 
-Everything outside the score snapshots still counts answers one by one: recommendation diagnostics, the
-answer viewer, competitor counts, and `geo-v2` itself. Once a domain's quiet cells are measured less often
-those counts lean towards the answers that show the brand, so a domain that was on `geo-v3` should not be
-switched back, and the diagnostics need the same per-cell reading before they quote rates (open).
+Recommendation diagnostics read their rates and averages (mention and competitor share per topic, mention rate
+per assistant, citation rate of answers that name the brand, average position, accuracy, sentiment) per cell
+on a domain whose version has cell weights (`cellRates` in `diagnose()`), like its score. Counts stay counts
+(sources cited, untracked brands named N times), and the answer viewer and competitor counts still list answers
+one by one, as does `geo-v2`. Once a domain's quiet cells are measured less often, answer counts lean towards
+the answers that show the brand, so a domain that was on `geo-v3` should not be switched back.
 
 With honest intervals "Not enough data" will show for domains whose prompts disagree a lot, until they have
 more prompts — the threshold stays ±10 points.
