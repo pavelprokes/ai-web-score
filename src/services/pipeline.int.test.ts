@@ -951,6 +951,69 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
 
+  it("migration 0017 re-dates answers collected days late to the time the assistant gave them, and rebuilds their scores", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL" }).returning();
+    const at = (iso: string) => new Date(iso);
+    const row = (id: string, startedAt: string, finishedAt: string, datetime: string | null) => ({
+      id,
+      runId: run!.id,
+      domainId: demo!.id,
+      promptVersionId: version!.id,
+      configurationId: config!.id,
+      providerId: "chatgpt-ui",
+      model: config!.model,
+      sampleIndex: 400 + id.length,
+      status: "SUCCEEDED" as const,
+      startedAt: at(startedAt),
+      finishedAt: at(finishedAt),
+      configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+      rawResponse: datetime === null ? { result: [{}] } : { result: [{ datetime }] },
+    });
+    await db.insert(s.measurements).values([
+      row("redate-late", "2026-11-19T00:32:46Z", "2026-11-24T21:45:46Z", "2026-11-19 00:33:23 +00:00"), // stuck until #86
+      row("redate-ontime", "2026-11-18T00:30:00Z", "2026-11-18T00:45:00Z", "2026-11-18 00:31:00 +00:00"), // normal delay
+      row("redate-garbage", "2026-11-19T00:30:00Z", "2026-11-24T21:00:00Z", "yesterday"),
+      row("redate-implausible", "2026-11-19T00:30:00Z", "2026-11-24T21:00:00Z", "2026-11-10 08:00:00 +00:00"), // before the request
+    ]);
+    const snapshot = (day: string) => ({
+      domainId: demo!.id,
+      scoringVersion: "geo-v2",
+      scope: "DOMAIN",
+      scopeKey: "all",
+      windowStart: at(`${day}T00:00:00Z`),
+      windowEnd: at(`${day}T12:00:00Z`),
+      overallScore: 10,
+      metrics: {},
+    });
+    await db.delete(s.scoreSnapshots).where(eq(s.scoreSnapshots.domainId, demo!.id));
+    await db.insert(s.scoreSnapshots).values([snapshot("2026-11-18"), snapshot("2026-11-19"), snapshot("2026-11-24")]);
+    await db.execute(sql`delete from jobs where type = 'scores.compute'`);
+
+    const migration = readFileSync("./drizzle/0017_redate_late_async_answers.sql", "utf8");
+    for (let i = 0; i < 2; i++) await db.execute(sql.raw(migration)); // a second run changes nothing
+
+    const rows = Object.fromEntries(
+      (await db.select().from(s.measurements).where(inArray(s.measurements.id, ["redate-late", "redate-ontime", "redate-garbage", "redate-implausible"]))).map((m) => [m.id, m]),
+    );
+    expect(rows["redate-late"]!.finishedAt!.toISOString()).toBe("2026-11-19T00:33:23.000Z");
+    expect(rows["redate-late"]!.durationMs).toBe(37_000);
+    expect(rows["redate-ontime"]!.finishedAt!.toISOString()).toBe("2026-11-18T00:45:00.000Z");
+    expect(rows["redate-garbage"]!.finishedAt!.toISOString()).toBe("2026-11-24T21:00:00.000Z");
+    expect(rows["redate-implausible"]!.finishedAt!.toISOString()).toBe("2026-11-24T21:00:00.000Z");
+    const days = (await db.select().from(s.scoreSnapshots).where(eq(s.scoreSnapshots.domainId, demo!.id))).map((x) => x.windowEnd.toISOString().slice(0, 10));
+    expect(days).toEqual(["2026-11-18"]); // from the earliest re-dated day on, rebuilt by the queued computation
+    const queued = await db.execute(sql`select payload from jobs where type = 'scores.compute' and status = 'QUEUED'`);
+    expect(queued.map((j) => (j.payload as { domainId: string }).domainId)).toEqual([demo!.id]);
+    await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
+  });
+
   it("counts each answer of a rejected async batch once, and migration 0012 repairs older counters", async () => {
     const { readFileSync } = await import("node:fs");
     const { getDb } = await import("@/db");
@@ -1048,6 +1111,9 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       row("save-lost", demo!.id, days(3), 4), // DataForSEO still says "in queue" after 3 days
       row("save-plain", demo!.id, days(3), 5),
     ]);
+    // DataForSEO reports when ChatGPT answered; the plain answer was given 10 minutes after its request, 3 days ago.
+    const plainAnsweredAt = new Date(Math.floor((Date.now() - 3 * 86_400_000 + 10 * 60_000) / 1000) * 1000);
+    const dfsTime = (d: Date) => `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 19)} +00:00`;
     const markdown = (id: string) =>
       id === "task-save-nul" ? "Na online kroužcích\u0000 bývá 4 až 8 dětí; Kódování pro děti má skupiny po šesti." : "Kódování pro děti je dobrá volba.";
     process.env.DATAFORSEO_LOGIN = "l";
@@ -1059,7 +1125,7 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       const task =
         id === "task-save-lost"
           ? { id, status_code: 40602, status_message: "Task In Queue.", result: null }
-          : { id, status_code: 20000, status_message: "Ok.", cost: 0, result: [{ model: "gpt-x", markdown: markdown(id), sources: [{ url: "https://a.example/\u0000" }], items: [] }] };
+          : { id, status_code: 20000, status_message: "Ok.", cost: 0, result: [{ model: "gpt-x", markdown: markdown(id), sources: [{ url: "https://a.example/\u0000" }], items: [], ...(id === "task-save-plain" ? { datetime: dfsTime(plainAnsweredAt) } : {}) }] };
       return new Response(JSON.stringify({ status_code: 20000, status_message: "Ok.", tasks: [task] }));
     }) as typeof fetch;
     const ids = ["save-data-error", "save-no-profile", "save-nul", "save-unchecked", "save-lost", "save-plain"];
@@ -1082,6 +1148,9 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       expect(r["save-lost"]!.status).toBe("FAILED"); // the provider says unfinished after 48 h
       expect(errorsOf(r["save-lost"]!)).toContain("Async result timed out");
       expect(r["save-plain"]!.status).toBe("SUCCEEDED");
+      // Dated when ChatGPT answered, not when it was saved; the answer without a reported time is dated by the save.
+      expect(r["save-plain"]!.finishedAt!.toISOString()).toBe(plainAnsweredAt.toISOString());
+      expect(Date.now() - r["save-nul"]!.finishedAt!.getTime()).toBeLessThan(60_000);
 
       // The third failed save ends it, as the app's storage error, not the provider's.
       await expect(collectAsync("chatgpt-ui")).rejects.toBeInstanceOf(RescheduleJob);

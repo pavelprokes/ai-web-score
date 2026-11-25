@@ -204,6 +204,16 @@ function dedupe<T extends { url: string }>(xs: T[]): T[] {
   return xs.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true)));
 }
 
+/** The capture time DataForSEO reports with a result ("2026-11-19 00:33:23 +00:00"), or undefined. */
+export function dfsAnsweredAt(r: unknown): Date | undefined {
+  const raw = (r as { datetime?: unknown } | null)?.datetime;
+  if (typeof raw !== "string") return undefined;
+  const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(?: ?([+-]\d{2}):?(\d{2}))?$/.exec(raw.trim());
+  if (!m) return undefined;
+  const at = new Date(`${m[1]}T${m[2]}${m[3] ? `${m[3]}:${m[4]}` : "Z"}`);
+  return Number.isNaN(at.getTime()) ? undefined : at;
+}
+
 export function parseLlmScraper(result: LlmScraperResult, fallbackModel: string): NormalizedAnswer {
   const { markdown, adUrls } = stripAds(result);
   const organic = <T extends { url: string }>(xs: T[]) => xs.filter((x) => !adUrls.has(x.url));
@@ -257,6 +267,7 @@ function createAdapter(args: {
   const path = PATHS[args.dfsSurface];
   const parse = (r: unknown, model: string) =>
     args.dfsSurface === "ai_mode" ? parseAiMode(r as AiModeResult) : parseLlmScraper(r as LlmScraperResult, model);
+  const result = (r: unknown, model: string) => ({ answer: parse(r, model), answeredAt: dfsAnsweredAt(r) });
 
   return {
     id: args.id,
@@ -312,7 +323,7 @@ function createAdapter(args: {
       if (!t || t.status_code !== 20000 || !t.result?.[0]) {
         throw new ProviderError(`DataForSEO ${t?.status_code} ${t?.status_message}`, (t?.status_code ?? 0) >= 50000);
       }
-      return { answer: parse(t.result[0], config.model), raw: t, reportedCostUsd: t.cost };
+      return { ...result(t.result[0], config.model), raw: t, reportedCostUsd: t.cost };
     },
     async submit(reqs, config) {
       const priority = Number(config.params.priority ?? STANDARD_PRIORITY);
@@ -353,7 +364,7 @@ function createAdapter(args: {
               status: "SUCCEEDED",
               // The task is charged at task_post; task_get reports 0 for some surfaces (chat_gpt), which would
               // record a free answer — fall back to the price book then.
-              result: { answer: parse(task.result[0], p.configuration.model), raw: task, reportedCostUsd: task.cost || undefined },
+              result: { ...result(task.result[0], p.configuration.model), raw: task, reportedCostUsd: task.cost || undefined },
             };
           }
           if (task.status_code === 40601 || task.status_code === 40602 || task.status_code === 20100) {
