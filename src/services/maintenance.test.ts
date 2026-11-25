@@ -55,3 +55,24 @@ describe("slimRawResponse", () => {
     expect(slimRawResponse(null, "Answer")).toBeNull();
   });
 });
+
+describe("answer time", () => {
+  it("reads DataForSEO's capture time and keeps a plausible one", async () => {
+    const { dfsAnsweredAt } = await import("@/core/measurement/providers/dataforseo");
+    const { answerTime } = await import("@/services/measure");
+    expect(dfsAnsweredAt({ datetime: "2026-11-19 00:33:23 +00:00" })?.toISOString()).toBe("2026-11-19T00:33:23.000Z");
+    expect(dfsAnsweredAt({ datetime: "2026-11-19 02:33:23 +02:00" })?.toISOString()).toBe("2026-11-19T00:33:23.000Z");
+    expect(dfsAnsweredAt({ datetime: "2026-11-19 00:33:23" })?.toISOString()).toBe("2026-11-19T00:33:23.000Z");
+    expect(dfsAnsweredAt({ datetime: "yesterday" })).toBeUndefined();
+    expect(dfsAnsweredAt({})).toBeUndefined();
+    expect(dfsAnsweredAt(null)).toBeUndefined();
+
+    const started = new Date("2026-11-19T00:32:46Z");
+    const saved = new Date("2026-11-24T21:45:46Z");
+    expect(answerTime(new Date("2026-11-19T00:33:23Z"), started, saved).toISOString()).toBe("2026-11-19T00:33:23.000Z");
+    expect(answerTime(undefined, started, saved)).toBe(saved);
+    expect(answerTime(new Date("2026-11-10T00:00:00Z"), started, saved)).toBe(saved); // before the request
+    expect(answerTime(new Date("2026-11-30T00:00:00Z"), started, saved)).toBe(saved); // in the future
+    expect(answerTime(new Date("2026-11-19T00:10:00Z"), started, saved).toISOString()).toBe("2026-11-19T00:10:00.000Z"); // clock skew
+  });
+});

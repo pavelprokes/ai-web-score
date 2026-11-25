@@ -302,6 +302,16 @@ async function maybeFinishRun(runId: string) {
     where id = ${runId} and status = 'RUNNING' and completed_count + failed_count >= planned_count`);
 }
 
+/**
+ * When an answer was given: the provider's own time when it reports one that is plausible (not before the request
+ * went out, allowing an hour of clock skew, and not in the future), otherwise the time it was saved.
+ */
+export function answerTime(answeredAt: Date | undefined, startedAt: Date, savedAt: Date): Date {
+  if (!answeredAt || Number.isNaN(answeredAt.getTime())) return savedAt;
+  if (answeredAt.getTime() < startedAt.getTime() - 3600_000 || answeredAt.getTime() > savedAt.getTime()) return savedAt;
+  return answeredAt;
+}
+
 /** Persist evidence, cost, raw signals and the updated statistical cell state. */
 export async function finalizeMeasurement(id: string, providerResult: ProviderResult, startedAt: Date) {
   const db = getDb();
@@ -310,7 +320,10 @@ export async function finalizeMeasurement(id: string, providerResult: ProviderRe
   const [m] = await db.select().from(measurements).where(eq(measurements.id, id));
   // Late results for a cancelled run are dropped (the run was closed by the admin).
   if (!m || m.status === "SUCCEEDED" || m.status === "CANCELLED") return;
-  const finishedAt = new Date();
+  const savedAt = new Date();
+  // The answer is dated when the assistant gave it: score windows read `finished_at`. Scheduling (cell state, the
+  // domain's last measurement) follows the save, so a late result does not make its cell due again at once.
+  const finishedAt = answerTime(result.answeredAt, startedAt, savedAt);
 
   const priceBook = await loadPriceBook();
   const price = selectPrice(priceBook, m.providerId, priceModelKey(m.providerId, m.model), m.scheduledAt);
@@ -342,7 +355,7 @@ export async function finalizeMeasurement(id: string, providerResult: ProviderRe
       .set({
         status: "SUCCEEDED",
         finishedAt,
-        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
         rawResponse: slimRawResponse(result.raw, result.answer.answerText) as object,
         answerText: result.answer.answerText,
         citations: result.answer.citations,
@@ -371,7 +384,7 @@ export async function finalizeMeasurement(id: string, providerResult: ProviderRe
     })
     .onConflictDoNothing();
 
-  await updateCellState(m.domainId, m.promptVersionId, m.configurationId, m.providerId, presence, finishedAt);
+  await updateCellState(m.domainId, m.promptVersionId, m.configurationId, m.providerId, presence, savedAt);
 
   await db
     .update(runs)
@@ -382,7 +395,7 @@ export async function finalizeMeasurement(id: string, providerResult: ProviderRe
     })
     .where(eq(runs.id, m.runId));
   await maybeFinishRun(m.runId);
-  await db.update(domains).set({ lastMeasuredAt: finishedAt }).where(eq(domains.id, m.domainId));
+  await db.update(domains).set({ lastMeasuredAt: savedAt }).where(eq(domains.id, m.domainId));
 
   if (needsAnalysis) {
     await enqueue("analysis.submit", {}, { dedupeKey: "analysis-submit", runAt: new Date(Date.now() + 60_000) });

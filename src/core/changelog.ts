@@ -72,7 +72,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     at: "2026-11-19",
     kind: "INCIDENT",
     title: "ChatGPT answers not saved, 19–24 Nov",
-    why: "One answer contained a character the database rejects and blocked every ChatGPT answer behind it. ChatGPT carries most of the combined score, so these days rest on older ChatGPT answers. Fixed on 24 Nov (#86); the waiting answers were saved afterwards.",
+    why: "One answer contained a character the database rejects and blocked every ChatGPT answer behind it. Fixed on 24 Nov (#86); the 2,805 waiting answers were saved that night and, on 25 Nov, dated back to the days ChatGPT gave them.",
   },
   {
     key: "2026-11-24-cleanup",
@@ -80,5 +80,12 @@ export const CHANGELOG: ChangelogEntry[] = [
     kind: "METHODOLOGY",
     title: "Daily clean-up; raw provider payloads kept 7 days",
     why: "Keeps the database under the plan's limit. Answers, citations, signals and scores are kept, so no number changes.",
+  },
+  {
+    key: "2026-11-25-answer-time",
+    at: "2026-11-25",
+    kind: "METHODOLOGY",
+    title: "Answers dated when the assistant gave them, not when they were saved",
+    why: "Async answers (ChatGPT, Gemini, AI Mode via DataForSEO) now carry DataForSEO's capture time. The 2,805 ChatGPT answers of 19–24 Nov, all saved on the 24th, were moved back to their days and the scores from 19 Nov on were recomputed, so those days now include ChatGPT and the 24th no longer holds them all.",
   },
 ];

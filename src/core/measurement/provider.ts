@@ -61,6 +61,12 @@ export interface ProviderResult {
   reportedCostUsd?: number;
   /** Price-book usage was billed at a batch discount. */
   batched?: boolean;
+  /**
+   * When the assistant gave the answer, if the provider reports it (DataForSEO `datetime`). Async results can be
+   * collected hours or days later (ChatGPT answers of 19–24 Nov 2026 were saved on the 24th); the answer is
+   * dated by this, so it falls into the right score windows.
+   */
+  answeredAt?: Date;
 }
 
 export interface PendingTask {
