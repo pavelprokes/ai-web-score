@@ -38,7 +38,7 @@ sentiment and accuracy counted unconditionally as geo-v3 does. Treat it as ±2 p
 | Named rate within 0.5 pp of the SQL mean of per-prompt rates | **Pass with the same weights** (the SQL replica equals the code exactly). **Fails as literally written** if that mean is unweighted: vzdelanibudoucnosti.cz 22.3 % vs 20.6 %, photographer 7.7 % vs 5.0 %, se-vezmou 0.56 % vs 1.65 %. The gap is the intended weighting, not a defect. Assistants weigh by reach (ChatGPT 69 %) and prompts by importance × commercial value. On vzdelanibudoucnosti.cz, reach weights with equal prompts give 20.2 %, and the remaining 2.0 pp come from higher-importance prompts naming the brand more. The criterion should name the weights: "within 0.5 pp of the reach- and importance-weighted mean of per-cell rates". |
 | Interval within 20 % of the bootstrap over prompts | **Pass** on every domain with data: width ratios 1.04, 1.07, 1.01. The plan's reference interval for the photographer, [6.3, 29.7], came from the 2026-11-12 data and was superseded by today's bootstrap. |
 | se-vezmou Overall under 10 or "Not enough data" | **Pass** (≈ 0.5). Under geo-v2 its 19.5 is almost entirely position (0.92 × 0.1), sentiment and accuracy measured on the handful of answers that name the brand. That is the floor geo-v3 removes. |
-| geo-v2 snapshots unchanged by the geo-v3 code | **Pass by code reading.** Every line #70 removed from `scoring.ts` and `scores.ts` has an equivalent on the geo-v2 path (`cells`, `clustered` and `unconditional` off; same weight formula; provider series still flattened). There is no golden test for it (follow-up below). |
+| geo-v2 snapshots unchanged by the geo-v3 code | **Pass by code reading.** Every line #70 removed from `scoring.ts` and `scores.ts` has an equivalent on the geo-v2 path (`cells`, `clustered` and `unconditional` off; same weight formula; provider series still flattened). Since then pinned by `src/services/geo-v2-golden.int.test.ts`: every snapshot of a fixed world equals the output of the code before #70 (commit 15c9807). |
 | Tests that gate it (unequal cells, oversampling planner, coverage ≥ 90 %, Overall ≈ 0 at rate 0) | Present in `src/core/scoring/geo-v3.test.ts`, run in CI. |
 | The switch visible on the chart | Done in #89: the `PATCH` with `scoringVersion` records a dated line with the reason. |
 
@@ -61,7 +61,9 @@ sentiment and accuracy counted unconditionally as geo-v3 does. Treat it as ±2 p
    17, the photographer from 28 to about 7, se-vezmou from 19.5 to about 0.5. Explain this to anyone who has seen
    the old numbers. Mention rates fall by 6–8 pp, matching RESEARCH §7.7.
 5. **No golden test pins geo-v2.** A test that freezes the geo-v2 output of a fixed world would make
-   "byte-identical" a checked property rather than a code-reading result.
+   "byte-identical" a checked property rather than a code-reading result. *(Done: `geo-v2-golden.int.test.ts`; its
+   fixture was written by the pre-#70 code and today's code reproduces it to 12 significant digits on every
+   snapshot.)*
 6. **`extract-v1` is named in the SQL.** The test fails when `EXTRACTOR_VERSION` changes, so both get bumped
    together.
 

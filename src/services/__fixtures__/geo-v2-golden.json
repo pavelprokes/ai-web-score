@@ -1,0 +1,368 @@
+[
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.51314336195,
+      "citationRate": {
+        "high": 0.363968021103,
+        "low": 0.123054299369,
+        "n": 93,
+        "value": 0.220801607171
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.220801607171,
+        "mention": 0.438054374233,
+        "position": 0.531399260775,
+        "recommendation": 0.316485429203,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": true,
+      "mentionRate": {
+        "high": 0.584683443336,
+        "low": 0.301502422417,
+        "n": 93,
+        "value": 0.438054374233
+      },
+      "overallScore": 49.9,
+      "promptCount": 3,
+      "recommendationRate": {
+        "high": 0.464896776654,
+        "low": 0.197927648182,
+        "n": 93,
+        "value": 0.316485429203
+      },
+      "sampleCount": 93,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 49.9,
+    "scope": "BRAND",
+    "scopeKey": "all"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.3689071629,
+      "citationRate": {
+        "high": 0.286073408695,
+        "low": 0.148462189951,
+        "n": 321,
+        "value": 0.209056391694
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.209056391694,
+        "mention": 0.550426948558,
+        "position": 0.553826098604,
+        "recommendation": 0.340627124896,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.632586612792,
+        "low": 0.465420847981,
+        "n": 321,
+        "value": 0.550426948558
+      },
+      "overallScore": 53.5,
+      "promptCount": 9,
+      "recommendationRate": {
+        "high": 0.424869807453,
+        "low": 0.265380519964,
+        "n": 321,
+        "value": 0.340627124896
+      },
+      "sampleCount": 321,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 53.5,
+    "scope": "CLUSTER",
+    "scopeKey": "a"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.62325183191,
+      "citationRate": {
+        "high": 0.351465567797,
+        "low": 0.182343714245,
+        "n": 218,
+        "value": 0.257964332644
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.257964332644,
+        "mention": 0.396763709059,
+        "position": 0.514379915594,
+        "recommendation": 0.215675871489,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.494679977845,
+        "low": 0.306474120148,
+        "n": 218,
+        "value": 0.396763709059
+      },
+      "overallScore": 47,
+      "promptCount": 9,
+      "recommendationRate": {
+        "high": 0.305919814604,
+        "low": 0.146436645699,
+        "n": 218,
+        "value": 0.215675871489
+      },
+      "sampleCount": 218,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 47,
+    "scope": "CLUSTER",
+    "scopeKey": "b"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.46400880484,
+      "citationRate": {
+        "high": 0.291577283565,
+        "low": 0.182806321021,
+        "n": 539,
+        "value": 0.232795610522
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.232795610522,
+        "mention": 0.475840997946,
+        "position": 0.539076834201,
+        "recommendation": 0.279977563909,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.540298533894,
+        "low": 0.41217841605,
+        "n": 539,
+        "value": 0.475840997946
+      },
+      "overallScore": 50.4,
+      "promptCount": 18,
+      "providerWeights": {
+        "chatgpt-ui": 0.681,
+        "gemini-ui": 0.125,
+        "google-ai-mode": 0.145,
+        "perplexity-api": 0.049
+      },
+      "recommendationRate": {
+        "high": 0.341301688016,
+        "low": 0.225893297087,
+        "n": 539,
+        "value": 0.279977563909
+      },
+      "sampleCount": 539,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 50.4,
+    "scope": "DOMAIN",
+    "scopeKey": "all"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.29661138505,
+      "citationRate": {
+        "high": 0.281015600874,
+        "low": 0.146131953534,
+        "n": 137,
+        "value": 0.205486756435
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.205486756435,
+        "mention": 0.447552094123,
+        "position": 0.579448187929,
+        "recommendation": 0.255299651271,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.531401449677,
+        "low": 0.366583066115,
+        "n": 137,
+        "value": 0.447552094123
+      },
+      "overallScore": 49.1,
+      "promptCount": 18,
+      "recommendationRate": {
+        "high": 0.334583928675,
+        "low": 0.189453797064,
+        "n": 137,
+        "value": 0.255299651271
+      },
+      "sampleCount": 137,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 49.1,
+    "scope": "PROVIDER",
+    "scopeKey": "chatgpt-ui"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.66059872548,
+      "citationRate": {
+        "high": 0.355418672034,
+        "low": 0.204886869403,
+        "n": 132,
+        "value": 0.273752690661
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.273752690661,
+        "mention": 0.546517602261,
+        "position": 0.47940629516,
+        "recommendation": 0.401817543957,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.628942475739,
+        "low": 0.461460950491,
+        "n": 132,
+        "value": 0.546517602261
+      },
+      "overallScore": 55,
+      "promptCount": 18,
+      "recommendationRate": {
+        "high": 0.487099589782,
+        "low": 0.322090265441,
+        "n": 132,
+        "value": 0.401817543957
+      },
+      "sampleCount": 132,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 55,
+    "scope": "PROVIDER",
+    "scopeKey": "gemini-ui"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.34179648317,
+      "citationRate": {
+        "high": 0.372834345183,
+        "low": 0.220707123492,
+        "n": 134,
+        "value": 0.290941993373
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.290941993373,
+        "mention": 0.47809444405,
+        "position": 0.563751599659,
+        "recommendation": 0.284383679006,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.562115250891,
+        "low": 0.395295133706,
+        "n": 134,
+        "value": 0.47809444405
+      },
+      "overallScore": 51.8,
+      "promptCount": 18,
+      "recommendationRate": {
+        "high": 0.365961040161,
+        "low": 0.214829504173,
+        "n": 134,
+        "value": 0.284383679006
+      },
+      "sampleCount": 134,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 51.8,
+    "scope": "PROVIDER",
+    "scopeKey": "google-ai-mode"
+  },
+  {
+    "metrics": {
+      "accuracyScore": null,
+      "avgRecommendationPosition": 2.24890425332,
+      "citationRate": {
+        "high": 0.281931627351,
+        "low": 0.146823079821,
+        "n": 136,
+        "value": 0.206308961185
+      },
+      "citationShare": null,
+      "components": {
+        "accuracy": null,
+        "citation": 0.206308961185,
+        "mention": 0.46338433421,
+        "position": 0.625025874572,
+        "recommendation": 0.26450518053,
+        "sentiment": 0.7,
+        "shareOfVoice": 1
+      },
+      "insufficientData": false,
+      "mentionRate": {
+        "high": 0.547047830271,
+        "low": 0.381732677262,
+        "n": 136,
+        "value": 0.46338433421
+      },
+      "overallScore": 50.2,
+      "promptCount": 18,
+      "recommendationRate": {
+        "high": 0.344366834995,
+        "low": 0.197582733332,
+        "n": 136,
+        "value": 0.26450518053
+      },
+      "sampleCount": 136,
+      "scoringVersion": "geo-v2",
+      "searchRate": 1,
+      "sentimentScore": 0.7,
+      "shareOfVoice": 1
+    },
+    "overallScore": 50.2,
+    "scope": "PROVIDER",
+    "scopeKey": "perplexity-api"
+  }
+]

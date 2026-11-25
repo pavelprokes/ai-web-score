@@ -1335,6 +1335,9 @@ describe.skipIf(!url)("pipeline (integration)", () => {
       .innerJoin(s.promptVersions, and(eq(s.promptVersions.promptId, s.prompts.id), eq(s.promptVersions.version, s.prompts.currentVersion)))
       .where(and(eq(s.prompts.domainId, demo!.id), eq(s.prompts.status, "ACTIVE")));
     const stuck = active[0]!.v;
+    const { estimatedMonthlyCost, configurationCost, projectMonthEnd } = await import("@/services/costs");
+    const at = new Date();
+    const forecastBefore = await estimatedMonthlyCost(demo!.id, at);
     const [oldRun] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "CRON", status: "FAILED" }).returning();
     await db.insert(s.measurements).values({
       id: "in-flight-1",
@@ -1354,6 +1357,10 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     const before = await spentThisMonth(demo!.id);
     const withPosted = await spentThisMonth(demo!.id, new Date(), () => 0.25);
     expect(withPosted - before).toBeCloseTo(0.25, 6);
+    // The domain page's forecast counts it too, at the planner's expected cost, in the month and in the week.
+    const c = (await configurationCost())(mock!.id, "mock");
+    expect(c).toBeGreaterThan(0);
+    expect((await estimatedMonthlyCost(demo!.id, at)) - forecastBefore).toBeCloseTo(projectMonthEnd({ spentMtd: c, trailing: c, now: at }), 6);
 
     // A manual run measures every core cell it can: the stuck one is still left out.
     const planned0 = await planMeasurements(demo!.id, "MANUAL");

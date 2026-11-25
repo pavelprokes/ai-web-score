@@ -2,6 +2,8 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currentSignals } from "@/services/signals";
 import { domains, llmUsage, measurementSignals, measurements } from "@/db/schema";
+import { getProvider } from "@/core/measurement/providers";
+import { expectedCostPerSample } from "@/core/pricing/cost";
 import { analyzeProviderValue, type ProviderPromptRates } from "@/core/optimization/provider-value";
 
 /** Cost analytics for the admin (§15): totals per domain/provider and cost per data point. */
@@ -95,6 +97,60 @@ export function projectMonthEnd({ spentMtd, trailing, now = new Date() }: { spen
   return spentMtd + (trailing / 7) * daysLeft;
 }
 
+/** Expected cost of one answer of a configuration: what one answer of it cost lately, else the provider's estimate. */
+export type ConfigurationCost = (configurationId: string, providerId: string) => number;
+
+/** Average cost of a saved answer per configuration over the last 30 days. */
+export async function observedCostByConfiguration(): Promise<Map<string, { avg: number; n: number }>> {
+  const since = new Date(Date.now() - 30 * DAY_MS);
+  const rows = await getDb()
+    .select({
+      id: measurements.configurationId,
+      avg: sql<number>`avg(${measurements.totalCostUsd})`,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(measurements)
+    .where(and(eq(measurements.status, "SUCCEEDED"), gte(measurements.finishedAt, since)))
+    .groupBy(measurements.configurationId);
+  return new Map(rows.map((r) => [r.id, { avg: Number(r.avg), n: Number(r.n) }]));
+}
+
+/** The planner's expected cost per answer (`expectedCostPerSample`) as a function of the configuration. */
+export async function configurationCost(): Promise<ConfigurationCost> {
+  const observed = await observedCostByConfiguration();
+  return (configurationId, providerId) => {
+    let est = 0;
+    try {
+      est = getProvider(providerId).capability.estimatedCostPerMeasurement;
+    } catch {
+      // A provider removed from code: its observed average (if any) is all there is.
+    }
+    const o = observed.get(configurationId);
+    return expectedCostPerSample(o?.avg ?? null, o?.n ?? 0, est);
+  };
+}
+
+/**
+ * Async requests already posted but not collected yet (status SUBMITTED), ordered since `since`, at their expected
+ * cost. DataForSEO bills when a task is posted and the answer's cost is written when it is saved, so without these a
+ * provider whose results stop arriving looks free (ChatGPT, 19–24 Nov 2026).
+ */
+export async function postedRequestCost(
+  domainId: string,
+  since: Date,
+  /** Called only when something is in flight, so an estimator that costs a query is not built for nothing. */
+  cost: () => ConfigurationCost | Promise<ConfigurationCost>,
+): Promise<number> {
+  const rows = await getDb()
+    .select({ configurationId: measurements.configurationId, providerId: measurements.providerId, n: sql<number>`count(*)::int` })
+    .from(measurements)
+    .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "SUBMITTED"), gte(measurements.scheduledAt, since)))
+    .groupBy(measurements.configurationId, measurements.providerId);
+  if (rows.length === 0) return 0;
+  const price = await cost();
+  return rows.reduce((a, r) => a + Number(r.n) * price(r.configurationId, r.providerId), 0);
+}
+
 /**
  * Forecast of the month's cost (measurements + internal LLM, like the budget) from the actual run rate of the
  * last 7 days. Not from cell_states: those rows outlive paused prompts and disabled providers, and the planner
@@ -108,17 +164,22 @@ export async function estimatedMonthlyCost(domainId: string, now = new Date()) {
     mtd: sql<number>`coalesce(sum(${cost}) filter (where ${at} >= ${month}::timestamptz), 0)`,
     trailing: sql<number>`coalesce(sum(${cost}) filter (where ${at} >= ${week}::timestamptz), 0)`,
   });
-  const [[d], [m], [l]] = await Promise.all([
+  let estimator: Promise<ConfigurationCost> | undefined;
+  const cost = () => (estimator ??= configurationCost());
+  const [[d], [m], [l], postedMtd, postedWeek] = await Promise.all([
     db.select({ status: domains.status }).from(domains).where(eq(domains.id, domainId)),
     db.select(sums(measurements.totalCostUsd, measurements.scheduledAt)).from(measurements).where(eq(measurements.domainId, domainId)),
     db.select(sums(llmUsage.costUsd, llmUsage.createdAt)).from(llmUsage).where(eq(llmUsage.domainId, domainId)),
+    // Posted, not yet collected requests are already billed; the planner's budget counts them the same way.
+    postedRequestCost(domainId, monthStart(now), cost),
+    postedRequestCost(domainId, new Date(now.getTime() - 7 * DAY_MS), cost),
   ]);
-  const spentMtd = Number(m?.mtd ?? 0) + Number(l?.mtd ?? 0);
+  const spentMtd = Number(m?.mtd ?? 0) + Number(l?.mtd ?? 0) + postedMtd;
   // Only ACTIVE domains are planned (schedulerTick); any other status spends nothing more on its own.
   if (d?.status !== "ACTIVE") return spentMtd;
   // Always ÷ 7, also for a domain younger than that: its first days hold the one-off setup cost and the
   // first-day burst, and dividing those by the domain's age projected several times the budget.
-  return projectMonthEnd({ spentMtd, trailing: Number(m?.trailing ?? 0) + Number(l?.trailing ?? 0), now });
+  return projectMonthEnd({ spentMtd, trailing: Number(m?.trailing ?? 0) + Number(l?.trailing ?? 0) + postedWeek, now });
 }
 
 /** Provider uniqueness / value analysis over the last 30 days (for "which provider adds least?"). */
