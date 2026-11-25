@@ -91,6 +91,10 @@ Keep this file current: update it at the end of each piece of work (state, merge
 | #86 | **ChatGPT answers were not saved 19–24 Nov** (2,803 stuck SUBMITTED): one answer carried U+0000, jsonb refused it and the oldest-first collect loop stopped at it every time. Provider results are cleaned (`src/db/pg-safe.ts`), each answer is saved on its own (STORAGE error class, 3 saves), tasks a poll did not ask about are not given up after 48 h, saving stops before the job budget, `last_error` leads with the cause. Backlog drained on production the same night |
 | #87 | hig-web-kit CSS vendored in `src/styles/hig-web-kit/`: `pnpm install` / `pnpm build` now work in cloud sessions |
 | #88 | Daily `maintenance.cleanup` job (03:00 UTC): raw payloads after `RAW_RESPONSE_RETENTION_DAYS` (default 7), old-extractor signal rows, jobs; optional `ANSWER_TEXT_RETENTION_DAYS` (off); DataForSEO markdown not stored twice; DB size recorded daily, /providers shows growth per day and days to the limit |
+| #91 | geo-v3 acceptance protocol: `scripts/geo-v3-check.sql` (proven equal to the code by `geo-v3-check.int.test.ts`), results on production and a literature review of the method (`docs/meetings/2026-11-25-geo-v3-protocol.md`) |
+| #92 | Answers dated when the assistant gave them (DataForSEO `datetime`); migration 0017 re-dated the 2,805 stuck ChatGPT answers to 19–24 Nov and rebuilt the scores |
+| #93 | Quiet-pace stopping-rule bias measured with the real cell state (−0.2 pp production-like) and pinned in `quiet-pace.test.ts` |
+| #94 | Recommendation diagnostics read rates per cell on geo-v3 domains (`cellRates`), with texts that say so |
 | #89 | Change markers: `change_events` (migration 0016), `src/core/changelog.ts` (backfilled history; **every change that can move numbers adds an entry**, CLAUDE.md), provider on/off and scoring switch recorded automatically, numbered dashed lines + list on the score chart, "Changes and notes" with a note form on the domain page |
 
 ## Next task
@@ -98,12 +102,14 @@ Keep this file current: update it at the end of each piece of work (state, merge
 **2026-11-25 session (Supabase MCP connected, so production SQL works from a cloud session through it; it connects as
 `postgres` with write access — ask the owner to set the connector to read-only).** Done: #86–#89 above.
 
-1. **Switch vzdelanibudoucnosti.cz to geo-v3** (owner asked; ChatGPT backlog is drained, markers exist):
-   `PATCH /api/domains/ef5c983e-3c5c-403d-801c-f27fe5511649 {"scoringVersion":"geo-v3","changeReason":"…"}`.
-   Expected from the data of 2026-11-24: mention rate ≈ 20 % (geo-v2 shows 31–33 %), prompt-bootstrap interval
-   ≈ 15–26 %. Accept: within 0.5 pp of the SQL mean of per-prompt rates, interval within 20 % of the bootstrap. Then
-   svatebni-fotograf-cechy.cz a week later, se-vezmou.cz after (Overall < 10 or "Not enough data" expected), photos
-   only after its portfolio is restored (4 active prompts of 62). Never switch back.
+1. **vzdelanibudoucnosti.cz runs on geo-v3 since 2026-11-25 07:18 UTC** (switched in the database with a change
+   event, as the PATCH does; no admin token in the cloud session). Verified: the app's snapshot equals
+   `scripts/geo-v3-check.sql` to the last digit (mention 22.27 % [16.3, 29.6], recommendation 10.5 %, Overall 16.9),
+   36 days of geo-v3 history. Next: around 2026-12-02 check answers per day by provider (the quiet pace should cut
+   measurement spend) and that woken cells return to the normal pace; then switch svatebni-fotograf-cechy.cz (run
+   the check SQL first), se-vezmou.cz after (Overall ≈ 0.5 expected), photos only after its portfolio is restored.
+   Never switch back. Open from the review: protocol criterion wording, CR2 / wild bootstrap for topics with few
+   prompts, reach weights (ChatGPT 0.72 vs ~0.55 market), a golden geo-v2 test.
 2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or
    `ANSWER_TEXT_RETENTION_DAYS`, or archiving answer text); photos domain (approve prompts or pause).
 3. **Follow-ups found in the ChatGPT incident:** the budget does not see the cost of submitted, uncollected async
