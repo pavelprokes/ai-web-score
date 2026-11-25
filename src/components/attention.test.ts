@@ -188,6 +188,43 @@ describe("attentionItems", () => {
   });
 });
 
+describe("attentionItems: assistant saved nothing", () => {
+  const silent = [{ providerId: "chatgpt-ui", ordered: 40, waiting: 37, failed: 3, lastAnswerAt: new Date(now.getTime() - 3 * DAY) }];
+
+  it("says which assistant, what is waiting and when it last answered", () => {
+    expect(items({ silent })).toEqual([
+      {
+        kind: "fix",
+        text: "CHATGPT-UI saved no answer in the last 24 hours: 37 requests sent 6–48 hours ago are still waiting and 3 failed; its last answer was 3 days ago.",
+        section: "failed-heading",
+        link: "Provider errors",
+      },
+    ]);
+  });
+
+  it("points to the runs when nothing failed (the error log is not shown then)", () => {
+    const [item] = items({ silent: [{ ...silent[0]!, waiting: 40, failed: 0 }] })!;
+    expect(item).toMatchObject({ section: "runs-heading", link: "Recent runs" });
+    expect(item!.text).toContain("40 requests sent 6–48 hours ago are still waiting;");
+  });
+
+  it("words all-failed and never-answered", () => {
+    expect(items({ silent: [{ providerId: "x", ordered: 1, waiting: 0, failed: 1, lastAnswerAt: null }] })![0]!.text).toBe(
+      "X saved no answer in the last 24 hours: the request sent 6–48 hours ago failed; it has not answered yet.",
+    );
+    expect(items({ silent: [{ providerId: "x", ordered: 4, waiting: 0, failed: 4, lastAnswerAt: null }] })![0]!.text).toBe(
+      "X saved no answer in the last 24 hours: all 4 requests sent 6–48 hours ago failed; it has not answered yet.",
+    );
+  });
+
+  it("is not repeated when the provider's errors already have a line, and not shown on a paused domain", () => {
+    const errors = [{ providerId: "chatgpt-ui", kind: "QUOTA" as const, count: 3 }];
+    expect(items({ silent, errors })!.map((i) => i.text)).toEqual([expect.stringMatching(/^CHATGPT-UI is out of credit/)]);
+    expect(items({ silent, errors: [{ providerId: "chatgpt-ui", kind: "UPSTREAM" as const, count: 3 }] })).toHaveLength(1);
+    expect(items({ silent, status: "PAUSED" })).toEqual([]);
+  });
+});
+
 describe("attentionItems: website changes", () => {
   it("lists critical website changes as dated lines pointing to the recommendations, at most three", () => {
     const at = new Date("2026-11-11T09:00:00Z");

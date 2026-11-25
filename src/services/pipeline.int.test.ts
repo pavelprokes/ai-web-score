@@ -951,6 +951,55 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
 
+  it("flags an assistant that was asked and saved no answer for 24 hours, and not one that is merely not asked", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { silentProviders } = await import("@/services/errors");
+    const db = getDb();
+    await db.update(s.providers).set({ enabled: true }).where(eq(s.providers.id, "chatgpt-ui"));
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    const [version] = await db.select().from(s.promptVersions).limit(1);
+    const [config] = await db.select().from(s.providerConfigurations).where(eq(s.providerConfigurations.providerId, "chatgpt-ui")).limit(1);
+    const [run] = await db.insert(s.runs).values({ domainId: demo!.id, kind: "MEASUREMENT", trigger: "MANUAL" }).returning();
+    // A clock far from every other test's rows, so only these count.
+    const now = new Date("2031-03-10T12:00:00Z");
+    const ago = (h: number) => new Date(now.getTime() - h * 3600_000);
+    const row = (id: string, scheduledH: number, status: string, finishedH?: number) => ({
+      id,
+      runId: run!.id,
+      domainId: demo!.id,
+      promptVersionId: version!.id,
+      configurationId: config!.id,
+      providerId: "chatgpt-ui",
+      model: config!.model,
+      sampleIndex: 0,
+      status,
+      scheduledAt: ago(scheduledH),
+      finishedAt: finishedH === undefined ? null : ago(finishedH),
+      configuration: { id: config!.id, model: config!.model, params: {}, role: "STANDARD" },
+    });
+    const chatgpt = async () => (await silentProviders(demo!.id, now)).filter((p) => p.providerId === "chatgpt-ui");
+
+    // Asked 30 h ago and answered within the hour, nothing ordered since: quiet, not silent.
+    await db.insert(s.measurements).values(row("silent-old", 30, "SUCCEEDED", 29));
+    expect(await chatgpt()).toEqual([]);
+
+    // Then 3 requests posted 20 h ago, none collected, one failed; one posted 2 h ago is not overdue yet.
+    await db.insert(s.measurements).values([row("silent-a", 20, "SUBMITTED"), row("silent-b", 20, "SUBMITTED"), row("silent-c", 12, "FAILED", 11), row("silent-d", 2, "SUBMITTED")]);
+    expect(await chatgpt()).toEqual([{ providerId: "chatgpt-ui", ordered: 3, waiting: 2, failed: 1, lastAnswerAt: ago(29) }]);
+
+    // One answer saved with a capture time inside the last 24 h ends it.
+    await db.update(s.measurements).set({ status: "SUCCEEDED", finishedAt: ago(19) }).where(eq(s.measurements.id, "silent-a"));
+    expect(await chatgpt()).toEqual([]);
+
+    // A disabled provider is not reported.
+    await db.update(s.measurements).set({ status: "SUBMITTED", finishedAt: null }).where(eq(s.measurements.id, "silent-a"));
+    expect(await chatgpt()).toHaveLength(1);
+    await db.update(s.providers).set({ enabled: false }).where(eq(s.providers.id, "chatgpt-ui"));
+    expect(await chatgpt()).toEqual([]);
+    await db.delete(s.measurements).where(eq(s.measurements.runId, run!.id));
+  });
+
   it("migration 0017 re-dates answers collected days late to the time the assistant gave them, and rebuilds their scores", async () => {
     const { readFileSync } = await import("node:fs");
     const { getDb } = await import("@/db");
