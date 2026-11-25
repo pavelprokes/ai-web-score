@@ -85,18 +85,33 @@ export async function liveCells(domainId: string, now = new Date()) {
   return rows.map((r) => ({ ...r.c, confidence: confidence(r.c.state as CellState, now) }));
 }
 
-export async function spentThisMonth(domainId: string, now = new Date()) {
+/**
+ * Spend of the month: saved answers at their recorded cost, LLM calls, and — with `inFlightCost` — async requests
+ * already posted but not collected yet (status SUBMITTED). DataForSEO bills when a task is posted and the answer's
+ * cost is written when it is saved, so without them a provider whose results stop arriving looks free and the
+ * planner keeps ordering (ChatGPT, 19–24 Nov 2026: orders rose from 220 to 742 a day while none came back).
+ */
+export async function spentThisMonth(domainId: string, now = new Date(), inFlightCost?: (configurationId: string, providerId: string) => number) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const db = getDb();
   const [m] = await db
     .select({ s: sql<number>`coalesce(sum(${measurements.totalCostUsd}), 0)` })
     .from(measurements)
     .where(and(eq(measurements.domainId, domainId), gte(measurements.scheduledAt, start)));
+  let posted = 0;
+  if (inFlightCost) {
+    const rows = await db
+      .select({ configurationId: measurements.configurationId, providerId: measurements.providerId, n: sql<number>`count(*)::int` })
+      .from(measurements)
+      .where(and(eq(measurements.domainId, domainId), eq(measurements.status, "SUBMITTED"), gte(measurements.scheduledAt, start)))
+      .groupBy(measurements.configurationId, measurements.providerId);
+    posted = rows.reduce((a, r) => a + Number(r.n) * inFlightCost(r.configurationId, r.providerId), 0);
+  }
   const [l] = await db
     .select({ s: sql<number>`coalesce(sum(${llmUsage.costUsd}), 0)` })
     .from(llmUsage)
     .where(and(eq(llmUsage.domainId, domainId), gte(llmUsage.createdAt, start)));
-  return Number(m?.s ?? 0) + Number(l?.s ?? 0);
+  return Number(m?.s ?? 0) + Number(l?.s ?? 0) + posted;
 }
 
 async function observedCostByConfiguration(): Promise<Map<string, { avg: number; n: number }>> {
@@ -169,11 +184,26 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
   const states = await db.select().from(cellStates).where(eq(cellStates.domainId, domainId));
   const stateOf = new Map(states.map((s) => [`${s.promptVersionId}|${s.configurationId}`, s.state as CellState]));
   const observed = await observedCostByConfiguration();
-  const costOf = (c: ConfigRow) => {
-    const est = getProvider(c.providerId).capability.estimatedCostPerMeasurement;
-    const o = observed.get(c.id);
+  const costOfConfig = (configurationId: string, providerId: string) => {
+    let est = 0;
+    try {
+      est = getProvider(providerId).capability.estimatedCostPerMeasurement;
+    } catch {
+      // A provider removed from code: its observed average (if any) is all there is.
+    }
+    const o = observed.get(configurationId);
     return expectedCostPerSample(o?.avg ?? null, o?.n ?? 0, est);
   };
+  const costOf = (c: ConfigRow) => costOfConfig(c.id, c.providerId);
+
+  // A cell whose answer is still on its way (queued or posted, from any run) is not ordered again: its state has
+  // not learnt from that answer yet, so it would look just as worth measuring as before, every cycle.
+  const pending = await db
+    .selectDistinct({ promptVersionId: measurements.promptVersionId, configurationId: measurements.configurationId })
+    .from(measurements)
+    // Bounded like the collector's give-up for unchecked tasks, so one answer lost for good cannot block its cell.
+    .where(and(eq(measurements.domainId, domainId), inArray(measurements.status, ["SCHEDULED", "SUBMITTED"]), gte(measurements.scheduledAt, new Date(now.getTime() - 14 * 86_400_000))));
+  const inFlightCells = new Set(pending.map((r) => `${r.promptVersionId}|${r.configurationId}`));
 
   // Quiet cells are slowed down only under a scoring version that gives each cell one weight (a version
   // that pools answers would read fewer answers without the brand as a higher rate), and not while several
@@ -185,6 +215,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
   const cells: PlanCell[] = [];
   for (const { p, v } of active) {
     for (const c of standard) {
+      if (inFlightCells.has(`${v.id}|${c.id}`)) continue;
       const reach = reachOf(c.providerId, c.reach);
       cells.push({
         cellKey: `${v.id}|${c.id}`,
@@ -204,7 +235,7 @@ export async function planMeasurements(domainId: string, trigger: "CRON" | "MANU
   }
 
   const monthly = domain.monthlyBudgetUsd ?? DEFAULT_MONTHLY_BUDGET_USD;
-  const spent = await spentThisMonth(domainId, now);
+  const spent = await spentThisMonth(domainId, now, costOfConfig);
   let budget = cycleBudget({ monthlyBudgetUsd: monthly, spentThisMonthUsd: spent, now, cyclesPerDay: domain.cyclesPerDay });
   const manual = trigger === "MANUAL";
   if (manual) budget = Math.min(Math.max(0, monthly - spent), budget * 3);
