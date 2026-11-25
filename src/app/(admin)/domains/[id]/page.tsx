@@ -20,7 +20,7 @@ import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { Flash } from "@/components/Flash";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ProviderErrors } from "@/components/ProviderErrors";
-import { recentProviderErrors } from "@/services/errors";
+import { recentProviderErrors, silentProviders } from "@/services/errors";
 import { MetricInfo } from "@/components/MetricInfo";
 import { ScoreTrend } from "@/components/ScoreTrend";
 import { ChangeLog } from "@/components/ChangeLog";
@@ -58,7 +58,7 @@ export default async function DomainPage({
   await requireAdminPage();
   const { id } = await params;
   const { done, added, error } = await searchParams;
-  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus, changes, changeLog] = await Promise.all([
+  const [detail, activePrompts, history, busyMap, recs, errors, { sources, kindShares, ownPages, ownPagesTotal }, suggestions, matches, searches, siteCheck, fixStatus, changes, changeLog, silent] = await Promise.all([
     domainDetail(id),
     listPrompts(id, "ACTIVE"),
     scoreHistory(id, 180),
@@ -73,6 +73,7 @@ export default async function DomainPage({
     websiteFixStatus(id),
     recentSiteChanges(id),
     changesFor(id),
+    silentProviders(id),
   ]);
   if (!detail) notFound();
   const { domain: d } = detail;
@@ -97,6 +98,7 @@ export default async function DomainPage({
     suggestions: suggestions.map((c) => c.name),
     rivalsCaveat: caveat,
     siteChanges: changes,
+    silent,
     providerLabel,
   });
   const open = (section: string) => opensSection(attention, section);

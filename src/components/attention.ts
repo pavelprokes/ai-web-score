@@ -30,6 +30,8 @@ export interface AttentionInput {
   suggestions: string[];
   /** An untracked brand AI names more often than every tracked rival (`rivalsCaveat`), if any. */
   rivalsCaveat?: { name: string; answers: number } | null;
+  /** Enabled providers asked 6–48 hours ago that saved no answer in the last 24 hours (`silentProviders`). */
+  silent?: Array<{ providerId: string; ordered: number; waiting: number; failed: number; lastAnswerAt: Date | null }>;
   /** Critical website changes found by the site checks (src/core/site/changes.ts), newest first. */
   siteChanges?: Array<{ at: Date; text: string }>;
   providerLabel: (id: string) => string;
@@ -107,9 +109,29 @@ export const opensSection = (items: AttentionItem[] | null, section: string) => 
 export function attentionItems(input: AttentionInput): AttentionItem[] | null {
   if (input.status !== "ACTIVE" && input.status !== "PAUSED") return null;
   const items: AttentionItem[] = [];
+  const explained = new Set<string>();
   for (const e of input.errors) {
     const text = ERROR_TEXT[e.kind]?.(input.providerLabel(e.providerId), e.count);
-    if (text) items.push({ kind: "fix", text, section: "failed-heading", link: "Provider errors" });
+    if (text) {
+      items.push({ kind: "fix", text, section: "failed-heading", link: "Provider errors" });
+      explained.add(e.providerId);
+    }
+  }
+  // A provider that was asked and saved nothing, whether its answers wait, fail on retried errors or vanish. One
+  // whose errors already have a line above is not repeated. A paused domain is not asked for anything new.
+  for (const s of input.status === "ACTIVE" ? (input.silent ?? []) : []) {
+    if (explained.has(s.providerId)) continue;
+    const since = s.lastAnswerAt ? `its last answer was ${relativeTime(s.lastAnswerAt, input.now)}` : "it has not answered yet";
+    const state =
+      s.waiting > 0
+        ? `${count(s.waiting, "request")} sent 6–48 hours ago ${s.waiting === 1 ? "is" : "are"} still waiting${s.failed ? ` and ${s.failed} failed` : ""}`
+        : s.ordered === 1 ? "the request sent 6–48 hours ago failed" : `all ${s.ordered} requests sent 6–48 hours ago failed`;
+    items.push({
+      kind: "fix",
+      text: `${input.providerLabel(s.providerId)} saved no answer in the last 24 hours: ${state}; ${since}.`,
+      // The error log renders only when something failed; answers that only wait show in the runs.
+      ...(s.failed > 0 ? { section: "failed-heading", link: "Provider errors" } : { section: "runs-heading", link: "Recent runs" }),
+    });
   }
   // Website changes that can break what assistants see, dated, past tense (copywriter): at most three lines.
   for (const c of (input.siteChanges ?? []).slice(0, 3)) {
