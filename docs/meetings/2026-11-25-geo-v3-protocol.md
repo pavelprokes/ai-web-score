@@ -71,3 +71,65 @@ geo-v3 computes what the methodology says, and its intervals agree with the boot
 domain. The mention-rate criterion passes once it names its weights. Switch vzdelanibudoucnosti.cz after
 finding 1 is fixed and repaired, then run the 8-week recalculation (finding 3). Finding 2 can follow in the
 next PR, before the second domain.
+
+## Is the definition itself sound? (checked against the literature, 2026-11-25)
+
+**Matches established practice.**
+- **Estimator.** The weighted rate over prompt clusters is a ratio estimator. Its variance comes from the
+  linearised (Taylor / "sandwich") formula over the prompts' residual totals, with g/(g−1), which is the default
+  in survey software. Inference uses t with g−1 degrees of freedom, as shown by Bester et al. and described in
+  Cameron & Miller's guide.
+- **Interval.** Wilson on a design-based effective n, capped at the actual number of answers and widened by the
+  ratio of t to normal quantiles, is the Korn & Graubard / Kott (2017) construction. Simulation studies of
+  complex-survey proportions favour Wilson over Wald.
+- **Unit of inference.** The GEO measurement preprints show that answers to one prompt agree among themselves
+  while prompts differ widely (Jaccard above 0.8 for some prompts, below 0.2 for others), and that one run is
+  noise. Neither preprint models that clustering: both pool responses. geo-v3's intervals over prompts are the
+  stricter choice.
+- **Window.** The 2–4 week window matches the recommendation of "Don't Measure Once".
+
+**Where the definition is weaker than it looks.**
+1. **The quiet-cell pace biases rates down.** The pace is a stopping rule driven by the outcome. Stopping
+   optimistically biases a sample mean up; stopping a cell after a run of zeros biases it down (Shin, Ramdas &
+   Rinaldo 2019).
+   - Bound: after eight empty answers, a further ChatGPT answer names the brand 3.1 % of the time (RESEARCH §7).
+     About 73 % of cells are quiet, and ChatGPT carries about 0.69 of the weight. That puts the bias at roughly
+     −0.5 to −1 pp on a domain's mention rate, which is small but systematic.
+   - `geo-v3.test.ts` simulates oversampling of visible cells, but not the stopping rule.
+   - Mitigation: read a quiet cell through its posterior (the planner's Kalman / Beta state) instead of its raw
+     mean, or keep a floor of answers per window. Add the stopping rule to the coverage simulation.
+2. **Topic-level intervals (CLUSTER snapshots) with few prompts are too narrow.** The t(G−1) reference "is often
+   not nearly conservative enough when G is small", and the weights and cluster sizes here are unequal.
+   Domain level, with 72–105 prompts, is fine. For topics with fewer than about 15 prompts, use CR2 /
+   Bell–McCaffrey or a wild cluster bootstrap, or say that the topic interval is approximate.
+3. **The interval covers measurement noise, not the choice of questions.** It treats the portfolio as a random
+   sample of questions like these. The prompts are generated, and their importance × commercial value weights are
+   assigned by an LLM. Equal prompt weights would move vzdelanibudoucnosti.cz by 2 pp. People phrase the same
+   need very differently (SparkToro), so the UI should say what the interval does not include.
+4. **The reach weights are dated.** The code has ChatGPT 0.72, AI Mode 0.15, Gemini 0.12, Perplexity 0.05.
+   Chatbot traffic in October 2026 was about ChatGPT 52–56 % and Gemini 24–29 % (Similarweb, StatCounter;
+   secondary aggregators, so approximate). Google's AI Overviews, the largest AI surface, are not measured.
+   Re-weighting to roughly 0.55 / 0.15 / 0.25 / 0.05 moves today's mention rates by under 1 pp (vzdelanibudoucnosti
+   +0.6, photographer −0.2, se-vezmou +0.06), so it is not urgent. It is still a judgement call that the changelog
+   should record when it is revised.
+5. **The acceptance criteria partly test themselves.**
+   - "Within 0.5 pp of the SQL mean" is either tautological (same weights) or wrong (no weights).
+   - The bootstrap over prompts makes the same assumptions as the analytic interval, so it checks the arithmetic,
+     not the model.
+   - Better criteria: (a) coverage in a simulation that includes the real planner, stopping rule included;
+     (b) after the switch, week-on-week changes fall inside the interval about 95 % of the time;
+     (c) a golden geo-v2 test.
+6. **Overall is a composite index, not a statistic.** Its weights are a product decision, and mention enters
+   twice through sentiment × mention and accuracy × mention. It has no interval, so its changes should be read
+   through the rates.
+
+**Verdict.** Statistically, the definition is sound and stricter than published GEO practice. Before the switch,
+fix the save-time dating (finding 1 above). Before the second domain, add the posterior reading of quiet cells
+and the stopping rule to the simulation. The criteria text, topic intervals and reach weights can follow.
+
+Sources: Cameron & Miller, "A Practitioner's Guide to Cluster-Robust Inference"; MacKinnon, Nielsen & Webb,
+"Cluster-Robust Inference: A Guide to Empirical Practice" (arXiv 2205.03285); Korn & Graubard (1998) via SAS
+SURVEYFREQ documentation; Kott (2017), *Survey Methodology* 12-001-X; Franco et al., JSSAM 2019 / JSM 2014;
+Nie et al., AISTATS 2018; Shin, Ramdas & Rinaldo, NeurIPS 2019; Schulte et al., "Don't Measure Once" (arXiv
+2604.07585); Sielinski (arXiv 2603.08924); SparkToro / Gumshoe study (2026); Similarweb and StatCounter via
+aggregators (October 2026).
