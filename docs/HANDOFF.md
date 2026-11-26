@@ -115,9 +115,15 @@ Keep this file current: update it at the end of each piece of work (state, merge
    prompts, reach weights (ChatGPT 0.72 vs ~0.55 market). The golden geo-v2 test is done (#99).
 2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or
    `ANSWER_TEXT_RETENTION_DAYS`, or archiving answer text); photos domain (approve prompts or pause).
-3. **Follow-ups found in the ChatGPT incident: done** (#96, #97, #99). ChatGPT was not ordered on svatebni-fotograf-cechy.cz
-   and vzdelanibudoucnosti.cz in the plans of 25 Nov 00:15/01:00 because the backlog had just been saved (0.9-day
-   minimum interval); check that the next cycle orders it again.
+3. **Follow-ups found in the ChatGPT incident: done** (#96, #97, #99). **ChatGPT is barely ordered since 25 Nov**
+   (4 answers on 25–26 Nov across all domains, ~250 per domain per day before), with no error and nothing in flight: the
+   2,805 backlog answers were folded into the cell states at once (ChatGPT cells n ≈ 30, posterior variance ≈ 0.0045
+   against ≈ 0.01 on the other assistants), so the value of one more answer is under the planner's threshold. It recovers
+   on its own as the variance grows, and core cells are forced at 7 days (from ~2 Dec). The 28-day window still holds
+   ChatGPT through 24 Nov, so scores are not affected, only fresher ChatGPT data is missing. **This confounds the
+   geo-v3 spend check of ~2 Dec** (less ChatGPT spend there comes from the backlog, not from the quiet pace): compare
+   from ~9 Dec, or compare per-cell order rates with svatebni-fotograf-cechy.cz (geo-v2, same pause). On 26 Nov
+   vzdelanibudoucnosti.cz had spent $9.45 of its $10 budget (LLM $2.48), so the rest of November is cut there.
 4. vzdelanibudoucnosti.cz mention rate fell 47 % → 31 % between 10 and 24 Nov (matcher revision 2, Gemini added,
    ChatGPT gap all fall in it): read it again once the 28-day window holds only data after 24 Nov.
 
