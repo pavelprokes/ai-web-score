@@ -81,11 +81,12 @@ next PR, before the second domain.
 |---|---|---|---|---|
 | vzdelanibudoucnosti.cz | 2026-11-25 07:18 | 22.3 % [16.3, 29.6], [15.9, 28.8], 1.04 | 10.5 % | 30.0 %, 36.1 |
 | svatebni-fotograf-cechy.cz | 2026-11-27 10:17 | 7.6 % [4.6, 12.3], [4.2, 11.5], 1.07 | 2.8 % [1.7, 4.4] | 10.4 %, 28.4 |
+| se-vezmou.cz | 2026-11-27 10:46 | 0.56 % [0.32, 1.01], [0.27, 0.93], 1.04 | 0.32 % [0.15, 0.68] | 1.0 %, 19.6 |
 
 Each switch was made in the database with a change event (as `PATCH /api/domains/{id}` does), and the app's first
 geo-v3 snapshot was compared with the check SQL run at the same window end. 105 prompts, 420 cells and 6,280 answers
-on the photographer at the switch. Next: se-vezmou.cz (Overall ≈ 0.5 expected); photos only after its portfolio is
-restored.
+on the photographer at the switch; 72 prompts, 288 cells and 4,031 answers on se-vezmou.cz. Only photos stays on
+geo-v2, until its portfolio is restored (4 prompts: geo-v3 would show "Not enough data").
 
 ## Is the definition itself sound? (checked against the literature, 2026-11-25)
 
