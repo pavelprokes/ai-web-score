@@ -108,9 +108,13 @@ Keep this file current: update it at the end of each piece of work (state, merge
 1. **vzdelanibudoucnosti.cz runs on geo-v3 since 2026-11-25 07:18 UTC** (switched in the database with a change
    event, as the PATCH does; no admin token in the cloud session). Verified: the app's snapshot equals
    `scripts/geo-v3-check.sql` to the last digit (mention 22.27 % [16.3, 29.6], recommendation 10.5 %, Overall 16.9),
-   36 days of geo-v3 history. Next: around 2026-12-02 check answers per day by provider (the quiet pace should cut
-   measurement spend) and that woken cells return to the normal pace; then switch svatebni-fotograf-cechy.cz (run
-   the check SQL first), se-vezmou.cz after (Overall ≈ 0.5 expected), photos only after its portfolio is restored.
+   36 days of geo-v3 history. **svatebni-fotograf-cechy.cz runs on geo-v3 since 2026-11-27 10:17 UTC** (owner's
+   request; check SQL mention 7.6 % [4.6, 12.3], interval 1.07× the bootstrap; geo-v2 had 10.4 %, Overall 28.4 →
+   ≈ 7; table in `docs/meetings/2026-11-25-geo-v3-protocol.md` § Switches). A version's history is now filled back
+   to the first answer (13 weeks, resumable), so both domains get geo-v3 back to 7 Oct after that deploy. Next:
+   around 2026-12-09 (see item 3) check answers per day by provider (the quiet pace should cut measurement spend)
+   and that woken cells return to the normal pace; then se-vezmou.cz (Overall ≈ 0.5 expected), photos only after its
+   portfolio is restored.
    Never switch back. Open from the review: protocol criterion wording, CR2 / wild bootstrap for topics with few
    prompts, reach weights (ChatGPT 0.72 vs ~0.55 market). The golden geo-v2 test is done (#99).
 2. **Owner decisions:** database growth (~3.5 MB/day of answers, 374 MB of 500 MB on 2026-11-25: Supabase Pro, or

@@ -951,6 +951,61 @@ describe.skipIf(!url)("pipeline (integration)", () => {
     await db.update(s.runs).set({ status: "FAILED", finishedAt: new Date() }).where(eq(s.runs.id, run!.id));
   });
 
+  it("fills a switched scoring version's whole history from the first answer, and on a later compute only the missing days", async () => {
+    const { getDb } = await import("@/db");
+    const s = await import("@/db/schema");
+    const { computeScores, HISTORY_WEEKS } = await import("@/services/scores");
+    const db = getDb();
+    const [demo] = await db.select().from(s.domains).where(eq(s.domains.hostname, "kodovani-pro-deti.example"));
+    // Answers 60, 40 and 20 days old (older than the 5 weeks a fill used to cover), copied from a scored one, so
+    // every day back to the first has answers in its 28-day window (a day with none gets no snapshot).
+    const [src] = await db
+      .select()
+      .from(s.measurements)
+      .innerJoin(s.measurementSignals, eq(s.measurementSignals.measurementId, s.measurements.id))
+      .where(and(eq(s.measurements.domainId, demo!.id), eq(s.measurements.status, "SUCCEEDED")))
+      .limit(1);
+    const old = new Date(Date.now() - 60 * 86_400_000);
+    for (const daysAgo of [60, 40, 20]) {
+      const at = new Date(Date.now() - daysAgo * 86_400_000);
+      const id = `history-${daysAgo}`;
+      await db.insert(s.measurements).values({ ...src!.measurements, id, sampleIndex: 700 + daysAgo, scheduledAt: at, startedAt: at, finishedAt: at });
+      await db.insert(s.measurementSignals).values({ ...src!.measurement_signals, measurementId: id });
+    }
+    expect(HISTORY_WEEKS * 7).toBeGreaterThan(60);
+
+    const version = demo!.scoringVersion === "geo-v3" ? "geo-v2" : "geo-v3";
+    await db.update(s.domains).set({ scoringVersion: version }).where(eq(s.domains.id, demo!.id));
+    await db.delete(s.scoreSnapshots).where(and(eq(s.scoreSnapshots.domainId, demo!.id), eq(s.scoreSnapshots.scoringVersion, version)));
+    const days = async () => {
+      const rows = await db
+        .select({ day: sql<string>`to_char(${s.scoreSnapshots.windowEnd} at time zone 'UTC', 'YYYY-MM-DD')`, id: s.scoreSnapshots.id })
+        .from(s.scoreSnapshots)
+        .where(and(eq(s.scoreSnapshots.domainId, demo!.id), eq(s.scoreSnapshots.scoringVersion, version), eq(s.scoreSnapshots.scope, "DOMAIN")));
+      return new Map(rows.map((r) => [r.day, r.id]));
+    };
+
+    await computeScores(demo!.id);
+    const filled = await days();
+    expect(filled.size).toBe(61); // every day from the old answer to today
+    expect(filled.has(old.toISOString().slice(0, 10))).toBe(true);
+
+    // A fill cut short leaves gaps: the next compute writes those and today, and leaves the other days alone.
+    const gap = [...filled.keys()].sort().slice(5, 15);
+    for (const day of gap) {
+      await db.execute(sql`delete from score_snapshots where id = ${filled.get(day)!}`);
+    }
+    await computeScores(demo!.id);
+    const after = await days();
+    expect(after.size).toBe(61);
+    const kept = [...filled.keys()].sort()[30]!;
+    expect(after.get(kept)).toBe(filled.get(kept));
+    for (const day of gap) expect(after.get(day)).toBeDefined();
+
+    await db.update(s.domains).set({ scoringVersion: demo!.scoringVersion }).where(eq(s.domains.id, demo!.id));
+    await db.delete(s.measurements).where(inArray(s.measurements.id, ["history-60", "history-40", "history-20"]));
+  });
+
   it("flags an assistant that was asked and saved no answer for 24 hours, and not one that is merely not asked", async () => {
     const { getDb } = await import("@/db");
     const s = await import("@/db/schema");
