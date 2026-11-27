@@ -113,7 +113,12 @@ Keep this file current: update it at the end of each piece of work (state, merge
    7.4, equal to the check SQL; table in `docs/meetings/2026-11-25-geo-v3-protocol.md` § Switches). **se-vezmou.cz
    runs on geo-v3 since 2026-11-27 10:46 UTC** (owner's request; mention 0.56 % [0.32, 1.01], interval 1.04× the
    bootstrap; geo-v2 had 1.0 %, Overall 19.6, almost all of it position / sentiment / accuracy on the few answers
-   naming the brand). Only photos stays on geo-v2. A version's history is now filled back
+   naming the brand; the app's snapshot equals the check SQL, Overall 0.5). Only photos stays on geo-v2. History
+   after the fill: vzdelanibudoucnosti.cz and the photographer from 7–8 Oct; se-vezmou.cz from 22 Oct only, because
+   every answer before 22 Oct belongs to topics that re-discovery replaced that day (scores count active topics only,
+   in geo-v2 too). Side effect: its coverage check stays short of the days since the first answer, so each compute
+   reloads 13 weeks of rows and recomputes those 15 empty days in memory (no writes, cheap); count only days with an
+   active-topic answer in `want` if it ever matters. A version's history is now filled back
    to the first answer (13 weeks, resumable), so both domains get geo-v3 back to 7 Oct after that deploy. Next:
    around 2026-12-09 (see item 3) check answers per day by provider (the quiet pace should cut measurement spend)
    and that woken cells return to the normal pace; photos only after its portfolio is restored.

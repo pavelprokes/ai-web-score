@@ -85,7 +85,8 @@ next PR, before the second domain.
 
 Each switch was made in the database with a change event (as `PATCH /api/domains/{id}` does), and the app's first
 geo-v3 snapshot was compared with the check SQL run at the same window end. 105 prompts, 420 cells and 6,280 answers
-on the photographer at the switch; 72 prompts, 288 cells and 4,031 answers on se-vezmou.cz. Only photos stays on
+on the photographer at the switch; 72 prompts, 288 cells and 4,031 answers on se-vezmou.cz. The app's first geo-v3
+snapshot equals the check SQL on all three domains (Overall 16.9, 7.4 and 0.5). Only photos stays on
 geo-v2, until its portfolio is restored (4 prompts: geo-v3 would show "Not enough data").
 
 ## Is the definition itself sound? (checked against the literature, 2026-11-25)
