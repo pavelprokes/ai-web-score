@@ -144,8 +144,8 @@ back to the domain's first answer (at most 13 weeks, `HISTORY_WEEKS`), so a tren
 | Version | Since | Used by | What it changed | Why |
 |---|---|---|---|---|
 | `geo-v1` | 2026-10-06 | no domain | First formula: all valid answers; recommendation rate over answers with a detected list | Starting point |
-| `geo-v2` | 2026-10-12 (#30) | default; se-vezmou.cz, photos.svatebni-fotograf-cechy.cz | Unbranded questions of active topics only; branded questions feed sentiment and accuracy; recommendation rate over all answers; new providers phase in over 7 days; "Not enough data" floor | First 5,000 production answers (`docs/meetings/2026-10-12-first-production-data.md`) |
-| `geo-v3` | 2026-11-12 (#70) | vzdelanibudoucnosti.cz (from 2026-11-25), svatebni-fotograf-cechy.cz (from 2026-11-27) | One weight per prompt × assistant; intervals over prompts; no floor in the overall score; quiet cells measured weekly | 21,483 production answers (`docs/RESEARCH.md` §7, `docs/meetings/2026-11-12-project-review-phased-plan.md`) |
+| `geo-v2` | 2026-10-12 (#30) | default; photos.svatebni-fotograf-cechy.cz | Unbranded questions of active topics only; branded questions feed sentiment and accuracy; recommendation rate over all answers; new providers phase in over 7 days; "Not enough data" floor | First 5,000 production answers (`docs/meetings/2026-10-12-first-production-data.md`) |
+| `geo-v3` | 2026-11-12 (#70) | vzdelanibudoucnosti.cz (from 2026-11-25), svatebni-fotograf-cechy.cz and se-vezmou.cz (from 2026-11-27) | One weight per prompt × assistant; intervals over prompts; no floor in the overall score; quiet cells measured weekly | 21,483 production answers (`docs/RESEARCH.md` §7, `docs/meetings/2026-11-12-project-review-phased-plan.md`) |
 
 Where a version is described: this section (the method), `SCORING_VERSIONS` in `src/core/scoring/scoring.ts`
 (weights and rules), and the admin's Metrics page (`SCORING_VERSION_NOTES` and the per-metric `byVersion` notes
