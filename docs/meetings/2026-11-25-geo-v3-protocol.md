@@ -56,7 +56,8 @@ sentiment and accuracy counted unconditionally as geo-v3 does. Treat it as ±2 p
    change the score, but it affects texts such as "named in X % of answers".
 3. **History after the switch covers 5 weeks** (`BACKFILL_WEEKS`). Run the domain action
    `recalculate-scores` with `{"scoringVersion": "geo-v3", "weeks": 8}` after the switch to cover everything
-   since 7 Oct.
+   since 7 Oct. *(Fixed in code on 2026-11-27: a version's history is filled back to the first answer, at most 13
+   weeks (`HISTORY_WEEKS`), and a fill cut short resumes with the missing days on the next compute.)*
 4. **Overall drops a lot, and that is the intended correction.** vzdelanibudoucnosti.cz goes from 36 to about
    17, the photographer from 28 to about 7, se-vezmou from 19.5 to about 0.5. Explain this to anyone who has seen
    the old numbers. Mention rates fall by 6–8 pp, matching RESEARCH §7.7.
@@ -73,6 +74,18 @@ geo-v3 computes what the methodology says, and its intervals agree with the boot
 domain. The mention-rate criterion passes once it names its weights. Switch vzdelanibudoucnosti.cz after
 finding 1 is fixed and repaired, then run the 8-week recalculation (finding 3). Finding 2 can follow in the
 next PR, before the second domain.
+
+## Switches
+
+| Domain | Switched (UTC) | Check SQL at the switch (mention [95 %], bootstrap over prompts, width ratio) | Recommendation | geo-v2 before (mention, Overall) |
+|---|---|---|---|---|
+| vzdelanibudoucnosti.cz | 2026-11-25 07:18 | 22.3 % [16.3, 29.6], [15.9, 28.8], 1.04 | 10.5 % | 30.0 %, 36.1 |
+| svatebni-fotograf-cechy.cz | 2026-11-27 10:17 | 7.6 % [4.6, 12.3], [4.2, 11.5], 1.07 | 2.8 % [1.7, 4.4] | 10.4 %, 28.4 |
+
+Each switch was made in the database with a change event (as `PATCH /api/domains/{id}` does), and the app's first
+geo-v3 snapshot was compared with the check SQL run at the same window end. 105 prompts, 420 cells and 6,280 answers
+on the photographer at the switch. Next: se-vezmou.cz (Overall ≈ 0.5 expected); photos only after its portfolio is
+restored.
 
 ## Is the definition itself sound? (checked against the literature, 2026-11-25)
 

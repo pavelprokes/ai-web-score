@@ -151,9 +151,14 @@ async function writeWindow(domainId: string, version: string, obs: ObservationRo
   });
 }
 
-/** Days of history a version should have: from the first answer, at most BACKFILL_WEEKS back. */
-// ponytail: 5 weeks covers the 28-day window plus a week of trend; longer history via the recalculate action.
+/** History rebuilt after a domain's signals change (competitors re-extracted): the window plus a month of trend. */
 export const BACKFILL_WEEKS = 5;
+/**
+ * Days of history a scoring version should have: from the domain's first answer, at most this far back. A domain
+ * switched to a new version gets its whole chart in that version (the switch's dated line says when it happened),
+ * not a line that starts five weeks back. Filled newest first and resumed by the next compute if a job is cut short.
+ */
+export const HISTORY_WEEKS = 13;
 
 export async function computeScores(domainId: string, opts: { scoringVersion?: string; windowEnd?: Date; windowDays?: number } = {}) {
   const db = getDb();
@@ -166,11 +171,11 @@ export async function computeScores(domainId: string, opts: { scoringVersion?: s
     const [cov] = await db.execute<{ have: number; want: number }>(sql`
       select (select count(distinct window_end::date)::int from score_snapshots
                 where domain_id = ${domainId} and scoring_version = ${version} and scope = 'DOMAIN'
-                  and window_end >= greatest(f.first, now() - interval '${sql.raw(String(BACKFILL_WEEKS * 7))} days')) as have,
-             (current_date - greatest(f.first, now() - interval '${sql.raw(String(BACKFILL_WEEKS * 7))} days')::date + 1)::int as want
+                  and window_end >= greatest(f.first, now() - interval '${sql.raw(String(HISTORY_WEEKS * 7))} days')) as have,
+             (current_date - greatest(f.first, now() - interval '${sql.raw(String(HISTORY_WEEKS * 7))} days')::date + 1)::int as want
       from (select min(finished_at) as first from measurements where domain_id = ${domainId} and status = 'SUCCEEDED') f
       where f.first is not null`);
-    if (cov && Number(cov.have) < Number(cov.want)) return recomputeHistory(domainId, version, BACKFILL_WEEKS);
+    if (cov && Number(cov.have) < Number(cov.want)) return recomputeHistory(domainId, version, HISTORY_WEEKS, { onlyMissing: true });
   }
   const end = opts.windowEnd ?? new Date();
   const start = new Date(end.getTime() - (opts.windowDays ?? DEFAULT_WINDOW_DAYS) * 86_400_000);
@@ -180,8 +185,10 @@ export async function computeScores(domainId: string, opts: { scoringVersion?: s
 /**
  * Recompute daily snapshots for the past `weeks` (from the first answer on) from stored raw signals.
  * One query for the whole range; each day's 28-day window is sliced and weighted in memory.
+ * `onlyMissing` fills only the days without a snapshot of the version (plus today), so a fill cut short by the job
+ * deadline continues where it stopped on the next compute instead of redoing the newest days every time.
  */
-export async function recomputeHistory(domainId: string, scoringVersion: string, weeks = 26) {
+export async function recomputeHistory(domainId: string, scoringVersion: string, weeks = 26, opts: { onlyMissing?: boolean } = {}) {
   const db = getDb();
   const now = Date.now();
   const [first] = await db
@@ -192,10 +199,19 @@ export async function recomputeHistory(domainId: string, scoringVersion: string,
   const from = Math.max(now - weeks * 7 * 86_400_000, firstAt);
   const windowMs = DEFAULT_WINDOW_DAYS * 86_400_000;
   const { rows, reach } = await loadRows(domainId, new Date(from - windowMs), new Date(now));
+  const have = new Set<string>();
+  if (opts.onlyMissing) {
+    const days = await db
+      .selectDistinct({ day: sql<string>`to_char(${scoreSnapshots.windowEnd} at time zone 'UTC', 'YYYY-MM-DD')` })
+      .from(scoreSnapshots)
+      .where(and(eq(scoreSnapshots.domainId, domainId), eq(scoreSnapshots.scoringVersion, scoringVersion), eq(scoreSnapshots.scope, "DOMAIN")));
+    for (const d of days) have.add(d.day);
+  }
   // Newest first: a run cut short by the job deadline leaves the recent trend complete, not a gap before today.
   for (let d = 0; d <= Math.ceil((now - from) / 86_400_000); d++) {
     await throwIfJobCancelled();
     const end = new Date(now - d * 86_400_000);
+    if (d > 0 && have.has(end.toISOString().slice(0, 10))) continue;
     const start = new Date(end.getTime() - windowMs);
     const inWindow = rows.filter((r) => r.finishedAt !== null && r.finishedAt >= start && r.finishedAt <= end);
     await writeWindow(domainId, scoringVersion, weigh(inWindow, end, scoringVersion, reach), start, end);
